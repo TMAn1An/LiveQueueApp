@@ -1,0 +1,87 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum StaffRole {
+  OWNER
+  ADMIN
+  ACCOUNTANT
+}
+
+enum StaffStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+/// A tenant. Every organization-owned record must trace back to one Organization,
+/// and every organization-scoped query must be filtered by the authenticated
+/// staff member's organizationId — never by a client-supplied id.
+model Organization {
+  id        String             @id @default(uuid())
+  name      String
+  status    OrganizationStatus @default(ACTIVE)
+  createdAt DateTime           @default(now()) @map("created_at")
+  updatedAt DateTime           @updatedAt @map("updated_at")
+
+  staff Staff[]
+
+  @@map("organizations")
+}
+
+/// email is globally unique for MVP (ADR-005): one staff identity maps to exactly
+/// one organization. No cross-organization staff memberships in this phase.
+model Staff {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name         String
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  role         StaffRole
+  permissions  String[]
+  status       StaffStatus @default(ACTIVE)
+  lastLoginAt  DateTime?   @map("last_login_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sessions Session[]
+
+  @@index([organizationId])
+  @@map("staff")
+}
+
+/// DB-backed refresh session (ADR-013). Only a SHA-256 hash of the refresh token
+/// is stored, never the raw token. Rotation on use: the presented session is
+/// revoked and replaced by a new row linked via replacedBySessionId. Presenting
+/// an already-revoked token's hash is treated as token reuse.
+model Session {
+  id      String @id @default(uuid())
+  staffId String @map("staff_id")
+  staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  refreshTokenHash String @unique @map("refresh_token_hash")
+
+  createdAt           DateTime  @default(now()) @map("created_at")
+  expiresAt           DateTime  @map("expires_at")
+  revokedAt           DateTime? @map("revoked_at")
+  replacedBySessionId String?   @map("replaced_by_session_id")
+
+  userAgent String? @map("user_agent")
+  ipAddress String? @map("ip_address")
+
+  @@index([staffId])
+  @@index([expiresAt])
+  @@map("sessions")
+}

@@ -21,6 +21,11 @@ coverage/
 !.vscode/settings.json
 .idea/
 
+# Claude Code local tooling (personal, machine-local — not project deliverables)
+.claude/
+.agents/
+skills-lock.json
+
 # OS
 .DS_Store
 Thumbs.db
