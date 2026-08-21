@@ -23,6 +23,32 @@ enum StaffStatus {
   SUSPENDED
 }
 
+enum QueueStatus {
+  ACTIVE
+  PAUSED
+  INACTIVE
+}
+
+enum CounterStatus {
+  ACTIVE
+  ON_BREAK
+  OFFLINE
+}
+
+/// Lowercase to match the wire format used throughout the spec's form-field
+/// JSON examples (e.g. "type": "phone") — deliberately not uppercase like the
+/// other status enums, to avoid a translation layer between API and storage.
+enum FormFieldType {
+  text
+  number
+  email
+  phone
+  date
+  dropdown
+  radio
+  checkbox
+}
+
 /// A tenant. Every organization-owned record must trace back to one Organization,
 /// and every organization-scoped query must be filtered by the authenticated
 /// staff member's organizationId — never by a client-supplied id.
@@ -33,7 +59,8 @@ model Organization {
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")
 
-  staff Staff[]
+  staff  Staff[]
+  queues Queue[]
 
   @@map("organizations")
 }
@@ -57,6 +84,7 @@ model Staff {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   sessions Session[]
+  counters Counter[]
 
   @@index([organizationId])
   @@map("staff")
@@ -84,4 +112,99 @@ model Session {
   @@index([staffId])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+/// A queue represents one service line, owned by exactly one Organization.
+/// deletedAt is archival state (ADR-012) and is intentionally independent of
+/// `status` — a queue is never "deleted" via status, and status is never
+/// implied by deletedAt (ADR-015).
+model Queue {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name                       String
+  description                String?
+  status                     QueueStatus @default(ACTIVE)
+  clientTerminology          String?     @map("client_terminology")
+  tokenPrefix                String      @map("token_prefix")
+  startingNumber             Int         @default(1) @map("starting_number")
+  nextTokenNumber            Int         @default(1) @map("next_token_number")
+  baseTimeMinutes            Int         @default(5) @map("base_time_minutes")
+  defaultNotificationMinutes Int         @default(10) @map("default_notification_minutes")
+  formVersion                Int         @default(1) @map("form_version")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  services   QueueService[]
+  counters   Counter[]
+  formFields QueueFormField[]
+
+  @@index([organizationId])
+  @@map("queues")
+}
+
+model QueueService {
+  id      String @id @default(uuid())
+  queueId String @map("queue_id")
+  queue   Queue  @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  serviceName     String  @map("service_name")
+  description     String?
+  durationMinutes Int     @map("duration_minutes")
+  isActive        Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([queueId])
+  @@map("queue_services")
+}
+
+model Counter {
+  id      String @id @default(uuid())
+  queueId String @map("queue_id")
+  queue   Queue  @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  name    String
+  status  CounterStatus @default(OFFLINE)
+  staffId String?       @map("staff_id")
+  staff   Staff?        @relation(fields: [staffId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([queueId])
+  @@index([staffId])
+  @@map("counters")
+}
+
+/// Versioned per ADR-009: a PUT replace never mutates or deletes existing
+/// rows — it writes a new set of rows at `version = Queue.formVersion + 1`
+/// and bumps Queue.formVersion, both inside one transaction. Old versions
+/// stay exactly as they were, so historical Token.formData (added in a later
+/// phase) always resolves against the field definitions it was submitted
+/// under.
+model QueueFormField {
+  id      String @id @default(uuid())
+  queueId String @map("queue_id")
+  queue   Queue  @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  key         String
+  label       String
+  type        FormFieldType
+  required    Boolean       @default(false)
+  placeholder String?
+  options     String[]      @default([])
+  sortOrder   Int           @default(0) @map("sort_order")
+  version     Int
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([queueId, version, key])
+  @@index([queueId, version])
+  @@map("queue_form_fields")
 }

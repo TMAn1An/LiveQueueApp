@@ -1,13 +1,13 @@
 # LiveQueue — Progress
 
-## Current Phase: Phase 1 (Foundation) — Complete and verified
+## Current Phase: Phase 2 (Queue Core) — Complete and verified
 
 ## Status
 
 | Phase | Status |
 |---|---|
 | Phase 1: Foundation | **Done** — auth, sessions, tenant isolation implemented and tested against a real PostgreSQL database |
-| Phase 2: Queue Core | Not started |
+| Phase 2: Queue Core | **Done** — Queue/Service/Counter/FormField CRUD, soft deletion, computed QR, tenant isolation, tested against a real PostgreSQL database |
 | Phase 3: Token Engine | Not started |
 | Phase 4: Real Time | Not started |
 | Phase 5: Mobile | Not started |
@@ -47,11 +47,31 @@ No production code changed as part of this — only new test coverage for existi
 
 **Deferred:** Concurrent/racing refresh-token testing (two simultaneous refresh calls with the same token) was explicitly *not* added yet. It's recorded here as required future coverage for **Phase 3 (Token Engine)**, the first phase that introduces high-concurrency correctness requirements (concurrent token serial generation, concurrent "Next Token" calls) — the same `SELECT ... FOR UPDATE` / transaction-under-race patterns apply, so the refresh-token race test should be added alongside that phase's concurrency test suite rather than in isolation now.
 
+## What Is Implemented (Phase 2)
+
+- Prisma schema additions: `Queue`, `QueueService`, `Counter`, `QueueFormField` (+ `QueueStatus`, `CounterStatus`, `FormFieldType` enums) — migrated to `livequeue_dev`, migration `20260821193938_add_queue_core` (purely additive: new tables/enums/indexes/FKs, no changes to Phase 1 tables)
+- Queue CRUD + status patch + soft deletion (`deletedAt`, independent of `status` — ADR-015 decision 6), computed `qrCodeUri` field
+- Service CRUD nested under a queue, no dedicated list endpoint (surfaces via the queue response)
+- Counter CRUD, status, and staff assignment (verifies target staff belongs to the same organization)
+- Dynamic form fields: atomic version-bump replace endpoint (`PUT /api/queues/:queueId/form-fields`), old versions retained untouched, uniqueness enforced by both Zod and a database `@@unique([queueId, version, key])` constraint
+- Every nested-resource endpoint verifies tenant ownership through its parent queue (`service/counter/formField → queue → organizationId`), never through the child id alone — centralized in `src/utils/tenantScope.ts` for the shared "does this queue belong to me" check
+- 47 new automated tests (CRUD, soft-deletion behavior, permissions, tenant isolation including cross-org direct-id access, staff-assignment validation, form versioning/atomicity/uniqueness, QR URI correctness) — all passing against a real PostgreSQL instance
+- Full design record in `docs/ARCHITECTURE_DECISIONS.md` ADR-015
+
+## Phase 2 Closure Items (post-review)
+
+Two gaps found in Phase 2 review were closed, both application-code-only (no schema/migration change):
+
+- **Archived queues are now enforced read-only.** Every mutation path touching an archived queue (`deletedAt` set) or any of its services/counters/form fields returns `409 QUEUE_ARCHIVED` — including a *second* `DELETE` call on an already-archived queue, which previously succeeded silently. `GET` behavior is unchanged. See ADR-015 addendum for the full endpoint list and the guard's implementation (`assertQueueMutable()` in `src/utils/tenantScope.ts`).
+- **Form-replace transaction rollback is now proven, not just asserted.** A new test (`formField.test.ts`) pre-seeds a colliding row so the real `createMany` inside `replaceFormFields` hits a genuine Postgres unique-constraint violation mid-transaction, then verifies `Queue.formVersion`, the previous version's rows, and the attempted version's rows are all exactly as they were before the call — no test-only code was added to production.
+- 10 new tests: 9 in `backend/tests/archivedQueue.test.ts` (every listed mutation endpoint, read-behavior-unaffected, and a tenant-isolation-not-bypassed check) + 1 rollback test in `formField.test.ts`. One pre-existing test (`queue.test.ts`, "is idempotent when deleted twice") was updated in place to match the new repeat-delete behavior.
+
 ## Known, Documented Deviations
 
 - Prisma pinned to `6.12.0` rather than the `7.x` default `npm install` resolves to — see ADR-014.
 - Owner `Staff.name` at registration defaults to the email's local part, since the spec's registration flow (section 4.1) collects only organization name, email, and password. Rename support arrives with staff-profile management in a later phase.
+- `authRateLimiter` (auth endpoints) now skips enforcement when `NODE_ENV === 'test'` — added during Phase 2 because the larger integration suite legitimately exceeds 20 requests/15min from a single test address. Production and development behavior is unchanged; see ADR-015.
 
 ## Last Action
 
-Phase 1 implemented, migrated against a live PostgreSQL database, and verified: connection, migration, table creation, full test suite, type check, and lint all confirmed passing. A follow-up security review closed its identified test gaps (cross-staff revocation, DB-level storage/revocation assertions, access-token-after-logout) with 5 new tests — 28/28 passing. Awaiting approval to begin Phase 2 (Queue Core).
+Phase 2 (Queue Core) implemented and closed out: Queue/Service/Counter/FormField CRUD, soft deletion (now fully read-only once archived), computed QR, atomic form versioning (rollback proven under a real constraint failure), and tenant isolation on every nested resource. Migrated against a live PostgreSQL database and verified: connection, migration (purely additive, reversible), table creation, full test suite (85/85 passing), type check, and lint all confirmed passing. Awaiting approval to begin Phase 3 (Token Engine).

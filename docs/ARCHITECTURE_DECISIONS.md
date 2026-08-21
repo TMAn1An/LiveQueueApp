@@ -148,3 +148,49 @@
 **Reason:** Prisma 7 removed support for `datasource db { url = env("DATABASE_URL") }` in `schema.prisma` for Migrate; it now requires a `prisma.config.ts` file and an explicit driver adapter package (e.g. `@prisma/adapter-pg`) passed to the `PrismaClient` constructor. That is a real architectural shift (new config file, new required dependency, different `PrismaClient` construction), not a patch-level change, and it buys nothing for LiveQueue's MVP requirements. CLAUDE.md and ADR-010 both direct against adding infrastructure/complexity the current requirements don't justify. 6.12.0 was chosen specifically (rather than the newer 6.13+ patch releases) because 6.13+ pulls in `@prisma/config`, which has a known high-severity `npm audit` advisory (stack-exhaustion DoS in a transitive `deepmerge-ts` dependency) — 6.12.0 predates that dependency and audits clean.
 
 **Consequence:** `backend/package.json` pins `"prisma"` and `"@prisma/client"` to `6.12.0` rather than `^7.x`. Revisit this pin when Prisma 7 stabilizes further and/or a documented reason to adopt driver adapters emerges (e.g. edge runtime deployment, connection pooling requirements) — not before.
+
+---
+
+## ADR-015: Phase 2 queue-core design (approved decisions, as implemented)
+
+**Status:** Approved (user decisions, 2026-08-21) and implemented.
+
+**Decision:** Five specific design choices for the Queue/Service/Counter/FormField layer, all already approved before implementation:
+
+1. **Read permissions.** No dedicated "view" permission exists. Any authenticated staff member of the organization can `GET` queues (list/detail, with nested `services`) and `GET` counters. Only mutations require `manage_queues` / `manage_services` / `manage_counters`, enforced via `requirePermission` on each write route.
+2. **Dynamic form versioning is a single atomic replace**, not per-field CRUD: `PUT /api/queues/:queueId/form-fields` takes the complete field set, and inside one `prisma.$transaction`, writes new `QueueFormField` rows at `version = Queue.formVersion + 1` and bumps `Queue.formVersion` — it never mutates or deletes existing rows. `@@unique([queueId, version, key])` enforces key-uniqueness per version at the database level, not just in the Zod schema.
+3. **QR is a computed field, never stored**: `qrCodeUri: "livequeue://queue/{id}"` is derived at serialization time in `queue.service.ts`, not persisted on the `Queue` row and not served by a dedicated endpoint.
+4. **Soft-deleted queue visibility**: `GET /api/queues` filters `deletedAt: null`; `GET /api/queues/:queueId` does not — an authorized staff member can still fetch an archived queue directly, with `deletedAt` visible in the response and `status` left completely untouched (see decision 6).
+5. **No cascading soft delete**: deleting a queue never touches its `QueueService`/`Counter` rows. They remain exactly as they are; nothing about them is soft-deleted or otherwise flagged. This resolves the open question carried since the original `IMPLEMENTATION_PLAN.md` review.
+6. **`status` and `deletedAt` are independent axes**: `Queue.status` (`ACTIVE`/`PAUSED`/`INACTIVE`) is never inferred from or coupled to `deletedAt`, and vice versa — a soft-deleted queue keeps whatever `status` it had.
+
+**Additional implementation-level decisions made while building this (not requiring separate approval, recorded for completeness):**
+
+- **Nested-resource authorization always goes through the parent queue**, never the child id alone: `service → queue → organizationId`, `counter → queue → organizationId`, `form field → queue → organizationId` (CLAUDE.md Rule 4). Centralized in `src/utils/tenantScope.ts`'s `requireOwnedQueue()` for the "verify a queueId belongs to this org" check shared by services, counters, and form fields; a comparable `findServiceScoped`/`findCounterScoped` join lives in each resource's own service module for id-only lookups (`PUT/DELETE/PATCH /api/services/:serviceId`, `/api/counters/:counterId`, which carry no `queueId` in their path).
+- **Counter assignment** (`PATCH /api/counters/:counterId/assign`) explicitly checks `targetStaff.organizationId === counter.queue.organizationId`, returning `404 STAFF_NOT_FOUND` if the staff id doesn't exist at all and `403 STAFF_ORGANIZATION_MISMATCH` if it belongs to a different org.
+- **`FormFieldType` enum values are lowercase** (`text`, `phone`, `dropdown`, …) rather than the uppercase convention used by every other enum in the schema, specifically to match the spec's own JSON examples (`"type": "phone"`) and avoid a translation layer between the wire format and storage.
+- **Services have no dedicated list endpoint** (matching the spec's endpoint map, which defines none) — they're only ever returned nested inside a `Queue` response. Counters, by contrast, do have a dedicated `GET /api/queues/:queueId/counters` and are not nested in the queue response, avoiding two competing representations of the same data.
+- **Test-environment rate-limit exemption**: `authRateLimiter` (`src/middleware/rateLimit.ts`) now skips enforcement when `NODE_ENV === 'test'`. The Phase 2 integration suite legitimately drives far more than 20 requests/15min from a single address (127.0.0.1) as a natural consequence of test volume, not the kind of abuse the limiter exists to catch. Production and development enforce it exactly as before — this is a test-environment carve-out, not a weakening of the control itself.
+
+**Reason:** All five numbered decisions were explicitly approved before coding began; the additional items follow directly from CLAUDE.md's tenant-isolation and authorization rules and from keeping the API surface exactly as specified rather than inventing endpoints the spec doesn't define.
+
+**Consequence:** Phase 3 (Token Engine) will read `Queue.nextTokenNumber`/`Queue.formVersion` and the current-version `QueueFormField` rows as-is — no migration or contract change anticipated from this phase's design.
+
+---
+
+## ADR-015 addendum: Archived queues are read-only (2026-08-22)
+
+**Decision:** A queue with `deletedAt` set is not just excluded from the default list (decision 4) — it is fully read-only. Every mutation path that touches the queue itself, or any of its services/counters/form fields, now rejects with `409 QUEUE_ARCHIVED` once the parent queue is archived:
+
+- Queue: `PUT`, `PATCH .../status`, and — notably — a **second** `DELETE` call (the first `DELETE` is the one allowed transition into the archived state; a repeat call is a mutation attempt against an already-archived queue, so it now fails instead of silently no-opping as it did before this addendum).
+- Services: `POST` (create), `PUT`, `DELETE`, `PATCH .../status`.
+- Counters: `POST` (create), `PUT`, `DELETE`, `PATCH .../status`, `PATCH .../assign`.
+- Form fields: `PUT .../form-fields`.
+
+`GET` behavior is completely unchanged (decision 4 still holds as originally approved).
+
+**Implementation:** `assertQueueMutable()` in `src/utils/tenantScope.ts` is a pure guard — `if (queue.deletedAt) throw AppError(409, 'QUEUE_ARCHIVED', ...)`. Every mutating service function calls the existing tenant-ownership resolver first (`findQueueOrThrow` / `requireOwnedQueue` / the join-based `findServiceScoped` / `findCounterScoped`, all unchanged), and only calls `assertQueueMutable` after that succeeds — so a cross-organization queue id still 404s before the archived check is ever reached; the archived check never substitutes for or bypasses the tenant check.
+
+**Reason:** Approved follow-up review: an archived queue being retrievable but still mutable was an inconsistency between "archived" as a concept and the actual API surface.
+
+**Consequence — explicitly not a change to the soft-delete strategy itself:** Queues are still soft-deleted the same way (a timestamp, not a row removal), still not cascaded to children (decision 5 unchanged), and `status` is still fully independent of `deletedAt` (decision 6 unchanged). What changed is narrower: repeat mutation attempts against an already-archived queue now get an explicit, typed rejection instead of either silently succeeding (the old repeat-delete case) or silently succeeding at creating orphaned data under an archived queue (the service/counter/form-field cases, which had no guard at all before this addendum).
