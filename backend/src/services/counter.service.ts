@@ -13,7 +13,7 @@ type UpdateCounterInput = z.infer<typeof updateCounterSchema.body>;
  * The parent queue is included so mutation paths can also check its
  * archived state.
  */
-async function findCounterScoped(
+export async function findCounterScoped(
   organizationId: string,
   counterId: string,
 ): Promise<Counter & { queue: Queue }> {

@@ -49,6 +49,22 @@ enum FormFieldType {
   checkbox
 }
 
+enum TokenStatus {
+  WAITING
+  CALLED
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+/// Device identity is deliberately global (no organizationId) per spec 7.19 /
+/// ADR-011 — a device is a lightweight per-installation identifier, not a
+/// tenant-scoped account.
+enum DeviceStatus {
+  ACTIVE
+  BLOCKED
+}
+
 /// A tenant. Every organization-owned record must trace back to one Organization,
 /// and every organization-scoped query must be filtered by the authenticated
 /// staff member's organizationId — never by a client-supplied id.
@@ -61,6 +77,7 @@ model Organization {
 
   staff  Staff[]
   queues Queue[]
+  tokens Token[]
 
   @@map("organizations")
 }
@@ -141,6 +158,7 @@ model Queue {
   services   QueueService[]
   counters   Counter[]
   formFields QueueFormField[]
+  tokens     Token[]
 
   @@index([organizationId])
   @@map("queues")
@@ -159,6 +177,8 @@ model QueueService {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  tokens Token[]
+
   @@index([queueId])
   @@map("queue_services")
 }
@@ -175,6 +195,8 @@ model Counter {
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+
+  tokens Token[]
 
   @@index([queueId])
   @@index([staffId])
@@ -207,4 +229,63 @@ model QueueFormField {
   @@unique([queueId, version, key])
   @@index([queueId, version])
   @@map("queue_form_fields")
+}
+
+/// One row per mobile installation (ADR-011). No organizationId: a device is
+/// not a tenant-scoped identity, it is a lightweight abuse-prevention handle
+/// the customer-facing token API resolves/creates on demand.
+model Device {
+  id               String       @id @default(uuid())
+  deviceIdentifier String       @unique @map("device_identifier")
+  status           DeviceStatus @default(ACTIVE)
+  lastSeenAt       DateTime?    @map("last_seen_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tokens Token[]
+
+  @@map("devices")
+}
+
+/// sequenceNumber is the atomically-allocated integer (ADR-003); serialNumber
+/// is the derived display string (tokenPrefix + zero-padded sequenceNumber).
+/// formVersion is a plain integer snapshot of Queue.formVersion at creation
+/// time — not a foreign key — so historical form definitions stay resolvable
+/// (queueId, version) even after the queue's live form changes (ADR-009).
+model Token {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  queueId        String       @map("queue_id")
+  queue          Queue        @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  serviceId      String       @map("service_id")
+  service        QueueService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  counterId      String?      @map("counter_id")
+  counter        Counter?     @relation(fields: [counterId], references: [id], onDelete: SetNull)
+  deviceId       String       @map("device_id")
+  device         Device       @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  sequenceNumber Int         @map("sequence_number")
+  serialNumber   String      @map("serial_number")
+  status         TokenStatus @default(WAITING)
+
+  formData    Json @map("form_data")
+  formVersion Int  @map("form_version")
+
+  idempotencyKey String @map("idempotency_key")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  calledAt    DateTime? @map("called_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  skippedAt   DateTime? @map("skipped_at")
+
+  @@unique([queueId, sequenceNumber])
+  @@unique([deviceId, idempotencyKey])
+  @@index([organizationId, createdAt])
+  @@index([queueId, status, createdAt])
+  @@index([deviceId])
+  @@index([counterId])
+  @@map("tokens")
 }

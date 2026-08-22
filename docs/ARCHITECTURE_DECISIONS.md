@@ -194,3 +194,40 @@
 **Reason:** Approved follow-up review: an archived queue being retrievable but still mutable was an inconsistency between "archived" as a concept and the actual API surface.
 
 **Consequence — explicitly not a change to the soft-delete strategy itself:** Queues are still soft-deleted the same way (a timestamp, not a row removal), still not cascaded to children (decision 5 unchanged), and `status` is still fully independent of `deletedAt` (decision 6 unchanged). What changed is narrower: repeat mutation attempts against an already-archived queue now get an explicit, typed rejection instead of either silently succeeding (the old repeat-delete case) or silently succeeding at creating orphaned data under an archived queue (the service/counter/form-field cases, which had no guard at all before this addendum).
+
+---
+
+## ADR-016: Phase 3 token engine design (approved decisions, as implemented)
+
+**Status:** Approved (user decisions, 2026-08-22) and implemented.
+
+**Decision:** Fifteen specific design choices for the Device/Token layer, all approved before implementation:
+
+1. **Idempotency uniqueness is `(deviceId, idempotencyKey)`**, not a global unique on the key alone — two different devices coincidentally generating the same key value can never collide.
+2. **Idempotency conflict returns `409 IDEMPOTENCY_KEY_CONFLICT`** when the same device reuses a key with different `queueId`/`serviceId`/`formData` — the original token is never silently returned for a mismatched payload.
+3. **`POST /api/queues/:queueId/next` takes `{ counterId }`** — the staff member selects the counter; the backend auto-selects the oldest eligible `WAITING` token for it.
+4. **Sequence allocation uses `SELECT ... FOR UPDATE`** on the `Queue` row inside the token-creation transaction (ADR-003, now implemented) — no application-level locks, mutexes, in-memory counters, or Redis.
+5. **`/next`'s token-selection query uses `FOR UPDATE SKIP LOCKED`**, scoped only to that query — the sequence-allocation lock in `createToken` stays plain `FOR UPDATE`. This lets two counters call `/next` concurrently and claim two different tokens without blocking each other.
+6. **`Device` has no `organizationId`** — kept exactly as specified (ADR-011): a device is a global, lightweight identifier, not a tenant-scoped account.
+7. **`Token.serviceId` uses `ON DELETE RESTRICT`**, not `CASCADE` — a service with token history can never be hard-deleted out from under that history.
+8. **Customer-facing token endpoints require no staff authentication**; authorization is possession of the token's (high-entropy) UUID. Customer responses are a restricted view (`toCustomerView` in `token.service.ts`) that never includes `organizationId`, `deviceId`, `idempotencyKey`, or `formVersion`.
+9. **Serial numbers are 3-digit zero-padded** (`A001` … `A999`, `A1000`, …) and never truncated past 999.
+10. **`PAUSED`/`INACTIVE` queues reject new token creation but do not affect existing tokens** — `call`/`start`/`complete`/`skip`/`next` are never gated on `queue.status`.
+11. **Archived queues reject new token creation (`409 QUEUE_ARCHIVED`)** but existing `WAITING`/`CALLED`/`IN_PROGRESS` tokens remain fully processable to `COMPLETED`/`SKIPPED` — the archived-queue guard (`assertQueueMutable`) is deliberately never called from any token-transition path.
+12. **Position counts only `WAITING` tokens in the same queue**, regardless of selected service — one physical line per queue, not per-service sub-queues.
+13. **`deviceIdentifier` is a request-body field**, not a header; `Idempotency-Key` remains an HTTP header.
+14. **Device registration is `POST /api/devices/register`** with `{ deviceIdentifier }` (the spec doesn't name an exact path).
+15. **`GET /api/public/queues/:queueId/config` is fully public** and returns only queue public info, active services, and the current-version form fields — never staff, counters, internal organization data, or historical form versions.
+
+**Token creation transaction (as implemented, `token.service.ts` `createToken`):** every independently-failable check (queue exists/not archived/`ACTIVE`, service exists/belongs to the queue/active, device not blocked, form data valid against the current `QueueFormField` set) runs before the queue row is locked. The lock, the authoritative idempotency re-check, the sequence increment, and the insert are the last steps — a failed transaction never leaves `next_token_number` advanced. One refinement beyond the literal approved step order: the queue's `status`/`deletedAt` are re-checked against the *locked* row (not the earlier pre-lock read) to close the narrow TOCTOU window between validation and lock acquisition (e.g. staff pausing the queue mid-request) — the pre-lock checks still run first as an early-exit optimization.
+
+**State machine (`src/utils/tokenStateMachine.ts`):** `WAITING → {CALLED, SKIPPED}`, `CALLED → {IN_PROGRESS, SKIPPED}`, `IN_PROGRESS → {COMPLETED, SKIPPED}`, `COMPLETED`/`SKIPPED` terminal. Centralized and called from every transition path; never re-implemented in a controller. Each transition (`call`/`start`/`complete`/`skip`) additionally applies a conditional (compare-and-swap) `UPDATE ... WHERE id = ? AND status = ?` as a concurrency safety net beyond the pre-check — two racing requests against the same token can only have one succeed, surfaced as `409 TOKEN_STATE_CHANGED` for the loser.
+
+**Reason:** All fifteen numbered decisions were explicitly approved before coding began. The transaction/state-machine refinements follow directly from CLAUDE.md's transaction and concurrency rules and from the spec's own "two simultaneous requests must never produce duplicates" requirement.
+
+**Consequence:** `Token.formVersion` is a plain integer snapshot (not a foreign key) of `Queue.formVersion` at creation time, permanently resolvable via `(queueId, formVersion)` against `QueueFormField` — this depends on ADR-009's existing guarantee that old `QueueFormField` rows are never mutated, and required no change to that guarantee. Phase 4 (Real-Time) will wrap `createToken`/`callToken`/`startToken`/`completeToken`/`skipToken`/`nextToken` with Socket.io event emission *after* each already-committed transaction — no event emission exists yet in Phase 3, deliberately.
+
+**Post-implementation review findings (2026-08-22), both closed before commit:**
+
+- **`estimatedWaitMinutes` returns `null` when zero counters are `ACTIVE`, rather than flooring the divisor to 1.** The spec (§7.14) gives only the bare formula (`service time × eligible tokens ahead ÷ available active counters`) and is silent on the zero-counter edge case — this is a product decision, not a spec requirement. The original implementation substituted `Math.max(activeCounters, 1)`, which produced a real numeric estimate implying active service even when no counter was open — misleading rather than merely imprecise. Approved decision: return `null` instead (matching how `position`/`estimatedWaitMinutes` are already nulled for non-`WAITING` tokens), so clients can distinguish "an estimate exists" from "no one is currently serving this queue."
+- **Optional form fields now accept an explicitly-submitted empty string as "no answer," not just an omitted key.** `buildFormDataSchema`'s non-empty constraint (`.min(1)` / enum membership) was previously applied to the base schema before the required/optional split, so Zod's `.optional()` only ever tolerated a missing key, never a blank value — inconsistent with `required: false`'s own meaning and with how real form clients typically submit a left-blank optional field. Fixed for all string-based field types (text/email/phone/date/dropdown/radio); `number`/`checkbox` were left untouched (out of scope — would need type coercion, not requested). Required-field validation is unchanged: an empty string is still rejected wherever `required: true`.

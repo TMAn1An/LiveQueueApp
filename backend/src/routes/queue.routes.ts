@@ -3,6 +3,7 @@ import * as queueController from '../controllers/queue.controller';
 import * as serviceController from '../controllers/service.controller';
 import * as counterController from '../controllers/counter.controller';
 import * as formFieldController from '../controllers/formField.controller';
+import * as tokenController from '../controllers/token.controller';
 import { authenticate } from '../middleware/authenticate';
 import { requirePermission } from '../middleware/requirePermission';
 import { validate } from '../middleware/validate';
@@ -15,6 +16,7 @@ import {
 import { createServiceSchema } from '../validators/service.validators';
 import { createCounterSchema, listCountersSchema } from '../validators/counter.validators';
 import { replaceFormFieldsSchema } from '../validators/formField.validators';
+import { nextTokenSchema } from '../validators/token.validators';
 
 const router = Router();
 
@@ -81,6 +83,16 @@ router.put(
   requirePermission('manage_queues'),
   validate(replaceFormFieldsSchema),
   formFieldController.replace,
+);
+
+// Staff selects the counter; the backend auto-selects the oldest eligible
+// waiting token (approved Phase 3 decision 3).
+router.post(
+  '/:queueId/next',
+  authenticate,
+  requirePermission('operate_tokens'),
+  validate(nextTokenSchema),
+  tokenController.next,
 );
 
 export default router;
