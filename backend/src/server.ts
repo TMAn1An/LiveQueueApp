@@ -1,11 +1,15 @@
+import http from 'node:http';
 import { createApp } from './app';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import { prisma } from './config/prisma';
+import { attachSocketServer } from './realtime/socketServer';
 
 const app = createApp();
+const server = http.createServer(app);
+attachSocketServer(server);
 
-const server = app.listen(env.PORT, () => {
+server.listen(env.PORT, () => {
   logger.info(`LiveQueue backend listening on port ${env.PORT} (${env.NODE_ENV})`);
 });
 

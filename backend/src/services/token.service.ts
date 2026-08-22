@@ -181,7 +181,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   });
   if (preCheck) {
     assertIdempotentPayloadMatches(preCheck, input, formData);
-    return finalizeTokenResponse(preCheck.id);
+    return getTokenCustomerView(preCheck.id);
   }
 
   const created = await prisma.$transaction(async (tx) => {
@@ -239,7 +239,25 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     });
   });
 
-  return finalizeTokenResponse(created.id);
+  return getTokenCustomerView(created.id);
+}
+
+/**
+ * With no counter actively serving, "duration × position ÷ counters" has no
+ * meaningful denominator — an estimate here would imply active service that
+ * isn't happening (approved product decision, 2026-08-22). Shared by both
+ * the single-token path (computeComputedFields) and the queue-wide batch
+ * path (listWaitingTokenPositions) so the formula is never duplicated.
+ */
+function computeEstimatedWaitMinutes(
+  durationMinutes: number,
+  position: number,
+  activeCounters: number,
+): number | null {
+  if (activeCounters === 0) {
+    return null;
+  }
+  return Math.ceil((durationMinutes * position) / activeCounters);
 }
 
 async function computeComputedFields(
@@ -259,18 +277,51 @@ async function computeComputedFields(
   ]);
 
   const position = aheadCount + 1;
-
-  if (activeCounters === 0) {
-    // With no counter actively serving, "duration × position ÷ counters" has
-    // no meaningful denominator — an estimate here would imply active
-    // service that isn't happening (approved product decision, 2026-08-22).
-    return { position, estimatedWaitMinutes: null };
-  }
-
   const durationMinutes = service?.durationMinutes ?? queue?.baseTimeMinutes ?? 5;
-  const estimatedWaitMinutes = Math.ceil((durationMinutes * position) / activeCounters);
+  const estimatedWaitMinutes = computeEstimatedWaitMinutes(durationMinutes, position, activeCounters);
 
   return { position, estimatedWaitMinutes };
+}
+
+/**
+ * Batch equivalent of computeComputedFields, for every currently-WAITING
+ * token in one queue at once — used by the realtime layer to recompute
+ * positions after a token leaves WAITING (approved Phase 4 decision 4),
+ * without an N+1 query per affected token.
+ */
+export async function listWaitingTokenPositions(queueId: string): Promise<
+  Array<{
+    id: string;
+    organizationId: string;
+    queueId: string;
+    sequenceNumber: number;
+    position: number;
+    estimatedWaitMinutes: number | null;
+  }>
+> {
+  const [waitingTokens, activeCounters, queue] = await Promise.all([
+    prisma.token.findMany({
+      where: { queueId, status: 'WAITING' },
+      orderBy: { sequenceNumber: 'asc' },
+      include: { service: true },
+    }),
+    prisma.counter.count({ where: { queueId, status: 'ACTIVE' } }),
+    prisma.queue.findUnique({ where: { id: queueId } }),
+  ]);
+
+  return waitingTokens.map((token, index) => {
+    const position = index + 1;
+    const durationMinutes = token.service?.durationMinutes ?? queue?.baseTimeMinutes ?? 5;
+    const estimatedWaitMinutes = computeEstimatedWaitMinutes(durationMinutes, position, activeCounters);
+    return {
+      id: token.id,
+      organizationId: token.organizationId,
+      queueId: token.queueId,
+      sequenceNumber: token.sequenceNumber,
+      position,
+      estimatedWaitMinutes,
+    };
+  });
 }
 
 /**
@@ -307,13 +358,34 @@ function toStaffView(
   return { ...token, ...computed };
 }
 
-async function finalizeTokenResponse(tokenId: string) {
+/**
+ * The exact customer-safe shape (approved decision 8) — reused by the REST
+ * response and by the realtime layer's token:{id} room payloads, so "what's
+ * safe to show a customer" stays defined in exactly one place.
+ */
+export async function getTokenCustomerView(tokenId: string) {
   const token = await prisma.token.findUniqueOrThrow({
     where: { id: tokenId },
     include: { counter: true },
   });
   const computed = await computeComputedFields(token);
   return toCustomerView(token, computed);
+}
+
+/**
+ * Full staff-authorized shape — used by the realtime layer's
+ * organization:{id} room payloads (approved decision 2/5). Callers are
+ * responsible for having already established the recipient is staff of the
+ * owning organization (room-join authorization already does this); this
+ * function itself does not re-check organization membership.
+ */
+export async function getTokenStaffView(tokenId: string) {
+  const token = await prisma.token.findUniqueOrThrow({
+    where: { id: tokenId },
+    include: { counter: true },
+  });
+  const computed = await computeComputedFields(token);
+  return toStaffView(token, computed);
 }
 
 /**
@@ -401,15 +473,22 @@ type TimestampField = 'startedAt' | 'completedAt' | 'skippedAt';
  * Loads current state, validates the transition centrally, then applies a
  * conditional (compare-and-swap) UPDATE as the concurrency-safety net —
  * two racing requests against the same token can only have one succeed.
+ *
+ * Returns `previousStatus` alongside the updated token: the realtime layer
+ * needs it to decide whether a WAITING->SKIPPED transition (which affects
+ * other waiting tokens' positions) actually happened, versus a
+ * CALLED/IN_PROGRESS->SKIPPED transition (which doesn't) — see
+ * token.controller.ts `skip` (approved Phase 4 decision 4).
  */
 async function transitionToken(
   organizationId: string,
   tokenId: string,
   targetStatus: TokenStatus,
   timestampField: TimestampField,
-): Promise<Token> {
+): Promise<{ token: Token; previousStatus: TokenStatus }> {
   const token = await findTokenScoped(organizationId, tokenId);
   assertValidTransition(token.status, targetStatus);
+  const previousStatus = token.status;
 
   const result = await prisma.token.updateMany({
     where: { id: tokenId, status: token.status },
@@ -419,7 +498,8 @@ async function transitionToken(
     throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
   }
 
-  return prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
+  const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
+  return { token: updated, previousStatus };
 }
 
 export const startToken = (organizationId: string, tokenId: string) =>

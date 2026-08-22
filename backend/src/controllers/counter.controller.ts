@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import * as counterService from '../services/counter.service';
+import * as realtime from '../realtime/emit';
 
 export async function list(req: Request, res: Response) {
   const counters = await counterService.listCounters(
@@ -16,6 +17,7 @@ export async function create(req: Request, res: Response) {
     req.body,
   );
   res.status(201).json({ success: true, data: counter });
+  await realtime.emitCounterCreated(counter, req.auth!.organizationId);
 }
 
 export async function update(req: Request, res: Response) {
@@ -25,6 +27,7 @@ export async function update(req: Request, res: Response) {
     req.body,
   );
   res.status(200).json({ success: true, data: counter });
+  await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
 }
 
 export async function updateStatus(req: Request, res: Response) {
@@ -34,6 +37,7 @@ export async function updateStatus(req: Request, res: Response) {
     req.body.status,
   );
   res.status(200).json({ success: true, data: counter });
+  await realtime.emitCounterStatusChanged(counter, req.auth!.organizationId);
 }
 
 export async function remove(req: Request, res: Response) {
@@ -48,4 +52,7 @@ export async function assign(req: Request, res: Response) {
     req.body.staffId,
   );
   res.status(200).json({ success: true, data: counter });
+  // Assignment is a counter update — no dedicated event exists for it in the
+  // specification's 12-event list (recommended mapping, readiness review §9).
+  await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
 }

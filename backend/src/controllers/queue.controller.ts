@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import * as queueService from '../services/queue.service';
+import * as realtime from '../realtime/emit';
 
 export async function list(req: Request, res: Response) {
   const queues = await queueService.listQueues(req.auth!.organizationId);
@@ -9,6 +10,7 @@ export async function list(req: Request, res: Response) {
 export async function create(req: Request, res: Response) {
   const queue = await queueService.createQueue(req.auth!.organizationId, req.body);
   res.status(201).json({ success: true, data: queue });
+  await realtime.emitQueueCreated(queue);
 }
 
 export async function get(req: Request, res: Response) {
@@ -23,6 +25,7 @@ export async function update(req: Request, res: Response) {
     req.body,
   );
   res.status(200).json({ success: true, data: queue });
+  await realtime.emitQueueUpdated(queue);
 }
 
 export async function updateStatus(req: Request, res: Response) {
@@ -32,6 +35,7 @@ export async function updateStatus(req: Request, res: Response) {
     req.body.status,
   );
   res.status(200).json({ success: true, data: queue });
+  await realtime.emitQueueStatusChanged(queue);
 }
 
 export async function remove(req: Request, res: Response) {

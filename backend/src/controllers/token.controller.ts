@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { AppError } from '../utils/AppError';
 import * as tokenService from '../services/token.service';
+import * as realtime from '../realtime/emit';
 
 function requireIdempotencyKey(req: Request): string {
   const header = req.headers['idempotency-key'];
@@ -14,6 +15,7 @@ export async function create(req: Request, res: Response) {
   const idempotencyKey = requireIdempotencyKey(req);
   const token = await tokenService.createToken(req.body, idempotencyKey);
   res.status(201).json({ success: true, data: token });
+  await realtime.emitTokenCreated(token.id);
 }
 
 export async function get(req: Request, res: Response) {
@@ -33,21 +35,39 @@ export async function call(req: Request, res: Response) {
     req.body.counterId,
   );
   res.status(200).json({ success: true, data: token });
+  await realtime.emitTokenCalled(token.id);
+  // call always transitions WAITING -> CALLED, so it always affects
+  // whichever waiting tokens were behind it (approved Phase 4 decision 4).
+  await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
 }
 
 export async function start(req: Request, res: Response) {
-  const token = await tokenService.startToken(req.auth!.organizationId, req.params.tokenId as string);
+  const { token } = await tokenService.startToken(req.auth!.organizationId, req.params.tokenId as string);
   res.status(200).json({ success: true, data: token });
+  await realtime.emitTokenStarted(token.id);
 }
 
 export async function complete(req: Request, res: Response) {
-  const token = await tokenService.completeToken(req.auth!.organizationId, req.params.tokenId as string);
+  const { token } = await tokenService.completeToken(
+    req.auth!.organizationId,
+    req.params.tokenId as string,
+  );
   res.status(200).json({ success: true, data: token });
+  await realtime.emitTokenCompleted(token.id);
 }
 
 export async function skip(req: Request, res: Response) {
-  const token = await tokenService.skipToken(req.auth!.organizationId, req.params.tokenId as string);
+  const { token, previousStatus } = await tokenService.skipToken(
+    req.auth!.organizationId,
+    req.params.tokenId as string,
+  );
   res.status(200).json({ success: true, data: token });
+  await realtime.emitTokenSkipped(token.id);
+  // Only a WAITING -> SKIPPED transition removes a token from the waiting
+  // set; CALLED/IN_PROGRESS -> SKIPPED never affected anyone else's position.
+  if (previousStatus === 'WAITING') {
+    await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
+  }
 }
 
 export async function next(req: Request, res: Response) {
@@ -57,4 +77,8 @@ export async function next(req: Request, res: Response) {
     req.body.counterId,
   );
   res.status(200).json({ success: true, data: token });
+  // /next results in status CALLED — the same event as /call, never a
+  // separate "next" event (approved Phase 4 decision 1/4).
+  await realtime.emitTokenCalled(token.id);
+  await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
 }

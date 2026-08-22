@@ -1,6 +1,6 @@
 # LiveQueue — Progress
 
-## Current Phase: Phase 3 (Token Engine) — Complete and verified
+## Current Phase: Phase 4 (Real-Time Layer) — Complete and verified
 
 ## Status
 
@@ -9,7 +9,7 @@
 | Phase 1: Foundation | **Done** — auth, sessions, tenant isolation implemented and tested against a real PostgreSQL database |
 | Phase 2: Queue Core | **Done** — Queue/Service/Counter/FormField CRUD, soft deletion, computed QR, tenant isolation, tested against a real PostgreSQL database |
 | Phase 3: Token Engine | **Done** — Device/Token models, token creation with atomic sequencing and idempotency, state machine, call/start/complete/skip/next, position/estimated wait, public queue config, tested against a real PostgreSQL database |
-| Phase 4: Real Time | Not started |
+| Phase 4: Real Time | **Done** — Socket.io with JWT-verified organization rooms, public queue/token rooms, all 12 spec events, targeted position_changed broadcasting, tested against a real PostgreSQL database and real socket.io-client connections |
 | Phase 5: Mobile | Not started |
 | Phase 6: Dashboard | Not started |
 | Phase 7: Production Hardening | Not started |
@@ -81,6 +81,23 @@ Two gaps found in Phase 2 review were closed, both application-code-only (no sch
 - 74 new automated tests across 9 files (creation validation matrix incl. optional-field blank-value handling, idempotency incl. concurrent duplicates, sequence concurrency at 2/10/100 simultaneous requests with DB-level count/min/max/distinct verification plus a real-constraint-violation rollback test, full state-machine coverage, `/next` concurrency incl. two-counters-claim-different-tokens and same-counter-only-one-wins, position/estimated-wait incl. the zero-active-counters null case, tenant isolation, device registration, public config) — all passing against a real PostgreSQL instance, no mocked locks
 - Full design record in `docs/ARCHITECTURE_DECISIONS.md` ADR-016, including two post-review refinements: `estimatedWaitMinutes` returns `null` (not a floored numeric estimate) when zero counters are `ACTIVE`, and optional form fields now accept an explicitly-submitted empty string as "no answer," not just an omitted key
 
+## What Is Implemented (Phase 4)
+
+- Socket.io server (`socket.io`) attached to the same `http.Server` as the Express app (`src/server.ts`) — no separate port, no separate process.
+- All 12 specification events (§8): `queue.created/updated/status_changed`, `token.created/called/started/completed/skipped/position_changed`, `counter.created/updated/status_changed` — the specification's list, not `IMPLEMENTATION_PLAN.md`'s narrower 8-event list (spec is authoritative where they conflict). No `service.*` events (not in the spec).
+- Three rooms exactly as specified: `organization:{id}` (staff-only, JWT-verified via the existing Phase 3 `resolveAuthContext` — no second JWT implementation), `queue:{id}` (public), `token:{id}` (public by UUID possession, matching the Phase 3 REST trust model).
+- Room/payload security tiers (closing a customer-PII-leak and staff-data-leak risk identified in the Phase 4 readiness review): organization room gets full staff-authorized payloads for all 12 events; the queue room only ever receives `queue.status_changed` with a minimal public-safe payload (`{id, status}`) — never token or counter detail; each token's own room gets only that token's customer-safe events (never `token.created`, since no one could have joined yet).
+- Targeted `token.position_changed`: only waiting tokens behind the one that just left `WAITING` are recomputed and notified, each to its own room — proven with dedicated tests for the affected/unaffected/wrong-transition-type cases.
+- Controller-level emission only, always after the HTTP response is already sent; every emit function catches its own errors, so a socket delivery failure can never turn a successful, already-committed REST operation into an HTTP failure.
+- No Redis, no event replay/log, no persisted socket-session records — reconnection is a fresh handshake + fresh room joins, resynchronization is the client's existing REST calls.
+- 44 new automated tests across 7 files (handshake auth incl. expired/invalid/suspended, organization room isolation, public room joins, queue/token room leak-prevention, all 12 events individually, multi-client delivery, a real forced-DB-failure-produces-zero-events test reusing the Phase 3 poison-row technique, a forced socket-emit-failure-doesn't-break-HTTP test, targeted position_changed, 10-concurrent-token-creation event delivery, and reconnection/no-replay behavior) — all passing against a real PostgreSQL instance and real `socket.io-client` connections, no mocked sockets.
+- Full design record in `docs/ARCHITECTURE_DECISIONS.md` ADR-017.
+
+**Discovered, recorded, not fixed (out of Phase 4's scope, per explicit instruction):**
+
+- Phase 3's public REST endpoints (`POST /api/tokens`, `GET /api/public/queues/:id/config`) still have no rate limiter, despite spec §19 listing both under mandatory rate limiting. Pre-existing from Phase 3, unrelated to the Socket.io layer — flagged for a future, separately-scoped fix rather than folded into Phase 4.
+- Neither queue archival nor counter deletion has a corresponding real-time event (the spec's event lists don't include a `deleted`/`archived` event for either) — these mutations remain real-time-invisible by design, matching the literal spec rather than inventing new event names.
+
 ## Known, Documented Deviations
 
 - Prisma pinned to `6.12.0` rather than the `7.x` default `npm install` resolves to — see ADR-014.
@@ -89,4 +106,4 @@ Two gaps found in Phase 2 review were closed, both application-code-only (no sch
 
 ## Last Action
 
-Phase 3 (Token Engine) implemented, reviewed, and closed out: Device/Token models, token creation with atomic per-queue sequencing (`SELECT ... FOR UPDATE`) and idempotency (`(deviceId, idempotencyKey)`, real concurrent-duplicate safety proven), centralized state machine, call/start/complete/skip, `/next` (`FOR UPDATE SKIP LOCKED`), derived position/estimated wait (returns `null` under zero active counters), customer-safe vs. staff-facing token views, and public queue config. Post-implementation review closed two findings: `estimatedWaitMinutes` no longer floors the active-counter divisor to 1 (returns `null` instead), and optional form fields now accept an explicitly-submitted empty string, not just an omitted key. Migrated against a live PostgreSQL database and verified: connection, migration (purely additive, reversible), table creation, full test suite (159/159 passing — 85 from Phase 1/2 plus 74 new), type check, and lint all confirmed passing. Committed; awaiting approval to begin Phase 4 (Real-Time Layer).
+Phase 4 (Real-Time Layer) implemented and closed out: Socket.io with JWT-verified organization rooms (reusing Phase 3's `resolveAuthContext`, no second auth implementation), public queue/token rooms with a security-tiered payload split, all 12 specification events wired into the existing queue/counter/token controllers (emission always after the HTTP response, never able to fail a REST call), and targeted `token.position_changed` broadcasting. No schema changes, no migration, no Redis — confirmed via `prisma migrate status` before and after. Verified: full test suite (203/203 passing — 159 from Phase 1-3 plus 44 new realtime tests, using real `socket.io-client` connections against a real listening server, no mocked sockets or locks), type check, and lint all confirmed passing. Not committed or pushed yet — awaiting review. Awaiting approval to begin Phase 5 (Mobile).
