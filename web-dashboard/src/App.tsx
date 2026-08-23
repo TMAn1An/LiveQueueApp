@@ -13,6 +13,7 @@ import { QueueCountersPage } from './pages/QueueCountersPage';
 import { StaffPage } from './pages/StaffPage';
 import { BlockedDevicesPage } from './pages/BlockedDevicesPage';
 import { ReportsPage } from './pages/ReportsPage';
+import { AuditLogsPage } from './pages/AuditLogsPage';
 import { OrganizationSettingsPage } from './pages/OrganizationSettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
 
@@ -42,6 +43,7 @@ function App() {
                 <Route path="/staff" element={<StaffPage />} />
                 <Route path="/devices" element={<BlockedDevicesPage />} />
                 <Route path="/reports" element={<ReportsPage />} />
+                <Route path="/audit-logs" element={<AuditLogsPage />} />
                 <Route path="/organization" element={<OrganizationSettingsPage />} />
                 <Route path="/profile" element={<ProfilePage />} />
               </Route>

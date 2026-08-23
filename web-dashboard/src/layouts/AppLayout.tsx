@@ -38,6 +38,11 @@ export function AppLayout() {
               Reports
             </NavLink>
           )}
+          {hasPermission('view_reports') && (
+            <NavLink to="/audit-logs" className={navLinkClass}>
+              Audit Logs
+            </NavLink>
+          )}
           <NavLink to="/organization" className={navLinkClass}>
             Organization Settings
           </NavLink>
