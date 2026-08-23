@@ -15,6 +15,34 @@ const envSchema = z.object({
   CORS_ORIGINS: z.string().default(''),
 
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
+
+  RATE_LIMIT_PUBLIC_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  RATE_LIMIT_PUBLIC_MAX: z.coerce.number().int().positive().default(60),
+  RATE_LIMIT_TOKEN_CREATE_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+  RATE_LIMIT_TOKEN_CREATE_MAX: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_SENSITIVE_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
+  RATE_LIMIT_SENSITIVE_MAX: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_REPORT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
+  RATE_LIMIT_REPORT_MAX: z.coerce.number().int().positive().default(10),
+
+  // Test-harness-only escape hatch (not in .env.example — never meant for a
+  // real environment): every limiter is skipped whenever NODE_ENV === 'test'
+  // by default, same as the pre-existing authRateLimiter carve-out, since
+  // the integration suite's request volume from a single address would
+  // otherwise trip every category. Setting this to 'true' lets one isolated
+  // test file (tests/rateLimit.test.ts) actually exercise 429 behavior
+  // without affecting the other ~30 test files, which never set it.
+  RATE_LIMIT_TEST_ENFORCE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+
+  // Optional: absolute or relative path to a Firebase service-account JSON
+  // file, never committed (.gitignore's "*service-account*.json"). Unset in
+  // any environment without push notifications configured yet.
+  FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(),
+
+  REMINDER_DISPATCH_CRON: z.string().default('*/1 * * * *'),
 });
 
 function loadEnv() {

@@ -6,6 +6,7 @@ import { verifyAccessToken } from './tokens';
 export interface AuthContext {
   staffId: string;
   organizationId: string;
+  email: string;
   role: StaffRole;
   permissions: Permission[];
 }
@@ -37,6 +38,7 @@ export async function resolveAuthContext(rawToken: string): Promise<AuthContext 
   return {
     staffId: staff.id,
     organizationId: staff.organizationId,
+    email: staff.email,
     role: staff.role,
     permissions: staff.permissions as Permission[],
   };

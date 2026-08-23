@@ -49,3 +49,24 @@ export async function setDeviceStatus(deviceId: string, status: DeviceStatus) {
   }
   return prisma.device.update({ where: { id: deviceId }, data: { status } });
 }
+
+/**
+ * Phase 7 Step 7. One row per device — a device's FCM token can rotate
+ * (reinstall, Firebase-initiated refresh), so registering a new one
+ * replaces the old one via upsert on the unique deviceId, never
+ * accumulates rows. Resolves/creates the Device the same way
+ * registerDevice does (self-asserted deviceIdentifier — there is no device
+ * authentication mechanism in this codebase, ADR-011), so a device
+ * registering an FCM token can only ever touch its own row.
+ */
+export async function registerFcmToken(deviceIdentifier: string, fcmToken: string) {
+  const device = await registerDevice(deviceIdentifier);
+
+  const record = await prisma.deviceFcmToken.upsert({
+    where: { deviceId: device.id },
+    create: { deviceId: device.id, fcmToken },
+    update: { fcmToken },
+  });
+
+  return { deviceId: device.id, updatedAt: record.updatedAt };
+}

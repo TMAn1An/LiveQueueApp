@@ -243,7 +243,9 @@ model Device {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tokens Token[]
+  tokens                  Token[]
+  fcmToken                DeviceFcmToken?
+  notificationPreferences NotificationPreference[]
 
   @@map("devices")
 }
@@ -281,11 +283,100 @@ model Token {
   completedAt DateTime? @map("completed_at")
   skippedAt   DateTime? @map("skipped_at")
 
+  /// Phase 7 Step 7 dedup claim: set exactly once, via a conditional
+  /// (compare-and-swap) UPDATE mirroring the existing state-machine pattern,
+  /// the moment a reminder dispatch attempt claims this token — before the
+  /// actual FCM send, so a crash mid-send under-delivers rather than
+  /// duplicates. The smallest correct persistence for "has this token
+  /// already been reminded," reusing this existing model rather than a new
+  /// table (survives scheduler restarts and repeated dispatch calls, unlike
+  /// an in-memory Set).
+  reminderSentAt DateTime? @map("reminder_sent_at")
+
+  notificationPreferences NotificationPreference[]
+
   @@unique([queueId, sequenceNumber])
   @@unique([deviceId, idempotencyKey])
   @@index([organizationId, createdAt])
   @@index([queueId, status, createdAt])
   @@index([deviceId])
   @@index([counterId])
+  // The reminder scheduler runs globally (not organization-scoped) every
+  // minute, selecting "currently WAITING, not yet reminded" tokens across
+  // every organization — without this, that query would scan every
+  // historical COMPLETED/SKIPPED token in the table each run.
+  @@index([status, reminderSentAt])
   @@map("tokens")
+}
+
+/// Phase 7 Step 7: one current FCM registration token per device. A device's
+/// token can rotate (reinstall, Firebase-initiated refresh) — registering a
+/// new one replaces the old one via upsert, never accumulates rows.
+model DeviceFcmToken {
+  id       String @id @default(uuid())
+  deviceId String @unique @map("device_id")
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  fcmToken String @unique @map("fcm_token")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("device_fcm_tokens")
+}
+
+/// Spec §15/§29.7's own data model, implemented now because Phase 7's
+/// reminder dispatch is the first feature that actually needs it — Phase 5
+/// (mobile) deliberately deferred this to a device-local-only preference
+/// (ADR-018), never synced to the backend. Scoped to (deviceId, tokenId),
+/// exactly as specified: a customer's reminder preference is per queue-join,
+/// not a single global device setting. Absence of a row is the server-side
+/// opt-out signal — reminder dispatch INNER JOINs this table, so a device/
+/// token with no row here is never reminded, not defaulted to "enabled."
+model NotificationPreference {
+  id       String @id @default(uuid())
+  deviceId String @map("device_id")
+  device   Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  tokenId  String @map("token_id")
+  token    Token  @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  /// Spec 7.18: customer-configurable, minimum 2 minutes — enforced by Zod
+  /// at the registration endpoint, not just documented here.
+  reminderMinutes       Int     @map("reminder_minutes")
+  vibrationEnabled      Boolean @default(true) @map("vibration_enabled")
+  soundEnabled          Boolean @default(true) @map("sound_enabled")
+  notificationsEnabled  Boolean @default(true) @map("notifications_enabled")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([deviceId, tokenId])
+  @@map("notification_preferences")
+}
+
+/// Append-only evidence trail (Phase 7 Step 4). organizationId/staffId are
+/// plain scalar snapshots with deliberately NO Prisma relation to
+/// Organization/Staff — an audit record is evidence of what happened, and
+/// must survive both organization deletion (Organization cascades through
+/// every other table via onDelete: Cascade) and staff deletion (DELETE
+/// /api/staff/:staffId is a hard delete). staffEmail is captured too, so the
+/// actor stays identifiable even after the Staff row is gone. `action` is a
+/// plain string, not a Postgres enum, so the audit vocabulary can grow
+/// without a schema migration for every new event — validated at the
+/// application layer instead (src/constants/auditActions.ts).
+model AuditLog {
+  id             String @id @default(uuid())
+  organizationId String @map("organization_id")
+  staffId        String @map("staff_id")
+  staffEmail     String @map("staff_email")
+
+  action     String
+  entityType String  @map("entity_type")
+  entityId   String? @map("entity_id")
+  metadata   Json?
+  ipAddress  String? @map("ip_address")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
 }

@@ -20,6 +20,8 @@ export async function remove(req: Request, res: Response) {
     req.auth!.organizationId,
     req.auth!.role,
     req.body.confirmName,
+    { staffId: req.auth!.staffId, staffEmail: req.auth!.email },
+    req.ip,
   );
   res.status(204).send();
 }

@@ -7,6 +7,7 @@ declare global {
       auth?: {
         staffId: string;
         organizationId: string;
+        email: string;
         role: StaffRole;
         permissions: Permission[];
       };

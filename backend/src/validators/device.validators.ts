@@ -24,3 +24,10 @@ export const updateDeviceStatusSchema = {
     status: z.enum(['ACTIVE', 'BLOCKED']),
   }),
 };
+
+export const registerFcmTokenSchema = {
+  body: z.object({
+    deviceIdentifier: z.string().trim().min(1, 'deviceIdentifier is required.').max(200),
+    fcmToken: z.string().trim().min(1, 'fcmToken is required.').max(4096),
+  }),
+};

@@ -50,6 +50,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   req.auth = {
     staffId: staff.id,
     organizationId: staff.organizationId,
+    email: staff.email,
     role: staff.role,
     permissions: staff.permissions as Permission[],
   };
