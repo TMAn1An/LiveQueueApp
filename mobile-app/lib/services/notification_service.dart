@@ -103,6 +103,24 @@ class NotificationService {
     );
   }
 
+  /// Displays an incoming FCM foreground message (spec 7.18's notification
+  /// types, once the backend actually dispatches them — Phase 7 backend
+  /// scope, not yet implemented). Android/iOS both suppress the automatic
+  /// system notification for a foreground app, so FCM's `onMessage` must
+  /// explicitly show one — this reuses the same plugin instance/channel as
+  /// every other notification here rather than standing up a second
+  /// notification system. Kept generic (title/body only, no payload
+  /// routing) because no backend FCM payload contract exists yet.
+  Future<void> showGenericNotification({required String title, required String body}) async {
+    await _show(
+      channel: _generalChannel,
+      title: title,
+      body: body,
+      soundEnabled: true,
+      vibrationEnabled: true,
+    );
+  }
+
   Future<void> showQueueStatusNotice({required String queueName, required bool paused}) async {
     await _show(
       channel: _generalChannel,
