@@ -1,9 +1,27 @@
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
-import { assertQueueMutable, requireOwnedQueue } from '../utils/tenantScope';
+import { requireOwnedQueue, assertQueueMutable } from '../utils/tenantScope';
 import type { replaceFormFieldsSchema } from '../validators/formField.validators';
 
 type ReplaceFormFieldsInput = z.infer<typeof replaceFormFieldsSchema.body>;
+
+/**
+ * Staff-authenticated read of the queue's *current* form version — added for
+ * Phase 6 (ADR-019): the dashboard's form builder needs to display existing
+ * fields before editing them, and no endpoint previously existed to read
+ * them (only PUT-replace). The public config endpoint already returns
+ * current-version fields, but that's the customer-facing path (no auth,
+ * public/staff data boundary) — this is the staff-facing equivalent, reusing
+ * the same tenant-ownership check as every other nested queue resource.
+ */
+export async function getFormFields(organizationId: string, queueId: string) {
+  const queue = await requireOwnedQueue(organizationId, queueId);
+  const fields = await prisma.queueFormField.findMany({
+    where: { queueId, version: queue.formVersion },
+    orderBy: { sortOrder: 'asc' },
+  });
+  return { formVersion: queue.formVersion, fields };
+}
 
 /**
  * Atomic replace (ADR-009 / approved Phase 2 decision): never mutates or

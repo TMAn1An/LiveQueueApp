@@ -1,0 +1,6 @@
+@import 'tailwindcss';
+
+/* Operational software: speed and clarity over visual effects (spec section 33). */
+body {
+  @apply bg-slate-50 text-slate-900 antialiased;
+}

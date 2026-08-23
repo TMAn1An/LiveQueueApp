@@ -28,7 +28,19 @@ export function validate(schemas: Schemas) {
         req.params = schemas.params.parse(req.params) as typeof req.params;
       }
       if (schemas.query) {
-        req.query = schemas.query.parse(req.query) as typeof req.query;
+        // Express 5 defines req.query as a getter that recomputes a fresh
+        // object from the raw URL on every access — neither a plain
+        // assignment (throws: no setter) nor mutating the object returned by
+        // one access (silently lost: the next access recomputes) sticks.
+        // Redefining the property itself is what actually persists the
+        // parsed/coerced/defaulted result for downstream handlers.
+        const parsedQuery = schemas.query.parse(req.query);
+        Object.defineProperty(req, 'query', {
+          value: parsedQuery,
+          writable: true,
+          configurable: true,
+          enumerable: true,
+        });
       }
       next();
     } catch (err) {

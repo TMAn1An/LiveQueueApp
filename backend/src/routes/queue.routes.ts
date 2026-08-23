@@ -77,6 +77,14 @@ router.post(
   counterController.create,
 );
 
+// Any authenticated staff member may read (Phase 2 decision 1 convention);
+// only the replace mutation requires manage_queues.
+router.get(
+  '/:queueId/form-fields',
+  authenticate,
+  validate(queueIdOnlySchema),
+  formFieldController.list,
+);
 router.put(
   '/:queueId/form-fields',
   authenticate,

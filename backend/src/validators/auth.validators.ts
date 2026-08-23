@@ -1,13 +1,13 @@
 import { z } from 'zod';
 
 const PASSWORD_MIN_LENGTH = 8;
-const passwordSchema = z
+export const passwordSchema = z
   .string()
   .min(PASSWORD_MIN_LENGTH, `Password must be at least ${PASSWORD_MIN_LENGTH} characters.`)
   .regex(/[A-Za-z]/, 'Password must contain at least one letter.')
   .regex(/[0-9]/, 'Password must contain at least one number.');
 
-const emailSchema = z.string().trim().toLowerCase().email('A valid email is required.');
+export const emailSchema = z.string().trim().toLowerCase().email('A valid email is required.');
 
 export const registerSchema = {
   body: z.object({

@@ -228,6 +228,68 @@ describe('Dynamic form replace', () => {
   });
 });
 
+describe('GET /api/queues/:queueId/form-fields (Phase 6 addition)', () => {
+  it('returns an empty current version for a fresh queue', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+
+    const res = await api()
+      .get(`/api/queues/${queue.id}/form-fields`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.formVersion).toBe(1);
+    expect(res.body.data.fields).toHaveLength(0);
+  });
+
+  it('returns only the current version after a replace', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+
+    await api()
+      .put(`/api/queues/${queue.id}/form-fields`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ fields: [{ key: 'email', label: 'Email', type: 'email' }] });
+    await api()
+      .put(`/api/queues/${queue.id}/form-fields`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ fields: [{ key: 'phone', label: 'Phone', type: 'phone' }] });
+
+    const res = await api()
+      .get(`/api/queues/${queue.id}/form-fields`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.formVersion).toBe(3);
+    expect(res.body.data.fields).toHaveLength(1);
+    expect(res.body.data.fields[0].key).toBe('phone');
+  });
+
+  it('any authenticated staff member may read (no manage_queues required)', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+
+    const res = await api()
+      .get(`/api/queues/${queue.id}/form-fields`)
+      .set('Authorization', `Bearer ${restricted.accessToken}`);
+
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects reading another organization's queue form fields", async () => {
+    const orgA = await registerOwner({ organizationName: 'Org A' });
+    const orgB = await registerOwner({ organizationName: 'Org B' });
+    const queueA = await createQueue(orgA.accessToken);
+
+    const res = await api()
+      .get(`/api/queues/${queueA.id}/form-fields`)
+      .set('Authorization', `Bearer ${orgB.accessToken}`);
+
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('Dynamic form permissions', () => {
   it('blocks form replacement without manage_queues', async () => {
     const ctx = await registerOwner();

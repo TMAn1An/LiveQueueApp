@@ -1,6 +1,6 @@
 # LiveQueue — Progress
 
-## Current Phase: Phase 5 (Mobile) — Complete and verified
+## Current Phase: Phase 6 (Dashboard) — Implemented, security-reviewed, blockers fixed; pending final commit approval
 
 ## Status
 
@@ -11,7 +11,7 @@
 | Phase 3: Token Engine | **Done** — Device/Token models, token creation with atomic sequencing and idempotency, state machine, call/start/complete/skip/next, position/estimated wait, public queue config, tested against a real PostgreSQL database |
 | Phase 4: Real Time | **Done** — Socket.io with JWT-verified organization rooms, public queue/token rooms, all 12 spec events, targeted position_changed broadcasting, tested against a real PostgreSQL database and real socket.io-client connections |
 | Phase 5: Mobile | **Done** — Flutter customer app: QR scan, queue details, dynamic form, token creation, live tracking, notification preferences, history. No backend changes — pure consumer of the Phase 1-4 API. |
-| Phase 6: Dashboard | Not started |
+| Phase 6: Dashboard | **Implemented, not yet committed** — React staff dashboard covering every spec §9-§13 page except Audit Logs (explicitly deferred to Phase 7 — see below). Backend gained 6 new resource areas (organization, staff, blocked devices, dashboard stats/live table, reports/CSV export, one form-fields read endpoint), no schema migration. |
 | Phase 7: Production Hardening | Not started |
 
 ## What Exists
@@ -19,7 +19,7 @@
 - `CLAUDE.md`, `docs/LiveQueue_AI_Ready_Specification.md`, `docs/IMPLEMENTATION_PLAN.md`, `docs/ARCHITECTURE_DECISIONS.md`
 - `backend/` — Express + TypeScript + Prisma + PostgreSQL project, fully scaffolded and building
 - `mobile-app/` — Flutter customer app, fully scaffolded and building (Android verified via `flutter build apk --debug`)
-- `web-dashboard/` — still empty (Phase 6)
+- `web-dashboard/` — React + TypeScript + Vite dashboard, fully scaffolded and building (`npm run build` succeeds; verified against a real running backend via curl-simulated browser requests, including CORS preflight)
 
 ## What Is Implemented (Phase 1)
 
@@ -130,6 +130,45 @@ Flutter customer app in `mobile-app/`, exactly the folder layout the spec and `I
 - **The customer-safe token view has no queue/service *names*, only ids** (`toCustomerView` in `backend/src/services/token.service.ts`, unchanged — Phase 3 approved decision 8 deliberately keeps this minimal). Worked around, not fixed: `HistoryEntry` denormalizes the queue/service names the app already has in hand from the just-fetched `QueueConfig` at the moment of joining, rather than requesting a backend change.
 - Phase 3's public-REST rate-limiting gap (already recorded in Phase 4's section above) remains unaddressed — still out of scope here too.
 
+## What Is Implemented (Phase 6)
+
+**Scope note:** the spec's own phase breakdown (§31) lists "Audit logs" under both Phase 6 and Phase 7, while `IMPLEMENTATION_PLAN.md`'s Phase 6 task list names an `AuditLogs` page but never creates the `AuditLog` model or write-on-action logic (that's explicitly its Phase 7 task) — a genuine two-document conflict. Surfaced before implementation; the user chose to **defer Audit Logs (page and backend) entirely to Phase 7**. Every other Phase 6 page and feature was implemented.
+
+**Backend additions** (`backend/src/{services,controllers,routes,validators}/`) — all additive, **zero Prisma migration** (confirmed via `prisma migrate status` before and after):
+
+- **Organization management**: `GET/PUT/DELETE /api/organizations/me` (singular — always the authenticated staff's own org). Edit/delete require `role === 'OWNER'` (spec 7.1), on top of `manage_organization`. Delete re-verifies the typed-name confirmation server-side, not just via the frontend dialog. Only `name` is editable — the schema has no organization-level terminology/default-queue-settings fields (those exist per-queue since Phase 2); not invented here, recorded in ADR-019.
+- **Staff management**: the exact five endpoints spec 7.3 names. Reads open to any staff (Phase 2 convention); mutations require `manage_staff`. Cannot create a second `OWNER`; cannot delete the `OWNER` (`403 CANNOT_DELETE_OWNER`) or modify the `OWNER` via `PUT` (`403 CANNOT_MODIFY_OWNER`, spec 7.3's explicit rule, both endpoints). Granting a permission via `POST`/`PUT` is capped by the acting staff member's own permission set (`403 PERMISSION_ESCALATION_DENIED` otherwise). Both protections were gaps found and closed in the Phase 6 pre-commit review — see ADR-019.
+- **Blocked devices**: `GET /api/devices` (paginated, status filter) + `PATCH /api/devices/:deviceId/status`, gated by `manage_blocked_devices`. Deliberately global, not tenant-scoped (`Device` has no `organizationId`, ADR-011) — a known, inherited tradeoff now visible in a UI for the first time, not a new defect.
+- **Dashboard**: `GET /api/dashboard/stats` (spec §10's nine cards) and `GET /api/dashboard/tokens` (the live queue table, reusing `token.service.ts`'s existing position-calculation function rather than re-deriving it).
+- **Reports**: `GET /api/reports` (`view_reports`) and `GET /api/reports/export` (`export_reports`, CSV — a distinct permission from viewing). Five date-range presets (spec §13). Counter utilization is an explicitly-labeled approximation (share of tokens served, not wall-clock active time — the schema tracks no such history).
+- **Form field read** (new): `GET /api/queues/:queueId/form-fields` — Phase 2 only ever built the atomic-replace `PUT`; there was no staff-authenticated way to read a queue's current fields before this, needed for the dashboard's form builder. Added per CLAUDE.md Rule 7 ("add a new endpoint only when necessary... document it").
+
+**A real pre-existing bug found and fixed**: `middleware/validate.ts`'s query-parameter validation (`req.query = schemas.query.parse(...)`) silently failed under Express 5, which made `req.query` a getter-only accessor — no Phase 1-5 route validated query parameters, so this was never exercised until Phase 6's `page`/`pageSize`/`status`/`range` params hit it (surfaced as `PrismaClientValidationError: Argument skip is missing` on `GET /api/staff`/`/api/reports`/`/api/devices`). Fixed via `Object.defineProperty` instead of direct assignment — see ADR-019 for the full diagnosis.
+
+**69 new backend tests** across 5 new test files (`organization.test.ts`, `staff.test.ts`, `device.blockedManagement.test.ts`, `dashboard.test.ts`, `report.test.ts`) plus 4 added to `formField.test.ts` for the new GET endpoint, plus 13 added to `staff.test.ts` in the pre-commit-review fix pass (see below) — covering authentication, permissions (including the `view_reports`/`export_reports` split), tenant isolation (including the deliberately-global device-list exception), validation, the owner-protection and permission-escalation business rules, and pagination. Backend test count: **203 → 275**, all passing against a real PostgreSQL database. Verified: `npm run typecheck` and `npm run lint` both clean.
+
+**Two BLOCKER-severity defects found in a dedicated Phase 6 pre-commit security review, both fixed and regression-tested before commit:**
+
+- **Permission self-escalation.** `staff.service.ts`'s `createStaff`/`updateStaff` never checked the requested `permissions` array against the *acting* staff member's own permissions — a staff member holding only `manage_staff` could grant themselves, or a new account, any permission including `manage_organization` (live-reproduced: a `['manage_staff']`-only caller self-escalated to four permissions via one `PUT` call). Fixed with `assertGrantablePermissions()`: every requested permission must already be held by the caller, or `403 PERMISSION_ESCALATION_DENIED`.
+- **Missing owner protection on update.** `deleteStaff` already blocked deleting the `OWNER`; `updateStaff` had no equivalent, so ordinary staff with `manage_staff` could suspend, demote, or permission-strip the owner (all live-reproduced). Fixed with `assertNotOwner()`, mirroring `deleteStaff`'s guard: any `PUT` targeting an `OWNER` record is rejected with `403 CANNOT_MODIFY_OWNER` in full (not just specific fields).
+
+Both fixes live in the service layer (backend-authoritative, per CLAUDE.md section 3), covered by 13 new regression tests, and verified via mutation testing — each guard (and the controller's permission-forwarding, and the tenant-scoping order) was temporarily removed and the relevant tests confirmed to fail, not just pass against the fixed code. Full details in ADR-019.
+
+**Frontend** (`web-dashboard/`, new project — React 19 + TypeScript + Vite + React Router 7 + TanStack Query 5 + Tailwind CSS 4 + `socket.io-client`, exactly spec §6's stack): folder layout matches `IMPLEMENTATION_PLAN.md`'s Phase 6 list. All pages implemented except Audit Logs: Login, Register, Dashboard (stats + live queue table with permission-gated Call/Start/Complete/Skip actions, state-gated per the backend's token state machine), Queues (list/create/pause/resume/archive with search+status filter), Queue Details (edit, services CRUD, dynamic form builder, QR code display/download/print), Counters (per-queue, per `IMPLEMENTATION_PLAN.md`'s separate page listing), Staff (list/create/edit/suspend/delete), Blocked Devices (list/block/unblock, with an in-UI note about the global-not-per-org tradeoff), Reports (date-range filters, CSV export, queue performance/counter utilization/peak-hours breakdowns), Organization Settings (owner-only edit, double-confirmation typed-name deletion), Profile (read-only — no self-service edit endpoint exists, see ADR-019).
+
+Real-time: one socket connection per session (`hooks/useOrganizationSocket.ts`), joining `organization:{id}` on every connect including reconnects (no server-side cross-disconnect memory, ADR-017 decision 7), invalidating the specific TanStack Query keys each of the 12 events affects rather than a blanket refetch.
+
+**47 frontend tests** (Vitest + React Testing Library) covering the highest-risk logic: the API client's 401-refresh-and-retry-once mechanism (7 tests), `AuthContext`'s session-restore/login/logout flows including the localStorage refresh-token handling (6 tests), the socket hook's connect/reconnect-rejoin/event-to-query-invalidation mapping (7 tests), `TokenActions`' state-gated button visibility mirroring the backend's centralized state machine (7 tests), `PermissionGate`, `StatusBadge`, `ProtectedRoute`, `LoginPage`, and pure utility functions. `npx tsc -b`: 0 errors. `oxlint`: 0 errors (2 pre-existing informational warnings on `AuthContext.tsx`, both accepted as correct for a context-provider-plus-hook module and a legitimate session-restore effect). `npm run build`: succeeds (389 KB / 117 KB gzipped bundle).
+
+**Verification method — explicitly not a full visual browser check**: this session has no browser-automation tool available. Verified instead via: `npm run build` producing a working production bundle; the dev server (`npm run dev`) booting and serving `200`; and a real integration smoke test — the backend dev server was started for real, and every new Phase 6 endpoint (register, dashboard stats, queue creation, the new form-fields GET, staff list, organization GET, reports) was exercised through actual HTTP calls with a `Origin: http://localhost:5173` header (the dashboard's dev origin), confirming both correct responses and correct CORS preflight headers. No page was rendered in an actual browser and visually inspected — flagged per CLAUDE.md section on UI verification rather than silently claimed.
+
+**Discovered, recorded, NOT fixed (outside Phase 6's scope):**
+
+- Organization-level customer-terminology/default-queue-settings fields spec 7.1 mentions but the schema doesn't have (queue-level equivalents already exist).
+- Counter utilization's approximation (no wall-clock active-time tracking exists to compute a truer metric).
+- Blocked devices' global (not per-org) scope, inherited from Phase 3's `Device` design.
+- Phase 3's public-REST rate-limiting gap (already recorded in Phase 4/5's sections) remains unaddressed.
+
 ## Known, Documented Deviations
 
 - Prisma pinned to `6.12.0` rather than the `7.x` default `npm install` resolves to — see ADR-014.
@@ -138,7 +177,9 @@ Flutter customer app in `mobile-app/`, exactly the folder layout the spec and `I
 - Mobile: `kotlin.incremental=false` in `mobile-app/android/gradle.properties` is a machine-specific build-speed workaround (see Phase 5 section above), not a functional change.
 - Mobile: iOS build has not been verified — no macOS/Xcode available in this environment. Android is verified via a real `flutter build apk --debug`. The app is pure cross-platform Flutter/Dart with no platform-specific logic beyond the standard `flutter create --platforms ios` scaffold plus the added `NSCameraUsageDescription`.
 - Mobile: FCM (background push) is scaffolded (`services/fcm_service.dart`) but not functional — no Firebase project is configured, and real delivery also needs a backend device-token-storage endpoint and dispatch job that is Phase 7 scope, not Phase 5. `flutter_local_notifications` covers all notification types while the app has a live connection; see the Phase 5 section above for the full explanation.
+- Dashboard: no browser-automation tool is available in this environment, so Phase 6's UI was verified via production build success, dev-server boot, automated component/unit tests, and real HTTP/CORS integration calls against a live backend — not by rendering pages in an actual browser and visually inspecting them. See the Phase 6 section above.
+- Dashboard: Blocked Devices is global, not per-organization, inherited from Phase 3's `Device` design (ADR-011) — see ADR-019.
 
 ## Last Action
 
-Phase 5 (Mobile) implemented, reviewed, and closed out: a full Flutter customer app in `mobile-app/` covering the entire spec section 4.3 join flow plus live tracking, notification preferences, and history — with zero backend changes, consuming only endpoints Phases 1-4 already built and tested. A dedicated final pre-commit review found and blocked on two real defects (idempotency key not stable across retries; corrupted local storage could crash the app) — both fixed and regression-tested (20 new tests) before commit. Verified with `flutter analyze` (0 errors/warnings), `flutter test` (103/103 passing), and a real `flutter build apk --debug`, re-run after the fixes. iOS build not verified (no macOS/Xcode in this environment). Committed; awaiting approval to begin Phase 6 (Dashboard).
+Phase 6 (Dashboard) implemented and security-reviewed, not yet committed: a React staff dashboard in `web-dashboard/` covering every spec §9-§13 page except Audit Logs (deferred to Phase 7 after a genuine spec/plan document conflict was surfaced and the user chose deferral). Backend gained six new resource areas (organization, staff, blocked devices, dashboard stats/live queue table, reports/CSV export, and one new form-fields read endpoint) — all additive, zero Prisma migration. Also fixed a real, previously-latent bug in shared query-parameter validation middleware (Express 5's `req.query` getter-only accessor), which no Phase 1-5 route had ever exercised. A dedicated pre-commit security review found and blocked on two BLOCKER-severity defects in staff management (permission self-escalation via `manage_staff`; missing owner-protection on `PUT /api/staff/:staffId`) — both fixed, regression-tested (13 new tests), and the fixes themselves verified via mutation testing before a second, focused review confirmed the fixes. Backend tests: 203 → 275, all passing; typecheck and lint clean. Frontend: 47 tests (unaffected by the backend-only fix), `tsc -b` clean, `oxlint` clean, production build succeeds; verified against a real running backend via HTTP/CORS integration calls, though not visually in an actual browser (no browser-automation tool available this session — flagged explicitly, not silently skipped). Not committed or pushed. Awaiting final commit approval.

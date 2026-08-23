@@ -6,6 +6,10 @@ import counterRoutes from './counter.routes';
 import tokenRoutes from './token.routes';
 import deviceRoutes from './device.routes';
 import publicRoutes from './public.routes';
+import organizationRoutes from './organization.routes';
+import staffRoutes from './staff.routes';
+import dashboardRoutes from './dashboard.routes';
+import reportRoutes from './report.routes';
 
 const router = Router();
 
@@ -16,5 +20,9 @@ router.use('/counters', counterRoutes);
 router.use('/tokens', tokenRoutes);
 router.use('/devices', deviceRoutes);
 router.use('/public', publicRoutes);
+router.use('/organizations', organizationRoutes);
+router.use('/staff', staffRoutes);
+router.use('/dashboard', dashboardRoutes);
+router.use('/reports', reportRoutes);
 
 export default router;
