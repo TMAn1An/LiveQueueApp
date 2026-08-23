@@ -1,6 +1,6 @@
 # LiveQueue — Progress
 
-## Current Phase: Phase 6 (Dashboard) — Implemented, security-reviewed, blockers fixed; pending final commit approval
+## Current Phase: Phase 6 (Dashboard) — Committed as f5b9bb1; pending push/synchronization with origin/master
 
 ## Status
 
@@ -11,7 +11,7 @@
 | Phase 3: Token Engine | **Done** — Device/Token models, token creation with atomic sequencing and idempotency, state machine, call/start/complete/skip/next, position/estimated wait, public queue config, tested against a real PostgreSQL database |
 | Phase 4: Real Time | **Done** — Socket.io with JWT-verified organization rooms, public queue/token rooms, all 12 spec events, targeted position_changed broadcasting, tested against a real PostgreSQL database and real socket.io-client connections |
 | Phase 5: Mobile | **Done** — Flutter customer app: QR scan, queue details, dynamic form, token creation, live tracking, notification preferences, history. No backend changes — pure consumer of the Phase 1-4 API. |
-| Phase 6: Dashboard | **Implemented, not yet committed** — React staff dashboard covering every spec §9-§13 page except Audit Logs (explicitly deferred to Phase 7 — see below). Backend gained 6 new resource areas (organization, staff, blocked devices, dashboard stats/live table, reports/CSV export, one form-fields read endpoint), no schema migration. |
+| Phase 6: Dashboard | **Committed as `f5b9bb1`, pending push/synchronization with origin/master** — React staff dashboard covering every spec §9-§13 page except Audit Logs (explicitly deferred to Phase 7 — see below). Backend gained 6 new resource areas (organization, staff, blocked devices, dashboard stats/live table, reports/CSV export, one form-fields read endpoint), no schema migration. |
 | Phase 7: Production Hardening | Not started |
 
 ## What Exists

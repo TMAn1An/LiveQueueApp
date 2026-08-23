@@ -297,7 +297,7 @@ Both were found in a dedicated, read-only pre-commit review (not caught by the o
 
 ## ADR-019: Phase 6 web dashboard design (implemented, pre-commit review complete)
 
-**Status:** Implemented, security-reviewed, and blocker findings fixed and regression-tested; not yet committed.
+**Status:** Implemented, security-reviewed, and blocker findings fixed and regression-tested. Committed as `f5b9bb1`; pending push/synchronization with origin/master.
 
 **Scope-conflict resolution (approved user decision before implementation began):** the specification's own §31 phase breakdown lists "Audit logs" under *both* "Phase 6: Dashboard" (item 7) and "Phase 7: Production Hardening" (item 4) — a genuine self-contradiction, compounded by `IMPLEMENTATION_PLAN.md`'s Phase 6 page list naming an `AuditLogs` page while its task checklist never creates the backing `AuditLog` model or any write-on-action logic (that model/logging is explicitly `IMPLEMENTATION_PLAN.md`'s Phase 7 task: "Add `AuditLog` model and write to it on all tracked actions"). Rather than guess, this was surfaced and the user chose: **defer the Audit Logs page and all backing infrastructure entirely to Phase 7.** Every other Phase 6 page/feature from spec §9-§13 and §31 was implemented.
 
