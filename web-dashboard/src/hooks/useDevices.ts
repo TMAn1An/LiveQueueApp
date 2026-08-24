@@ -9,11 +9,18 @@ export function useDevices(page: number, pageSize: number, status?: DeviceStatus
   });
 }
 
-export function useSetDeviceStatus() {
+export function useBlockDevice() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ deviceId, status }: { deviceId: string; status: DeviceStatus }) =>
-      deviceApi.setDeviceStatus(deviceId, status),
+    mutationFn: (deviceId: string) => deviceApi.blockDevice(deviceId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['devices'] }),
+  });
+}
+
+export function useUnblockDevice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (deviceId: string) => deviceApi.unblockDevice(deviceId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['devices'] }),
   });
 }

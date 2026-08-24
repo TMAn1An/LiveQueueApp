@@ -24,19 +24,30 @@ export async function list(req: Request, res: Response) {
     pageSize: number;
     status?: 'ACTIVE' | 'BLOCKED';
   };
-  const result = await deviceService.listDevices(page, pageSize, status);
+  const result = await deviceService.listDevices(req.auth!.organizationId, page, pageSize, status);
   res.status(200).json({ success: true, data: result.data, pagination: result.pagination });
 }
 
-export async function updateStatus(req: Request, res: Response) {
-  const device = await deviceService.setDeviceStatus(
-    req.params.deviceId as string,
-    req.body.status,
-  );
+export async function block(req: Request, res: Response) {
+  const device = await deviceService.blockDevice(req.auth!.organizationId, req.params.deviceId as string);
   res.status(200).json({ success: true, data: device });
-  // Device is a deliberately global identity (ADR-011) — organizationId on
-  // this audit row is the acting staff member's organization, not the
-  // device's (it has none), per the approved Step 4 design decision.
+  // organizationId on this audit row is the acting staff member's
+  // organization — the block relationship this row records IS scoped to
+  // that organization (OrganizationDeviceBlock), unlike Device itself, which
+  // remains a deliberately global identity (ADR-011).
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'blocked_device_changed',
+    entityType: 'device',
+    entityId: device.id,
+    metadata: { newStatus: device.status, deviceIdentifier: device.deviceIdentifier },
+    ipAddress: req.ip,
+  });
+}
+
+export async function unblock(req: Request, res: Response) {
+  const device = await deviceService.unblockDevice(req.auth!.organizationId, req.params.deviceId as string);
+  res.status(200).json({ success: true, data: device });
   await auditService.recordAuditEventSafely({
     actor: auditService.actorFromAuth(req.auth!),
     action: 'blocked_device_changed',

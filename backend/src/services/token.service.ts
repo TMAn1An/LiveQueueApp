@@ -164,7 +164,14 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   }
 
   const device = await registerDevice(input.deviceIdentifier);
-  if (device.status === 'BLOCKED') {
+  // OrganizationDeviceBlock, not device.status, is authoritative — a device
+  // can be blocked by one organization without affecting any other
+  // (organizationId here comes from the already-resolved queue, never from
+  // the customer request).
+  const block = await prisma.organizationDeviceBlock.findUnique({
+    where: { organizationId_deviceId: { organizationId: queue.organizationId, deviceId: device.id } },
+  });
+  if (block) {
     throw new AppError(403, 'DEVICE_BLOCKED', 'This device has been blocked.');
   }
 

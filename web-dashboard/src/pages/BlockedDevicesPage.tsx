@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useDevices, useSetDeviceStatus } from '../hooks/useDevices';
+import { useDevices, useBlockDevice, useUnblockDevice } from '../hooks/useDevices';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
@@ -12,15 +12,15 @@ export function BlockedDevicesPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | undefined>(undefined);
   const { data: result, isLoading } = useDevices(page, 20, statusFilter);
-  const setDeviceStatus = useSetDeviceStatus();
+  const blockDevice = useBlockDevice();
+  const unblockDevice = useUnblockDevice();
 
   return (
     <div>
       <h1 className="mb-2 text-xl font-semibold text-slate-900">Blocked Devices</h1>
       <p className="mb-4 max-w-2xl text-sm text-slate-500">
-        Devices are a platform-wide identifier, not tied to a single organization (a customer's phone
-        may be used to join queues at more than one business) — this list and blocking action apply
-        globally, not only to devices that have used your queues.
+        Devices that have joined one of your queues. Blocking a device only affects your organization
+        — it can still be used to join queues at other businesses.
       </p>
 
       <div className="mb-4 flex gap-2">
@@ -65,10 +65,9 @@ export function BlockedDevicesPage() {
                     <Button
                       variant={device.status === 'ACTIVE' ? 'danger' : 'secondary'}
                       onClick={() =>
-                        setDeviceStatus.mutate({
-                          deviceId: device.id,
-                          status: device.status === 'ACTIVE' ? 'BLOCKED' : 'ACTIVE',
-                        })
+                        device.status === 'ACTIVE'
+                          ? blockDevice.mutate(device.id)
+                          : unblockDevice.mutate(device.id)
                       }
                     >
                       {device.status === 'ACTIVE' ? 'Block' : 'Unblock'}

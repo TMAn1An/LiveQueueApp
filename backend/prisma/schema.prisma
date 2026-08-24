@@ -75,9 +75,10 @@ model Organization {
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")
 
-  staff  Staff[]
-  queues Queue[]
-  tokens Token[]
+  staff        Staff[]
+  queues       Queue[]
+  tokens       Token[]
+  deviceBlocks OrganizationDeviceBlock[]
 
   @@map("organizations")
 }
@@ -246,8 +247,30 @@ model Device {
   tokens                  Token[]
   fcmToken                DeviceFcmToken?
   notificationPreferences NotificationPreference[]
+  organizationBlocks      OrganizationDeviceBlock[]
 
   @@map("devices")
+}
+
+/// Organization-scoped block relationship — the authoritative source for
+/// device blocking (see token.service.ts::createToken). Device remains a
+/// deliberately global identity (see comment above); this join table is what
+/// lets Organization A block a device without affecting Organization B/C,
+/// via the compound unique key. Device.status/DeviceStatus.BLOCKED are
+/// intentionally left in place, unused for authorization — removing them and
+/// backfilling historical blocks into this table are separate, deferred,
+/// reviewed operations, not part of this change.
+model OrganizationDeviceBlock {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deviceId       String       @map("device_id")
+  device         Device       @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([organizationId, deviceId])
+  @@map("organization_device_blocks")
 }
 
 /// sequenceNumber is the atomically-allocated integer (ADR-003); serialNumber
@@ -341,10 +364,10 @@ model NotificationPreference {
 
   /// Spec 7.18: customer-configurable, minimum 2 minutes — enforced by Zod
   /// at the registration endpoint, not just documented here.
-  reminderMinutes       Int     @map("reminder_minutes")
-  vibrationEnabled      Boolean @default(true) @map("vibration_enabled")
-  soundEnabled          Boolean @default(true) @map("sound_enabled")
-  notificationsEnabled  Boolean @default(true) @map("notifications_enabled")
+  reminderMinutes      Int     @map("reminder_minutes")
+  vibrationEnabled     Boolean @default(true) @map("vibration_enabled")
+  soundEnabled         Boolean @default(true) @map("sound_enabled")
+  notificationsEnabled Boolean @default(true) @map("notifications_enabled")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

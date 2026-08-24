@@ -5,6 +5,10 @@ export function listDevices(page = 1, pageSize = 20, status?: DeviceStatus) {
   return apiFetch<Device[]>('/api/devices', { query: { page, pageSize, status } });
 }
 
-export function setDeviceStatus(deviceId: string, status: DeviceStatus) {
-  return apiFetch<Device>(`/api/devices/${deviceId}/status`, { method: 'PATCH', body: { status } });
+export function blockDevice(deviceId: string) {
+  return apiFetch<Device>(`/api/devices/${deviceId}/block`, { method: 'POST' });
+}
+
+export function unblockDevice(deviceId: string) {
+  return apiFetch<Device>(`/api/devices/${deviceId}/block`, { method: 'DELETE' });
 }

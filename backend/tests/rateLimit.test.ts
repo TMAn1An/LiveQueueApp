@@ -161,15 +161,14 @@ describe('rate limiting (Phase 7)', () => {
 
   describe('sensitive rate limiter (staff/organization/device mutations)', () => {
     it('still requires authentication under the limit — rate limiting never substitutes for it', async () => {
-      const res = await api().patch(`/api/devices/${randomUUID()}/status`).send({ status: 'BLOCKED' });
+      const res = await api().post(`/api/devices/${randomUUID()}/block`);
       expect(res.status).toBe(401);
     });
 
     it('allows a genuine authenticated mutation under the limit', async () => {
       const res = await api()
-        .patch(`/api/devices/${blockableDeviceId}/status`)
-        .set(authHeader(owner.accessToken))
-        .send({ status: 'BLOCKED' });
+        .post(`/api/devices/${blockableDeviceId}/block`)
+        .set(authHeader(owner.accessToken));
 
       expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('BLOCKED');
@@ -178,7 +177,7 @@ describe('rate limiting (Phase 7)', () => {
     it('returns 429 once the limit is exceeded', async () => {
       let last;
       for (let i = 0; i < 3; i++) {
-        last = await api().patch(`/api/devices/${randomUUID()}/status`).send({ status: 'BLOCKED' });
+        last = await api().post(`/api/devices/${randomUUID()}/block`);
       }
       expect(last!.status).toBe(429);
     });

@@ -5,10 +5,10 @@ import { publicRateLimiter, sensitiveRateLimiter } from '../middleware/rateLimit
 import { requirePermission } from '../middleware/requirePermission';
 import { validate } from '../middleware/validate';
 import {
+  deviceBlockActionSchema,
   listDevicesSchema,
   registerDeviceSchema,
   registerFcmTokenSchema,
-  updateDeviceStatusSchema,
 } from '../validators/device.validators';
 
 const router = Router();
@@ -24,10 +24,12 @@ router.post(
   deviceController.registerFcmToken,
 );
 
-// Staff-only, global (not tenant-scoped — see ADR-019: Device has no
-// organizationId by design, ADR-011/ADR-016 decision 6). GET (list) is not
-// rate-limited — it's a read, and manage_blocked_devices already restricts
-// it to staff who need it; PATCH (status change) is a sensitive mutation.
+// Staff-only. Device identity itself is global (ADR-011/ADR-016 decision 6),
+// but blocking is organization-scoped (OrganizationDeviceBlock) — an
+// organization only ever sees and manages its own block relationships,
+// never another organization's. GET (list) is not rate-limited — it's a
+// read, and manage_blocked_devices already restricts it to staff who need
+// it; block/unblock are sensitive mutations.
 router.get(
   '/',
   authenticate,
@@ -35,13 +37,21 @@ router.get(
   validate(listDevicesSchema),
   deviceController.list,
 );
-router.patch(
-  '/:deviceId/status',
+router.post(
+  '/:deviceId/block',
   sensitiveRateLimiter,
   authenticate,
   requirePermission('manage_blocked_devices'),
-  validate(updateDeviceStatusSchema),
-  deviceController.updateStatus,
+  validate(deviceBlockActionSchema),
+  deviceController.block,
+);
+router.delete(
+  '/:deviceId/block',
+  sensitiveRateLimiter,
+  authenticate,
+  requirePermission('manage_blocked_devices'),
+  validate(deviceBlockActionSchema),
+  deviceController.unblock,
 );
 
 export default router;

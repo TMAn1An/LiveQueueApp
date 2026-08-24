@@ -365,9 +365,8 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
       .send({ deviceIdentifier: `audit-wiring-device-${Date.now()}` });
 
     const res = await api()
-      .patch(`/api/devices/${deviceRes.body.data.id}/status`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ status: 'BLOCKED' });
+      .post(`/api/devices/${deviceRes.body.data.id}/block`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
     expect(res.status).toBe(200);
 
     const rows = await waitForAuditLogs({

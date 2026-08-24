@@ -18,11 +18,8 @@ export const listDevicesSchema = {
   }),
 };
 
-export const updateDeviceStatusSchema = {
+export const deviceBlockActionSchema = {
   params: deviceIdParams,
-  body: z.object({
-    status: z.enum(['ACTIVE', 'BLOCKED']),
-  }),
 };
 
 export const registerFcmTokenSchema = {

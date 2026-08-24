@@ -131,7 +131,12 @@ describe('Token creation', () => {
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
     const deviceIdentifier = `blocked-device-${Math.random().toString(36).slice(2, 10)}`;
-    await prisma.device.create({ data: { deviceIdentifier, status: 'BLOCKED' } });
+    const device = await prisma.device.create({ data: { deviceIdentifier } });
+    // Blocking is organization-scoped (OrganizationDeviceBlock) — the raw
+    // Device.status column is no longer authoritative for token creation.
+    await prisma.organizationDeviceBlock.create({
+      data: { organizationId: ctx.organizationId, deviceId: device.id },
+    });
 
     const res = await createTokenRequest({ queueId: queue.id, serviceId: service.id, deviceIdentifier });
 
