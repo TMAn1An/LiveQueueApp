@@ -254,6 +254,35 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
       expect(rows[0]?.metadata).toEqual({ previousStatus: 'WAITING' });
     });
 
+    it('recalling a skipped token creates exactly one token_recalled audit event', async () => {
+      const { ctx, counter, token } = await setupWaitingToken();
+
+      await api()
+        .post(`/api/tokens/${token.id}/skip`)
+        .set('Authorization', `Bearer ${ctx.accessToken}`);
+      const res = await api()
+        .post(`/api/tokens/${token.id}/recall`)
+        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .send({ counterId: counter.id });
+      expect(res.status).toBe(200);
+      expect(res.body.data.status).toBe('CALLED');
+
+      const rows = await waitForAuditLogs({
+        organizationId: ctx.organizationId,
+        action: 'token_recalled',
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.entityId).toBe(token.id);
+
+      // Recall is audited distinctly from an ordinary call — this token was
+      // skipped directly from WAITING (no prior call), so recall must not
+      // also produce a token_called row.
+      const calledCount = await prisma.auditLog.count({
+        where: { organizationId: ctx.organizationId, entityId: token.id, action: 'token_called' },
+      });
+      expect(calledCount).toBe(0);
+    });
+
     it('completing a token creates exactly one token_completed audit event', async () => {
       const { ctx, counter, token } = await setupWaitingToken();
 

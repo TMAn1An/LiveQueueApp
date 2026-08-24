@@ -3,7 +3,14 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TokenActions } from './TokenActions';
 import { useCounters } from '../hooks/useCounters';
-import { useCallToken, useCompleteToken, useSkipToken, useStartToken } from '../hooks/useTokenActions';
+import {
+  useCallToken,
+  useCompleteToken,
+  useRecallToken,
+  useSkipToken,
+  useStartToken,
+} from '../hooks/useTokenActions';
+import { ApiError } from '../api/client';
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({ hasPermission: () => true }),
@@ -15,6 +22,7 @@ const callMutate = vi.fn();
 const startMutate = vi.fn();
 const completeMutate = vi.fn();
 const skipMutate = vi.fn();
+const recallMutate = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -26,8 +34,13 @@ beforeEach(() => {
   } as unknown as ReturnType<typeof useCounters>);
   vi.mocked(useCallToken).mockReturnValue({ mutate: callMutate } as unknown as ReturnType<typeof useCallToken>);
   vi.mocked(useStartToken).mockReturnValue({ mutate: startMutate } as unknown as ReturnType<typeof useStartToken>);
-  vi.mocked(useCompleteToken).mockReturnValue({ mutate: completeMutate } as unknown as ReturnType<typeof useCompleteToken>);
+  vi.mocked(useCompleteToken).mockReturnValue({
+    mutate: completeMutate,
+  } as unknown as ReturnType<typeof useCompleteToken>);
   vi.mocked(useSkipToken).mockReturnValue({ mutate: skipMutate } as unknown as ReturnType<typeof useSkipToken>);
+  vi.mocked(useRecallToken).mockReturnValue({
+    mutate: recallMutate,
+  } as unknown as ReturnType<typeof useRecallToken>);
 });
 
 describe('TokenActions — state-gated buttons (mirrors the backend state machine)', () => {
@@ -55,12 +68,20 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
     expect(screen.queryByText('Start')).not.toBeInTheDocument();
   });
 
-  it('COMPLETED and SKIPPED (terminal) show no actions', () => {
-    const { rerender } = render(<TokenActions tokenId="t1" queueId="q1" status="COMPLETED" />);
+  it('COMPLETED (terminal) shows no actions', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="COMPLETED" />);
     expect(screen.queryByText('Call')).not.toBeInTheDocument();
+    expect(screen.queryByText('Start')).not.toBeInTheDocument();
+    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
     expect(screen.queryByText('Skip')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recall')).not.toBeInTheDocument();
+  });
 
-    rerender(<TokenActions tokenId="t1" queueId="q1" status="SKIPPED" />);
+  it('SKIPPED shows Recall, and nothing else', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="SKIPPED" />);
+    expect(screen.getByText('Recall')).toBeInTheDocument();
+    expect(screen.queryByText('Call')).not.toBeInTheDocument();
+    expect(screen.queryByText('Start')).not.toBeInTheDocument();
     expect(screen.queryByText('Complete')).not.toBeInTheDocument();
     expect(screen.queryByText('Skip')).not.toBeInTheDocument();
   });
@@ -93,5 +114,55 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
     await user.click(screen.getByText('Skip'));
 
     expect(skipMutate).toHaveBeenCalledWith('t1');
+  });
+});
+
+describe('TokenActions — Recall', () => {
+  it('clicking Recall reveals a counter picker, and selecting a counter calls recallToken with its id', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="SKIPPED" />);
+
+    await user.click(screen.getByText('Recall'));
+    const select = screen.getByRole('combobox');
+    await user.selectOptions(select, 'c1');
+
+    expect(recallMutate).toHaveBeenCalledWith(
+      { tokenId: 't1', counterId: 'c1' },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
+  });
+
+  it('the Recall counter picker only offers ACTIVE counters, not OFFLINE ones', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="SKIPPED" />);
+
+    await user.click(screen.getByText('Recall'));
+
+    expect(screen.getByRole('option', { name: 'Counter 1' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Counter 2' })).not.toBeInTheDocument();
+  });
+
+  it('shows the backend error message when recall fails, rather than failing silently', async () => {
+    const user = userEvent.setup();
+    recallMutate.mockImplementation((_vars, { onError }: { onError: (e: unknown) => void }) => {
+      onError(new ApiError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is already serving another token.'));
+    });
+    render(<TokenActions tokenId="t1" queueId="q1" status="SKIPPED" />);
+
+    await user.click(screen.getByText('Recall'));
+    await user.selectOptions(screen.getByRole('combobox'), 'c1');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Counter is already serving another token.',
+    );
+  });
+
+  it('does not require a confirmation step before recalling (recall is not destructive)', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="SKIPPED" />);
+
+    await user.click(screen.getByText('Recall'));
+    // The counter picker appears immediately — no "are you sure?" step in between.
+    expect(screen.getByRole('combobox')).toBeInTheDocument();
   });
 });

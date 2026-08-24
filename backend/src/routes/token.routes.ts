@@ -67,5 +67,12 @@ router.post(
   validate(tokenIdOnlySchema),
   tokenController.skip,
 );
+router.post(
+  '/:tokenId/recall',
+  authenticate,
+  requirePermission('operate_tokens'),
+  validate(callTokenSchema),
+  tokenController.recall,
+);
 
 export default router;

@@ -17,6 +17,10 @@ export function skipToken(tokenId: string) {
   return apiFetch<StaffToken>(`/api/tokens/${tokenId}/skip`, { method: 'POST' });
 }
 
+export function recallToken(tokenId: string, counterId: string) {
+  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/recall`, { method: 'POST', body: { counterId } });
+}
+
 export function nextToken(queueId: string, counterId: string) {
   return apiFetch<StaffToken>(`/api/queues/${queueId}/next`, { method: 'POST', body: { counterId } });
 }

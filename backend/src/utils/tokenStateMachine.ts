@@ -11,7 +11,11 @@ const ALLOWED_TRANSITIONS: Record<TokenStatus, TokenStatus[]> = {
   CALLED: ['IN_PROGRESS', 'SKIPPED'],
   IN_PROGRESS: ['COMPLETED', 'SKIPPED'],
   COMPLETED: [],
-  SKIPPED: [],
+  // A deliberate staff Recall (spec: Skipped Token Recall) — the only path
+  // back out of SKIPPED. Goes straight to CALLED, not WAITING: the customer
+  // already earned their position; recall re-announces them rather than
+  // making them wait through the line again (approved design decision).
+  SKIPPED: ['CALLED'],
 };
 
 export function assertValidTransition(current: TokenStatus, next: TokenStatus): void {

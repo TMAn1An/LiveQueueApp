@@ -34,6 +34,7 @@ export async function call(req: Request, res: Response) {
     req.auth!.organizationId,
     req.params.tokenId as string,
     req.body.counterId,
+    'WAITING',
   );
   res.status(200).json({ success: true, data: token });
   await auditService.recordAuditEventSafely({
@@ -94,6 +95,35 @@ export async function skip(req: Request, res: Response) {
   if (previousStatus === 'WAITING') {
     await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
   }
+}
+
+/**
+ * Recall (spec: Skipped Token Recall) — SKIPPED -> CALLED. Reuses callToken
+ * itself (same counter lock/busy-check/compare-and-swap; see its doc
+ * comment) since the mechanics are identical to a normal call; only the
+ * audit action differs, so the trail distinguishes a deliberate recall from
+ * an ordinary first call.
+ */
+export async function recall(req: Request, res: Response) {
+  const token = await tokenService.callToken(
+    req.auth!.organizationId,
+    req.params.tokenId as string,
+    req.body.counterId,
+    'SKIPPED',
+  );
+  res.status(200).json({ success: true, data: token });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'token_recalled',
+    entityType: 'token',
+    entityId: token.id,
+    metadata: { counterId: req.body.counterId },
+    ipAddress: req.ip,
+  });
+  await realtime.emitTokenCalled(token.id);
+  // No broadcastAffectedPositions — recall's source is always SKIPPED,
+  // never WAITING, so no other waiting token's position can be affected
+  // (mirrors skip's own previousStatus === 'WAITING' guard above).
 }
 
 export async function next(req: Request, res: Response) {

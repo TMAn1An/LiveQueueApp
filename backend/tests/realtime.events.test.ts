@@ -185,6 +185,32 @@ describe('All 12 specification events are emitted to the organization room', () 
     expect(envelope.data.status).toBe('CALLED');
   });
 
+  it('token.called (via recall — reuses the same event, no new event type)', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
+    const token = await createToken({ queueId: queue.id, serviceId: service.id });
+    await api()
+      .post(`/api/tokens/${token.id}/call`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ counterId: counter.id });
+    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
+    const eventPromise = waitForEvent<Envelope>(socket, 'token.called');
+
+    await api()
+      .post(`/api/tokens/${token.id}/recall`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ counterId: counter.id });
+
+    const envelope = await eventPromise;
+    expect(envelope.tokenId).toBe(token.id);
+    expect(envelope.data.status).toBe('CALLED');
+  });
+
   it('token.started', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);

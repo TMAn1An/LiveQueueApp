@@ -427,8 +427,29 @@ export async function getTokenStatus(tokenId: string) {
  * update is a conditional (compare-and-swap) UPDATE on status, which is the
  * "lock the token row appropriately" step — Postgres implicitly locks the
  * row for the duration of that UPDATE statement.
+ *
+ * Shared by both /call (WAITING -> CALLED) and /recall (SKIPPED -> CALLED —
+ * see tokenStateMachine.ts) — the mechanics are identical, and reusing this
+ * exact function is what keeps recall safe: a token skipped from
+ * CALLED/IN_PROGRESS keeps its old counterId (skipToken never clears it),
+ * but this function always re-verifies the target counter fresh and
+ * unconditionally overwrites counterId, so a stale prior assignment can
+ * never leak into an invalid double-served-counter state.
+ *
+ * `requireSourceStatus` narrows the otherwise-generic
+ * assertValidTransition(token.status, 'CALLED') check to exactly the source
+ * status the calling endpoint means to represent — WAITING: [CALLED] and
+ * SKIPPED: [CALLED] are both valid *transitions*, but /call and /recall are
+ * deliberately distinct *operations* (different audit action, different
+ * product meaning), so each must reject the other's source state rather
+ * than silently accepting it just because the table permits it generically.
  */
-export async function callToken(organizationId: string, tokenId: string, counterId: string) {
+export async function callToken(
+  organizationId: string,
+  tokenId: string,
+  counterId: string,
+  requireSourceStatus: 'WAITING' | 'SKIPPED',
+) {
   const token = await findTokenScoped(organizationId, tokenId);
   const counter = await findCounterScoped(organizationId, counterId);
 
@@ -436,6 +457,13 @@ export async function callToken(organizationId: string, tokenId: string, counter
     throw new AppError(409, 'COUNTER_QUEUE_MISMATCH', "Counter does not belong to the token's queue.");
   }
 
+  if (token.status !== requireSourceStatus) {
+    throw new AppError(
+      422,
+      'INVALID_TOKEN_TRANSITION',
+      `Cannot transition token from ${token.status} to CALLED.`,
+    );
+  }
   assertValidTransition(token.status, 'CALLED');
 
   return prisma.$transaction(async (tx) => {
@@ -447,15 +475,21 @@ export async function callToken(organizationId: string, tokenId: string, counter
       throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is not active.');
     }
 
+    // Excludes this same tokenId: without it, two racing requests for the
+    // *same already-CALLED-then-skipped* token/counter pair (only possible
+    // via recall — a fresh WAITING token could never already occupy this
+    // counter) would have the loser misread its own winning twin's
+    // just-committed row as "a different token is busy" instead of
+    // correctly falling through to the TOKEN_STATE_CHANGED check below.
     const busy = await tx.token.findFirst({
-      where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] } },
+      where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] }, id: { not: tokenId } },
     });
     if (busy) {
       throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is already serving another token.');
     }
 
     const result = await tx.token.updateMany({
-      where: { id: tokenId, status: 'WAITING' },
+      where: { id: tokenId, status: token.status },
       data: { status: 'CALLED', counterId, calledAt: new Date() },
     });
     if (result.count === 0) {

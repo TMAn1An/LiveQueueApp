@@ -18,6 +18,7 @@ export const AUDIT_ACTIONS = [
   'token_called',
   'token_skipped',
   'token_completed',
+  'token_recalled',
   'organization_deletion_requested',
   'blocked_device_changed',
 ] as const;

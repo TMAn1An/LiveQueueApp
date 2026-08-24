@@ -46,6 +46,15 @@ export function useSkipToken() {
   });
 }
 
+export function useRecallToken() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tokenId, counterId }: { tokenId: string; counterId: string }) =>
+      tokenApi.recallToken(tokenId, counterId),
+    onSuccess: () => invalidateLiveData(queryClient),
+  });
+}
+
 export function useNextToken() {
   const queryClient = useQueryClient();
   return useMutation({
