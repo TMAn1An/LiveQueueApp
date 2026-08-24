@@ -15,11 +15,25 @@ import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState } from '../components/Spinner';
 import { PermissionGate } from '../components/PermissionGate';
+import { ErrorBanner } from '../components/ErrorBanner';
+import { ApiError } from '../api/client';
 import type { Counter, CounterStatus } from '../types/queue';
 
 const COUNTER_STATUSES: CounterStatus[] = ['ACTIVE', 'ON_BREAK', 'OFFLINE'];
 
-function CounterRow({ queueId, counter }: { queueId: string; counter: Counter }) {
+function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError ? err.message : fallback;
+}
+
+function CounterRow({
+  queueId,
+  counter,
+  onError,
+}: {
+  queueId: string;
+  counter: Counter;
+  onError: (message: string) => void;
+}) {
   const updateCounter = useUpdateCounter(queueId);
   const setStatus = useSetCounterStatus(queueId);
   const assignCounter = useAssignCounter(queueId);
@@ -54,7 +68,10 @@ function CounterRow({ queueId, counter }: { queueId: string; counter: Counter })
               <>
                 <Button
                   onClick={() => {
-                    updateCounter.mutate({ counterId: counter.id, name });
+                    updateCounter.mutate(
+                      { counterId: counter.id, name },
+                      { onError: (err) => onError(errorMessage(err, 'Failed to rename counter.')) },
+                    );
                     setEditing(false);
                   }}
                 >
@@ -72,7 +89,10 @@ function CounterRow({ queueId, counter }: { queueId: string; counter: Counter })
             <select
               value={counter.status}
               onChange={(e) =>
-                setStatus.mutate({ counterId: counter.id, status: e.target.value as CounterStatus })
+                setStatus.mutate(
+                  { counterId: counter.id, status: e.target.value as CounterStatus },
+                  { onError: (err) => onError(errorMessage(err, 'Failed to change counter status.')) },
+                )
               }
               className="rounded-md border border-slate-300 px-2 py-1 text-sm"
             >
@@ -86,7 +106,10 @@ function CounterRow({ queueId, counter }: { queueId: string; counter: Counter })
               value={counter.staffId ?? ''}
               onChange={(e) =>
                 e.target.value &&
-                assignCounter.mutate({ counterId: counter.id, staffId: e.target.value })
+                assignCounter.mutate(
+                  { counterId: counter.id, staffId: e.target.value },
+                  { onError: (err) => onError(errorMessage(err, 'Failed to assign staff to counter.')) },
+                )
               }
               className="rounded-md border border-slate-300 px-2 py-1 text-sm"
             >
@@ -99,7 +122,14 @@ function CounterRow({ queueId, counter }: { queueId: string; counter: Counter })
                 </option>
               ))}
             </select>
-            <Button variant="danger" onClick={() => deleteCounter.mutate(counter.id)}>
+            <Button
+              variant="danger"
+              onClick={() =>
+                deleteCounter.mutate(counter.id, {
+                  onError: (err) => onError(errorMessage(err, 'Failed to delete counter.')),
+                })
+              }
+            >
               Delete
             </Button>
           </div>
@@ -115,6 +145,7 @@ export function QueueCountersPage() {
   const { data: counters, isLoading } = useCounters(queueId);
   const createCounter = useCreateCounter(queueId ?? '');
   const [name, setName] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   if (!queueId) return null;
 
@@ -126,6 +157,8 @@ export function QueueCountersPage() {
         </Link>
       </div>
       <h1 className="mb-4 text-xl font-semibold text-slate-900">Counters</h1>
+
+      <ErrorBanner message={error} />
 
       <Card>
         {isLoading ? (
@@ -144,7 +177,7 @@ export function QueueCountersPage() {
             </thead>
             <tbody>
               {counters.map((c) => (
-                <CounterRow key={c.id} queueId={queueId} counter={c} />
+                <CounterRow key={c.id} queueId={queueId} counter={c} onError={setError} />
               ))}
             </tbody>
           </table>
@@ -163,7 +196,10 @@ export function QueueCountersPage() {
             <Button
               disabled={!name || createCounter.isPending}
               onClick={() => {
-                createCounter.mutate(name);
+                setError(null);
+                createCounter.mutate(name, {
+                  onError: (err) => setError(errorMessage(err, 'Failed to create counter.')),
+                });
                 setName('');
               }}
             >
