@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,14 @@ import 'package:http/http.dart' as http;
 
 import '../utils/app_config.dart';
 import 'api_exception.dart';
+
+/// No timeout was previously set on any request — an unreachable host (most
+/// commonly a real device still pointed at the emulator-only default
+/// API_BASE_URL, http://10.0.2.2, which silently goes nowhere rather than
+/// being actively refused) could hang a request, and anything awaiting it
+/// (e.g. SplashScreen's bootstrap sequence), indefinitely instead of failing
+/// fast into the existing NetworkException handling below.
+const _requestTimeout = Duration(seconds: 12);
 
 /// Thin wrapper over `http` that understands the backend's response
 /// envelope (`{ success, data }` / `{ success: false, error: { code,
@@ -43,10 +52,14 @@ class ApiClient {
 
   Future<Map<String, dynamic>> get(String path) async {
     try {
-      final response = await _httpClient.get(_uri(path), headers: {'Accept': 'application/json'});
+      final response = await _httpClient
+          .get(_uri(path), headers: {'Accept': 'application/json'})
+          .timeout(_requestTimeout);
       return _handle(response);
     } on SocketException {
       throw const NetworkException('No network connection. Please check your connection and try again.');
+    } on TimeoutException {
+      throw const NetworkException('The request timed out. Please check your connection and try again.');
     }
   }
 
@@ -56,14 +69,18 @@ class ApiClient {
     Map<String, String>? headers,
   }) async {
     try {
-      final response = await _httpClient.post(
-        _uri(path),
-        headers: {'Content-Type': 'application/json', 'Accept': 'application/json', ...?headers},
-        body: jsonEncode(body ?? const {}),
-      );
+      final response = await _httpClient
+          .post(
+            _uri(path),
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json', ...?headers},
+            body: jsonEncode(body ?? const {}),
+          )
+          .timeout(_requestTimeout);
       return _handle(response);
     } on SocketException {
       throw const NetworkException('No network connection. Please check your connection and try again.');
+    } on TimeoutException {
+      throw const NetworkException('The request timed out. Please check your connection and try again.');
     }
   }
 

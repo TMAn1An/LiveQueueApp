@@ -15,14 +15,50 @@ import { logger } from '../config/logger';
  */
 let app: App | null | undefined;
 
-function initialize(): App | null {
-  if (app !== undefined) {
-    return app;
+/**
+ * Resolves the service-account credential from whichever source is
+ * configured. FIREBASE_CREDENTIALS (the raw JSON content as the env var's
+ * own value) takes priority — it's the only form a stateless host like
+ * Render can hold without a separate secret-file mount. Falls back to
+ * FIREBASE_SERVICE_ACCOUNT_PATH (a local file path) for local dev, where
+ * the downloaded key already sits on disk. Returns null, never throws, if
+ * neither is set or the configured one can't be parsed — initialize()
+ * below treats that identically to "not configured."
+ */
+function resolveServiceAccountCredential(): Record<string, unknown> | null {
+  if (env.FIREBASE_CREDENTIALS) {
+    try {
+      return JSON.parse(env.FIREBASE_CREDENTIALS) as Record<string, unknown>;
+    } catch (err) {
+      logger.error(
+        { message: (err as Error).message },
+        'FIREBASE_CREDENTIALS is set but is not valid JSON — Firebase Admin/FCM dispatch is disabled.',
+      );
+      return null;
+    }
   }
 
-  if (!env.FIREBASE_SERVICE_ACCOUNT_PATH) {
-    logger.warn('FIREBASE_SERVICE_ACCOUNT_PATH is not set — Firebase Admin/FCM dispatch is disabled.');
-    app = null;
+  if (env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+    try {
+      const raw = readFileSync(env.FIREBASE_SERVICE_ACCOUNT_PATH, 'utf-8');
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch (err) {
+      // Deliberately logs only the message, never the caught value itself —
+      // a JSON.parse or file-read failure on a malformed credential file
+      // could otherwise end up echoing file content/paths into the error.
+      logger.error(
+        { message: (err as Error).message },
+        'FIREBASE_SERVICE_ACCOUNT_PATH is set but could not be read — Firebase Admin/FCM dispatch is disabled.',
+      );
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function initialize(): App | null {
+  if (app !== undefined) {
     return app;
   }
 
@@ -32,15 +68,24 @@ function initialize(): App | null {
     return app;
   }
 
+  if (!env.FIREBASE_CREDENTIALS && !env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+    logger.warn(
+      'Neither FIREBASE_CREDENTIALS nor FIREBASE_SERVICE_ACCOUNT_PATH is set — Firebase Admin/FCM dispatch is disabled.',
+    );
+    app = null;
+    return app;
+  }
+
+  const credential = resolveServiceAccountCredential();
+  if (!credential) {
+    app = null;
+    return app;
+  }
+
   try {
-    const raw = readFileSync(env.FIREBASE_SERVICE_ACCOUNT_PATH, 'utf-8');
-    const serviceAccount = JSON.parse(raw) as Record<string, unknown>;
-    app = initializeApp({ credential: cert(serviceAccount) });
+    app = initializeApp({ credential: cert(credential) });
     logger.info('Firebase Admin initialized — FCM dispatch is enabled.');
   } catch (err) {
-    // Deliberately logs only the message, never the caught value itself —
-    // a JSON.parse or file-read failure on a malformed credential file
-    // could otherwise end up echoing file content/paths into the error.
     logger.error(
       { message: (err as Error).message },
       'Firebase Admin initialization failed — FCM dispatch is disabled.',

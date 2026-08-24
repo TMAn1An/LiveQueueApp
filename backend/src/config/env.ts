@@ -37,9 +37,15 @@ const envSchema = z.object({
     .default('false')
     .transform((value) => value === 'true'),
 
-  // Optional: absolute or relative path to a Firebase service-account JSON
-  // file, never committed (.gitignore's "*service-account*.json"). Unset in
-  // any environment without push notifications configured yet.
+  // Two ways to supply the Firebase service-account credential — exactly
+  // one is needed. FIREBASE_CREDENTIALS (the raw service-account JSON
+  // content as the variable's value) is the one that works on a stateless
+  // host like Render, which has no mounted-file mechanism for a plain
+  // environment variable. FIREBASE_SERVICE_ACCOUNT_PATH (a path to a local
+  // JSON file, never committed — .gitignore's "*service-account*.json")
+  // remains for local dev convenience where the downloaded key already
+  // sits on disk. If FIREBASE_CREDENTIALS is set, it takes priority.
+  FIREBASE_CREDENTIALS: z.string().optional(),
   FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(),
 
   REMINDER_DISPATCH_CRON: z.string().default('*/1 * * * *'),
