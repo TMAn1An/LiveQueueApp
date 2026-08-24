@@ -7,6 +7,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  setFormFields,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 
@@ -137,5 +138,63 @@ describe('GET /api/dashboard/tokens (live queue table)', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
     expect(res.body.pagination).toMatchObject({ page: 1, pageSize: 2, total: 3, totalPages: 2 });
+  });
+
+  it('Issue #4 Test 11: returns formFields (labels resolved from QueueFormField) and deviceId for the authenticated organization\'s tokens', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    await setFormFields(ctx.accessToken, queue.id, [
+      { key: 'fullName', label: 'Full Name', type: 'text', required: true },
+    ]);
+    const token = await createToken({
+      queueId: queue.id,
+      serviceId: service.id,
+      deviceIdentifier: 'device-live-queue-1',
+      formData: { fullName: 'Karim Uddin' },
+    });
+
+    const res = await api().get('/api/dashboard/tokens').set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].deviceId).toBeTruthy();
+    expect(res.body.data[0].formFields).toEqual([
+      { key: 'fullName', label: 'Full Name', type: 'text', value: 'Karim Uddin' },
+    ]);
+    expect(res.body.data[0].id).toBe(token.id);
+  });
+
+  it("Issue #4 Test 12: another organization's customer field labels/values never appear", async () => {
+    const orgA = await registerOwner({ organizationName: 'Org A' });
+    const orgB = await registerOwner({ organizationName: 'Org B' });
+    const queueA = await createQueue(orgA.accessToken);
+    const serviceA = await createService(orgA.accessToken, queueA.id);
+    const queueB = await createQueue(orgB.accessToken);
+    const serviceB = await createService(orgB.accessToken, queueB.id);
+    await setFormFields(orgA.accessToken, queueA.id, [{ key: 'note', label: 'Org A Only Label', type: 'text' }]);
+    await setFormFields(orgB.accessToken, queueB.id, [{ key: 'note', label: 'Org B Only Label', type: 'text' }]);
+    await createToken({ queueId: queueA.id, serviceId: serviceA.id, formData: { note: 'A data' } });
+    await createToken({ queueId: queueB.id, serviceId: serviceB.id, formData: { note: 'B data' } });
+
+    const res = await api().get('/api/dashboard/tokens').set('Authorization', `Bearer ${orgA.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].formFields).toEqual([
+      { key: 'note', label: 'Org A Only Label', type: 'text', value: 'A data' },
+    ]);
+  });
+
+  it('Issue #4 Test 14: empty formData is handled safely and produces an empty formFields list', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    await setFormFields(ctx.accessToken, queue.id, [{ key: 'note', label: 'Note', type: 'text', required: false }]);
+    await createToken({ queueId: queue.id, serviceId: service.id, formData: {} });
+
+    const res = await api().get('/api/dashboard/tokens').set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].formFields).toEqual([]);
   });
 });

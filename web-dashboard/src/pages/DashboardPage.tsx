@@ -5,8 +5,9 @@ import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
 import { TokenActions } from '../components/TokenActions';
+import { Modal } from '../components/Modal';
 import { formatDateTime, formatMinutes } from '../utils/format';
-import type { DashboardStats } from '../types/dashboard';
+import type { DashboardStats, LiveQueueTokenRow } from '../types/dashboard';
 
 const STAT_CARDS: { key: keyof DashboardStats; label: string; minutes?: boolean }[] = [
   { key: 'activeQueues', label: 'Active Queues' },
@@ -20,10 +21,63 @@ const STAT_CARDS: { key: keyof DashboardStats; label: string; minutes?: boolean 
   { key: 'skippedToday', label: 'Skipped Today' },
 ];
 
+/** A short one-line summary for the table cell — the full list is only ever
+ * shown in the details modal, so the table never has to grow to fit
+ * however many dynamic fields a queue happens to collect (Issue #4). */
+function CustomerSummaryCell({ row, onOpenDetails }: { row: LiveQueueTokenRow; onOpenDetails: () => void }) {
+  if (row.formFields.length === 0) {
+    return <span className="text-slate-400">—</span>;
+  }
+
+  const first = row.formFields[0]!;
+  return (
+    <button
+      type="button"
+      onClick={onOpenDetails}
+      className="text-left text-blue-600 hover:underline"
+      title="View submitted form details"
+    >
+      {first.value}
+      {row.formFields.length > 1 ? ` (+${row.formFields.length - 1} more)` : ''}
+    </button>
+  );
+}
+
+function TokenDetailsModal({ row, onClose }: { row: LiveQueueTokenRow; onClose: () => void }) {
+  return (
+    <Modal title={`Token ${row.serialNumber}`} onClose={onClose}>
+      <dl className="space-y-2 text-sm">
+        {row.formFields.map((field) => (
+          <div key={field.key}>
+            <dt className="text-xs text-slate-400">{field.label}</dt>
+            <dd className="text-slate-700">
+              {field.type === 'phone' ? (
+                <a href={`tel:${field.value}`} className="text-blue-600 hover:underline">
+                  {field.value}
+                </a>
+              ) : field.type === 'email' ? (
+                <a href={`mailto:${field.value}`} className="text-blue-600 hover:underline">
+                  {field.value}
+                </a>
+              ) : (
+                field.value
+              )}
+            </dd>
+          </div>
+        ))}
+        {row.formFields.length === 0 && (
+          <p className="text-xs italic text-slate-400">No form data was submitted for this token.</p>
+        )}
+      </dl>
+    </Modal>
+  );
+}
+
 export function DashboardPage() {
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const [page, setPage] = useState(1);
   const { data: liveTable, isLoading: tableLoading } = useLiveQueueTable(page);
+  const [detailsRow, setDetailsRow] = useState<LiveQueueTokenRow | null>(null);
 
   return (
     <div>
@@ -58,6 +112,7 @@ export function DashboardPage() {
                   <th className="py-2 pr-4">Token</th>
                   <th className="py-2 pr-4">Queue</th>
                   <th className="py-2 pr-4">Service</th>
+                  <th className="py-2 pr-4">Customer</th>
                   <th className="py-2 pr-4">Position</th>
                   <th className="py-2 pr-4">Status</th>
                   <th className="py-2 pr-4">Counter</th>
@@ -71,6 +126,9 @@ export function DashboardPage() {
                     <td className="py-2 pr-4 text-lg font-bold text-slate-900">{row.serialNumber}</td>
                     <td className="py-2 pr-4">{row.queue.name}</td>
                     <td className="py-2 pr-4">{row.service.name}</td>
+                    <td className="py-2 pr-4">
+                      <CustomerSummaryCell row={row} onOpenDetails={() => setDetailsRow(row)} />
+                    </td>
                     <td className="py-2 pr-4">{row.position ?? '—'}</td>
                     <td className="py-2 pr-4">
                       <StatusBadge status={row.status} />
@@ -88,6 +146,8 @@ export function DashboardPage() {
         )}
         <Pagination pagination={liveTable?.pagination} onPageChange={setPage} />
       </Card>
+
+      {detailsRow && <TokenDetailsModal row={detailsRow} onClose={() => setDetailsRow(null)} />}
     </div>
   );
 }

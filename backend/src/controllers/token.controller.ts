@@ -3,6 +3,7 @@ import { AppError } from '../utils/AppError';
 import * as tokenService from '../services/token.service';
 import * as auditService from '../services/audit.service';
 import * as realtime from '../realtime/emit';
+import * as tokenNotificationDispatch from '../services/tokenNotificationDispatch.service';
 
 function requireIdempotencyKey(req: Request): string {
   const header = req.headers['idempotency-key'];
@@ -49,6 +50,7 @@ export async function call(req: Request, res: Response) {
   // call always transitions WAITING -> CALLED, so it always affects
   // whichever waiting tokens were behind it (approved Phase 4 decision 4).
   await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
+  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
 export async function start(req: Request, res: Response) {
@@ -57,6 +59,7 @@ export async function start(req: Request, res: Response) {
   const { token } = await tokenService.startToken(req.auth!.organizationId, req.params.tokenId as string);
   res.status(200).json({ success: true, data: token });
   await realtime.emitTokenStarted(token.id);
+  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
 export async function complete(req: Request, res: Response) {
@@ -73,6 +76,7 @@ export async function complete(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitTokenCompleted(token.id);
+  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
 export async function skip(req: Request, res: Response) {
@@ -95,6 +99,7 @@ export async function skip(req: Request, res: Response) {
   if (previousStatus === 'WAITING') {
     await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
   }
+  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
 /**
@@ -124,6 +129,7 @@ export async function recall(req: Request, res: Response) {
   // No broadcastAffectedPositions — recall's source is always SKIPPED,
   // never WAITING, so no other waiting token's position can be affected
   // (mirrors skip's own previousStatus === 'WAITING' guard above).
+  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
 export async function next(req: Request, res: Response) {
@@ -146,4 +152,5 @@ export async function next(req: Request, res: Response) {
   });
   await realtime.emitTokenCalled(token.id);
   await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
+  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }

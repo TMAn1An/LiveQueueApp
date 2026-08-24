@@ -1,4 +1,5 @@
 import type { TokenStatus } from './token';
+import type { DisplayFormField } from './device';
 
 export interface DashboardStats {
   activeQueues: number;
@@ -24,4 +25,6 @@ export interface LiveQueueTokenRow {
   createdAt: string;
   calledAt: string | null;
   startedAt: string | null;
+  deviceId: string;
+  formFields: DisplayFormField[];
 }

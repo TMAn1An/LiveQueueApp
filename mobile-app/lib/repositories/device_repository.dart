@@ -26,4 +26,15 @@ class DeviceRepository {
     await _apiService.registerDevice(identifier);
     return identifier;
   }
+
+  /// Issue #5: registers this device's current FCM token with the backend
+  /// so token-status-change pushes have somewhere to go. Safe to call
+  /// repeatedly (initial registration and every token refresh) — the
+  /// backend upserts on deviceId, matching [ensureRegisteredDevice]'s own
+  /// idempotency contract.
+  Future<void> registerFcmToken(String fcmToken) async {
+    final identifier = _cachedDeviceIdentifier ?? await _identityService.getOrCreateDeviceIdentifier();
+    _cachedDeviceIdentifier = identifier;
+    await _apiService.registerFcmToken(identifier, fcmToken);
+  }
 }

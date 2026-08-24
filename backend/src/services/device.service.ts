@@ -1,6 +1,26 @@
-import { Prisma, type Device } from '@prisma/client';
+import { Prisma, type Device, type TokenStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
+import { buildDisplayFormFields, fetchFormFieldDefs, type DisplayFormField } from '../utils/formFieldDisplay';
+
+const ACTIVE_TOKEN_STATUSES: TokenStatus[] = ['WAITING', 'CALLED', 'IN_PROGRESS'];
+/** Priority order for picking a customerContext token when a device somehow
+ * has more than one active token for this organization at once — possible
+ * only across different queues (Issue #9 guarantees at most one active
+ * token per device *per queue*, not per organization overall). */
+const ACTIVE_STATUS_PRIORITY: TokenStatus[] = ['WAITING', 'CALLED', 'IN_PROGRESS'];
+
+export interface CustomerContext {
+  tokenId: string;
+  serialNumber: string;
+  status: TokenStatus;
+  queue: { id: string; name: string };
+  service: { id: string; name: string };
+  formFields: DisplayFormField[];
+  createdAt: Date;
+  calledAt: Date | null;
+  startedAt: Date | null;
+}
 
 /**
  * Idempotent get-or-create: a device that registers twice (or is implicitly
@@ -19,7 +39,7 @@ export async function registerDevice(deviceIdentifier: string) {
  * block state (from OrganizationDeviceBlock), never the raw global
  * Device.status column (see the OrganizationDeviceBlock model comment in
  * schema.prisma for why that column is no longer authoritative). */
-function toDeviceResponse(device: Device, isBlocked: boolean) {
+function toDeviceResponse(device: Device, isBlocked: boolean, customerContext: CustomerContext | null = null) {
   return {
     id: device.id,
     deviceIdentifier: device.deviceIdentifier,
@@ -27,7 +47,120 @@ function toDeviceResponse(device: Device, isBlocked: boolean) {
     lastSeenAt: device.lastSeenAt,
     createdAt: device.createdAt,
     updatedAt: device.updatedAt,
+    customerContext,
   };
+}
+
+type CustomerContextTokenRow = {
+  id: string;
+  serialNumber: string;
+  status: TokenStatus;
+  formData: Prisma.JsonValue;
+  queueId: string;
+  serviceId: string;
+  formVersion: number;
+  deviceId: string;
+  createdAt: Date;
+  calledAt: Date | null;
+  startedAt: Date | null;
+  queue: { id: string; name: string };
+  service: { id: string; serviceName: string };
+};
+
+const CUSTOMER_CONTEXT_TOKEN_SELECT = {
+  id: true,
+  serialNumber: true,
+  status: true,
+  formData: true,
+  queueId: true,
+  serviceId: true,
+  formVersion: true,
+  deviceId: true,
+  createdAt: true,
+  calledAt: true,
+  startedAt: true,
+  queue: { select: { id: true, name: true } },
+  service: { select: { id: true, serviceName: true } },
+} satisfies Prisma.TokenSelect;
+
+/**
+ * Issue #4 approved priority: WAITING > CALLED > IN_PROGRESS > most recent
+ * historical token, scoped to the authenticated organization AND the
+ * device — never another organization's token (CLAUDE.md Rule 4).
+ *
+ * Prisma cannot express "custom enum priority, else fall back to most
+ * recent" in a single relation query, so this runs as two bounded,
+ * non-N+1 queries for the whole page (never one query per device):
+ *   1. every active token (WAITING/CALLED/IN_PROGRESS) for these devices —
+ *      realistically a handful of rows, picked per device by priority
+ *      in memory.
+ *   2. for devices with no active token, the single most recent token per
+ *      device via `distinct: ['deviceId']` + `orderBy: createdAt desc` —
+ *      Postgres/Prisma's native "latest row per group" pattern, still one
+ *      query regardless of how many devices need it.
+ */
+async function fetchCustomerContexts(
+  organizationId: string,
+  deviceIds: string[],
+): Promise<Map<string, CustomerContext | null>> {
+  const result = new Map<string, CustomerContext | null>();
+  if (deviceIds.length === 0) {
+    return result;
+  }
+
+  const activeCandidates = (await prisma.token.findMany({
+    where: { deviceId: { in: deviceIds }, organizationId, status: { in: ACTIVE_TOKEN_STATUSES } },
+    orderBy: { createdAt: 'desc' },
+    select: CUSTOMER_CONTEXT_TOKEN_SELECT,
+  })) as CustomerContextTokenRow[];
+
+  const activeByDevice = new Map<string, CustomerContextTokenRow>();
+  for (const priorityStatus of ACTIVE_STATUS_PRIORITY) {
+    for (const token of activeCandidates) {
+      if (token.status === priorityStatus && !activeByDevice.has(token.deviceId)) {
+        activeByDevice.set(token.deviceId, token);
+      }
+    }
+  }
+
+  const devicesNeedingHistory = deviceIds.filter((id) => !activeByDevice.has(id));
+  const historicalCandidates = devicesNeedingHistory.length
+    ? ((await prisma.token.findMany({
+        where: { deviceId: { in: devicesNeedingHistory }, organizationId },
+        orderBy: { createdAt: 'desc' },
+        distinct: ['deviceId'],
+        select: CUSTOMER_CONTEXT_TOKEN_SELECT,
+      })) as CustomerContextTokenRow[])
+    : [];
+  const historicalByDevice = new Map(historicalCandidates.map((t) => [t.deviceId, t]));
+
+  const chosenTokens = deviceIds
+    .map((id) => activeByDevice.get(id) ?? historicalByDevice.get(id))
+    .filter((t): t is CustomerContextTokenRow => t !== undefined);
+
+  const formFieldDefs = await fetchFormFieldDefs(
+    chosenTokens.map((t) => ({ queueId: t.queueId, formVersion: t.formVersion })),
+  );
+
+  for (const deviceId of deviceIds) {
+    const token = activeByDevice.get(deviceId) ?? historicalByDevice.get(deviceId);
+    if (!token) {
+      result.set(deviceId, null);
+      continue;
+    }
+    result.set(deviceId, {
+      tokenId: token.id,
+      serialNumber: token.serialNumber,
+      status: token.status,
+      queue: token.queue,
+      service: { id: token.service.id, name: token.service.serviceName },
+      formFields: buildDisplayFormFields(token.queueId, token.formVersion, token.formData, formFieldDefs),
+      createdAt: token.createdAt,
+      calledAt: token.calledAt,
+      startedAt: token.startedAt,
+    });
+  }
+  return result;
 }
 
 /**
@@ -68,8 +201,15 @@ export async function listDevices(
     prisma.device.count({ where }),
   ]);
 
+  const customerContexts = await fetchCustomerContexts(
+    organizationId,
+    devices.map((d) => d.id),
+  );
+
   return {
-    data: devices.map((d) => toDeviceResponse(d, d.organizationBlocks.length > 0)),
+    data: devices.map((d) =>
+      toDeviceResponse(d, d.organizationBlocks.length > 0, customerContexts.get(d.id) ?? null),
+    ),
     pagination: { page, pageSize, total, totalPages: Math.ceil(total / pageSize) },
   };
 }

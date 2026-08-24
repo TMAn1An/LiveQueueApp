@@ -224,6 +224,32 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
       return existing;
     }
 
+    // One device may hold at most one non-terminal-for-this-rule token per
+    // queue at a time (approved design). Scoped by (deviceId, queueId) only
+    // — queueId already determines organizationId, so adding it would be
+    // redundant. SKIPPED is deliberately excluded from the blocking set even
+    // though it isn't graph-terminal (SKIPPED -> CALLED via Recall exists) —
+    // the approved rule frees the slot immediately on skip; see the matching
+    // guard in callToken's recall path for the resulting Recall interaction.
+    // Checked under the queue row lock acquired above, so this is race-free
+    // against another concurrent createToken call for the same queue —
+    // backed by a DB partial unique index (tokens_device_queue_active_key)
+    // as a defense-in-depth backstop.
+    const existingActive = await tx.token.findFirst({
+      where: {
+        deviceId: device.id,
+        queueId: input.queueId,
+        status: { in: ['WAITING', 'CALLED', 'IN_PROGRESS'] },
+      },
+    });
+    if (existingActive) {
+      throw new AppError(
+        409,
+        'DEVICE_ALREADY_IN_QUEUE',
+        'This device already has an active token in this queue.',
+      );
+    }
+
     const sequenceNumber = lockedQueue.nextTokenNumber;
     await tx.queue.update({
       where: { id: input.queueId },
@@ -472,6 +498,35 @@ export async function callToken(
     );
   }
   assertValidTransition(token.status, 'CALLED');
+
+  // Recall-only guard (approved design, Option A): skipping a token frees
+  // its device+queue slot immediately, so the device may have gone on to
+  // create a brand new active token in this same queue in the meantime.
+  // Recalling the old skipped token would then produce two active tokens
+  // for the same device in the same queue — reject it instead. Not needed
+  // on the plain /call (WAITING) path: the one-active-token-per-device-per-
+  // queue invariant already guarantees a WAITING token has no other active
+  // sibling to conflict with. The DB partial unique index
+  // (tokens_device_queue_active_key) remains the authoritative backstop for
+  // the narrow race window this pre-check doesn't fully close (this
+  // function holds no lock analogous to createToken's queue-row lock).
+  if (requireSourceStatus === 'SKIPPED') {
+    const conflicting = await prisma.token.findFirst({
+      where: {
+        deviceId: token.deviceId,
+        queueId: token.queueId,
+        status: { in: ['WAITING', 'CALLED', 'IN_PROGRESS'] },
+        id: { not: tokenId },
+      },
+    });
+    if (conflicting) {
+      throw new AppError(
+        409,
+        'DEVICE_ALREADY_IN_QUEUE',
+        'This device already has another active token in this queue; recall is not allowed.',
+      );
+    }
+  }
 
   return prisma.$transaction(async (tx) => {
     const counterRows = await tx.$queryRaw<{ id: string; status: string }[]>`

@@ -10,4 +10,15 @@ class DeviceApiService {
   Future<void> registerDevice(String deviceIdentifier) async {
     await _client.post('/api/devices/register', body: {'deviceIdentifier': deviceIdentifier});
   }
+
+  /// POST /api/devices/fcm-token (Issue #5) — same upsert-on-deviceId trust
+  /// model as [registerDevice]; safe to call repeatedly (initial
+  /// registration and every onTokenRefresh) without creating duplicate rows,
+  /// since the backend keys DeviceFcmToken by deviceId.
+  Future<void> registerFcmToken(String deviceIdentifier, String fcmToken) async {
+    await _client.post(
+      '/api/devices/fcm-token',
+      body: {'deviceIdentifier': deviceIdentifier, 'fcmToken': fcmToken},
+    );
+  }
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import * as fcmService from '../src/services/fcm.service';
 import { dispatchReminders } from '../src/services/reminderDispatch.service';
 import {
@@ -18,6 +18,21 @@ beforeEach(async () => {
   await resetDb();
   vi.restoreAllMocks();
 });
+
+/** Issue #5's own status-change notification runs asynchronously after a
+ * state-change request's HTTP response — poll rather than assume it has
+ * already landed by the time the test's next line runs. */
+async function waitForCalls(
+  send: MockInstance<typeof import('../src/services/fcm.service').sendNotification>,
+  expectedCount: number,
+  timeoutMs = 2000,
+) {
+  const start = Date.now();
+  while (send.mock.calls.length < expectedCount && Date.now() - start < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return send.mock.calls;
+}
 
 interface Setup {
   organizationId: string;
@@ -83,10 +98,16 @@ describe('dispatchReminders — selection rules', () => {
     const setup = await setupToken(5);
     await setCounterStatus(setup.accessToken, setup.counterId, 'ACTIVE');
     await setPreference(setup.tokenId, setup.deviceIdentifier, 10);
+    // Spy installed before /skip — Issue #5's own status-change notification
+    // also fires (asynchronously, after this request's HTTP response) on a
+    // skip, unrelated to reminders. Wait for that call to land and clear it
+    // so this assertion is isolated to dispatchReminders' own behavior.
+    const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
     await api()
       .post(`/api/tokens/${setup.tokenId}/skip`)
       .set('Authorization', `Bearer ${setup.accessToken}`);
-    const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
+    await waitForCalls(send, 1);
+    send.mockClear();
 
     const summary = await dispatchReminders();
 

@@ -53,6 +53,8 @@ class FcmService {
   bool _available = false;
   String? _fcmToken;
   final _tapController = StreamController<RemoteMessage>.broadcast();
+  final _tokenRefreshController = StreamController<String>.broadcast();
+  final _dataMessageController = StreamController<Map<String, dynamic>>.broadcast();
 
   bool get isAvailable => _available;
   String? get fcmToken => _fcmToken;
@@ -60,10 +62,25 @@ class FcmService {
   /// Fires when the user taps a notification that opened/resumed the app —
   /// from background (`onMessageOpenedApp`) or from fully terminated
   /// (`getInitialMessage`, replayed once here so both cases look the same
-  /// to a listener). No screen subscribes to this yet: the backend has no
-  /// FCM payload contract to route on (Phase 7 backend scope), so this is
-  /// the hook a future screen would use, not a finished feature.
+  /// to a listener). Consumed by SplashScreen (Issue #5) to resume tracking
+  /// a token from a cold start.
   Stream<RemoteMessage> get onNotificationTapped => _tapController.stream;
+
+  /// Issue #5: FCM registration tokens can rotate (reinstall, Firebase-
+  /// initiated refresh) — Firebase's own guidance is to listen for this and
+  /// re-register. Deliberately just forwards the new token string; this
+  /// class has no backend/repository dependency of its own (kept consistent
+  /// with its existing "additive, never a dependency of anything else"
+  /// design) — the composition root (SplashScreen) owns forwarding it to
+  /// DeviceRepository, exactly like the initial token already is.
+  Stream<String> get onTokenRefreshed => _tokenRefreshController.stream;
+
+  /// Issue #5: the raw `data` payload of any foreground FCM message —
+  /// generic and payload-agnostic on purpose (this service doesn't know
+  /// about "token_status_changed" or any other business event type; that
+  /// interpretation belongs to whichever listener cares, e.g.
+  /// TokenTrackingProvider).
+  Stream<Map<String, dynamic>> get onDataMessage => _dataMessageController.stream;
 
   Future<void> initialize() async {
     try {
@@ -98,14 +115,28 @@ class FcmService {
 
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
+      // Issue #5: registration tokens can rotate at any time — forward the
+      // new one so the composition root can re-register it with the
+      // backend, the same way the initial token already is.
+      messaging.onTokenRefresh.listen((newToken) {
+        _fcmToken = newToken;
+        _tokenRefreshController.add(newToken);
+      });
+
       // Foreground: the OS does NOT show a system notification while the
       // app is active, so this is the one case that must display one itself
       // — reuses NotificationService rather than a second notification path.
+      // Also forwards `data` (Issue #5) so a business-logic listener (e.g.
+      // TokenTrackingProvider) can react — this class only forwards, it
+      // never interprets the payload itself.
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         final title = message.notification?.title;
         final body = message.notification?.body;
         if (title != null && body != null) {
           unawaited(_notificationService.showGenericNotification(title: title, body: body));
+        }
+        if (message.data.isNotEmpty) {
+          _dataMessageController.add(message.data);
         }
         if (kDebugMode) {
           debugPrint('FCM foreground message received: ${message.messageId}');
@@ -138,5 +169,7 @@ class FcmService {
 
   void dispose() {
     unawaited(_tapController.close());
+    unawaited(_tokenRefreshController.close());
+    unawaited(_dataMessageController.close());
   }
 }

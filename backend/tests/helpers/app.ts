@@ -248,3 +248,26 @@ export async function createToken(overrides: {
   }
   return res.body.data;
 }
+
+export interface FormFieldInput {
+  key: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  placeholder?: string;
+  options?: string[];
+}
+
+/** Replaces a queue's dynamic form fields (bumps formVersion) — the setup
+ * helper Issue #4's customer-context tests need to make Token.formData
+ * resolvable back to real labels. */
+export async function setFormFields(accessToken: string, queueId: string, fields: FormFieldInput[]) {
+  const res = await api()
+    .put(`/api/queues/${queueId}/form-fields`)
+    .set('Authorization', `Bearer ${accessToken}`)
+    .send({ fields });
+  if (res.status !== 200) {
+    throw new Error(`setFormFields failed: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  return res.body.data as { formVersion: number; fields: unknown[] };
+}

@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/live_queue_token.dart';
 import '../models/notification_preferences.dart';
 import '../repositories/history_repository.dart';
 import '../repositories/token_repository.dart';
+import '../services/fcm_service.dart';
 import '../services/notification_service.dart';
 
 /// Live-tracks a single token via Socket.io, with REST as the fallback
@@ -13,18 +15,30 @@ import '../services/notification_service.dart';
 /// reconnecting" — every reconnect triggers a REST resync here, never
 /// relying on missed events being replayed, matching Phase 4's own "no
 /// event replay" design).
+///
+/// Issue #5: FCM is a second, independent trigger for that same REST
+/// resync — a `token_status_changed` data message (received in foreground,
+/// or carried by a tapped notification that resumed the app) never sets
+/// `token.status` directly from the payload. It only ever asks
+/// [_resyncFromServer] to fetch authoritative state, exactly like a socket
+/// reconnect does — so a delayed, duplicated, or out-of-order FCM message
+/// can never leave this provider showing anything other than the backend's
+/// current truth.
 class TokenTrackingProvider extends ChangeNotifier {
   TokenTrackingProvider({
     required TokenRepository tokenRepository,
     required HistoryRepository historyRepository,
     required NotificationService notificationService,
+    required FcmService fcmService,
   })  : _tokenRepository = tokenRepository,
         _historyRepository = historyRepository,
-        _notificationService = notificationService;
+        _notificationService = notificationService,
+        _fcmService = fcmService;
 
   final TokenRepository _tokenRepository;
   final HistoryRepository _historyRepository;
   final NotificationService _notificationService;
+  final FcmService _fcmService;
 
   LiveQueueToken? token;
   bool isConnected = false;
@@ -39,6 +53,8 @@ class TokenTrackingProvider extends ChangeNotifier {
   StreamSubscription<LiveQueueToken>? _lifecycleSub;
   StreamSubscription<PositionUpdate>? _positionSub;
   StreamSubscription<QueueStatusUpdate>? _queueStatusSub;
+  StreamSubscription<Map<String, dynamic>>? _fcmDataSub;
+  StreamSubscription<RemoteMessage>? _fcmTapSub;
 
   void start(LiveQueueToken initialToken, NotificationPreferences preferences) {
     token = initialToken;
@@ -53,6 +69,25 @@ class TokenTrackingProvider extends ChangeNotifier {
     _lifecycleSub = _tokenRepository.tokenLifecycleUpdates.listen(_onLifecycleUpdate);
     _positionSub = _tokenRepository.positionUpdates.listen(_onPositionUpdate);
     _queueStatusSub = _tokenRepository.queueStatusUpdates.listen(_onQueueStatusUpdate);
+    // Foreground data message (Issue #5) — the fast path when the app is
+    // open but this specific screen's socket update is delayed or missed.
+    _fcmDataSub = _fcmService.onDataMessage.listen(_onFcmDataMessage);
+    // A tapped notification that resumed an already-running app (not a
+    // cold start — that path is SplashScreen's job) carries the same data
+    // shape, so it's handled identically: resync if it's about the token
+    // we're already tracking.
+    _fcmTapSub = _fcmService.onNotificationTapped.listen((message) => _onFcmDataMessage(message.data));
+  }
+
+  /// Never trusts `data['status']` as authoritative — always resyncs via
+  /// REST instead (approved Issue #5 design: FCM is a trigger, not a state
+  /// source). Ignored if it isn't about the token currently being tracked,
+  /// or isn't the event type this provider knows how to react to.
+  Future<void> _onFcmDataMessage(Map<String, dynamic> data) async {
+    if (data['type'] != 'token_status_changed') return;
+    final current = token;
+    if (current == null || data['tokenId'] != current.id) return;
+    await _resyncFromServer();
   }
 
   void updatePreferences(NotificationPreferences preferences) {
@@ -174,6 +209,8 @@ class TokenTrackingProvider extends ChangeNotifier {
     _lifecycleSub?.cancel();
     _positionSub?.cancel();
     _queueStatusSub?.cancel();
+    _fcmDataSub?.cancel();
+    _fcmTapSub?.cancel();
     _tokenRepository.stopTracking();
     token = null;
     isConnected = false;

@@ -2,6 +2,7 @@ import type { Prisma, TokenStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { todayRange } from '../utils/dateRange';
 import { listWaitingTokenPositions } from './token.service';
+import { buildDisplayFormFields, fetchFormFieldDefs } from '../utils/formFieldDisplay';
 
 const LIVE_STATUSES: TokenStatus[] = ['WAITING', 'CALLED', 'IN_PROGRESS'];
 
@@ -88,6 +89,15 @@ export async function getLiveQueueTable(organizationId: string, page: number, pa
   const positionEntries = await Promise.all(waitingQueueIds.map((id) => listWaitingTokenPositions(id)));
   const positionById = new Map(positionEntries.flat().map((entry) => [entry.id, entry]));
 
+  // Issue #4: formData/deviceId were already present on every `token` row
+  // above (plain scalar columns, unaffected by `include`) — only the
+  // response projection was dropping them. One batched query for the
+  // (queueId, formVersion) pairs actually present on this page, not one
+  // query per token.
+  const formFieldDefs = await fetchFormFieldDefs(
+    tokens.map((t) => ({ queueId: t.queueId, formVersion: t.formVersion })),
+  );
+
   const data = tokens.map((token) => {
     const position = positionById.get(token.id);
     return {
@@ -102,6 +112,8 @@ export async function getLiveQueueTable(organizationId: string, page: number, pa
       createdAt: token.createdAt,
       calledAt: token.calledAt,
       startedAt: token.startedAt,
+      deviceId: token.deviceId,
+      formFields: buildDisplayFormFields(token.queueId, token.formVersion, token.formData, formFieldDefs),
     };
   });
 

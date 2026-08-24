@@ -7,6 +7,7 @@ import 'package:mobile_app/repositories/history_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
 import 'package:mobile_app/screens/live_tracking_screen.dart';
 import 'package:mobile_app/services/api_client.dart';
+import 'package:mobile_app/services/fcm_service.dart';
 import 'package:mobile_app/services/history_storage_service.dart';
 import 'package:mobile_app/services/notification_service.dart';
 import 'package:mobile_app/services/socket_service.dart';
@@ -28,6 +29,7 @@ class _FakeTokenTrackingProvider extends TokenTrackingProvider {
           ),
           historyRepository: HistoryRepository(storageService: HistoryStorageService()),
           notificationService: NotificationService(),
+          fcmService: FcmService(notificationService: NotificationService()),
         );
 
   void pushState({

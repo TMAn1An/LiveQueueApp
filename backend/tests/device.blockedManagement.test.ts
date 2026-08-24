@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
+  createCounter,
   createRestrictedStaff,
   createQueue,
   createService,
@@ -8,6 +9,8 @@ import {
   createToken,
   createTokenRequest,
   registerOwner,
+  setCounterStatus,
+  setFormFields,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -228,8 +231,11 @@ describe('Organization-scoped device blocking — tenant isolation', () => {
     const orgA = await setupOrg();
     const orgB = await setupOrg();
     const deviceIdentifier = 'shared-device-4';
-    await createToken({ queueId: orgA.queue.id, serviceId: orgA.service.id, deviceIdentifier });
-    await createToken({ queueId: orgB.queue.id, serviceId: orgB.service.id, deviceIdentifier });
+    // Registered (not createToken) — this test only needs the Device row to
+    // exist for the block/unblock calls below, not an actual token; creating
+    // one here would immediately trip the one-active-token-per-device-per-
+    // queue rule on the real assertion tokens further down.
+    await api().post('/api/devices/register').send({ deviceIdentifier });
     const device = await prisma.device.findUniqueOrThrow({ where: { deviceIdentifier } });
 
     await api().post(`/api/devices/${device.id}/block`).set('Authorization', `Bearer ${orgA.accessToken}`);
@@ -357,7 +363,9 @@ describe('Organization-scoped device blocking — tenant isolation', () => {
   it('Test 9: a stale global Device.status=BLOCKED does not block token creation without an OrganizationDeviceBlock row', async () => {
     const org = await setupOrg();
     const deviceIdentifier = 'legacy-globally-blocked';
-    await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
+    // Registered (not createToken) — same reasoning as Test 4: only the
+    // Device row is needed here, not an actual token in this queue.
+    await api().post('/api/devices/register').send({ deviceIdentifier });
     // Simulate a pre-existing legacy-blocked device: the column is set directly,
     // bypassing the API, with no OrganizationDeviceBlock row created for any org.
     await prisma.device.update({
@@ -374,3 +382,175 @@ describe('Organization-scoped device blocking — tenant isolation', () => {
 async function createStaffWithRoleForTest(organizationId: string, role: 'ADMIN') {
   return createStaffWithRole(organizationId, role);
 }
+
+describe('Issue #4: GET /api/devices customerContext', () => {
+  it('Test D1: returns customerContext for a WAITING token, labels resolved from QueueFormField', async () => {
+    const org = await setupOrg();
+    await setFormFields(org.accessToken, org.queue.id, [
+      { key: 'fullName', label: 'Full Name', type: 'text', required: true },
+      { key: 'phone', label: 'Phone Number', type: 'phone', required: true },
+    ]);
+    const deviceIdentifier = 'device-ctx-waiting';
+    const token = await createToken({
+      queueId: org.queue.id,
+      serviceId: org.service.id,
+      deviceIdentifier,
+      formData: { fullName: 'Rahim Ahmed', phone: '01700000000' },
+    });
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+
+    expect(row.customerContext).not.toBeNull();
+    expect(row.customerContext.tokenId).toBe(token.id);
+    expect(row.customerContext.status).toBe('WAITING');
+    expect(row.customerContext.formFields).toEqual([
+      { key: 'fullName', label: 'Full Name', type: 'text', value: 'Rahim Ahmed' },
+      { key: 'phone', label: 'Phone Number', type: 'phone', value: '01700000000' },
+    ]);
+  });
+
+  it('Test D2: returns customerContext for a CALLED token', async () => {
+    const org = await setupOrg();
+    const counter = await createCounter(org.accessToken, org.queue.id);
+    await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
+    const deviceIdentifier = 'device-ctx-called';
+    const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
+    await api()
+      .post(`/api/tokens/${token.id}/call`)
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ counterId: counter.id });
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+
+    expect(row.customerContext.tokenId).toBe(token.id);
+    expect(row.customerContext.status).toBe('CALLED');
+  });
+
+  it('Test D3: returns customerContext for an IN_PROGRESS token', async () => {
+    const org = await setupOrg();
+    const counter = await createCounter(org.accessToken, org.queue.id);
+    await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
+    const deviceIdentifier = 'device-ctx-in-progress';
+    const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
+    await api()
+      .post(`/api/tokens/${token.id}/call`)
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ counterId: counter.id });
+    await api().post(`/api/tokens/${token.id}/start`).set('Authorization', `Bearer ${org.accessToken}`);
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+
+    expect(row.customerContext.tokenId).toBe(token.id);
+    expect(row.customerContext.status).toBe('IN_PROGRESS');
+  });
+
+  it('Test D4: falls back to the most recent historical token when no active token exists', async () => {
+    const org = await setupOrg();
+    const deviceIdentifier = 'device-ctx-history';
+    const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
+    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`);
+    const second = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
+    await api().post(`/api/tokens/${second.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`);
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+
+    expect(row.customerContext.tokenId).toBe(second.id);
+    expect(row.customerContext.status).toBe('SKIPPED');
+  });
+
+  it('Test D5: a device with no token for the authenticated organization is not visible at all', async () => {
+    const org = await setupOrg();
+    await api().post('/api/devices/register').send({ deviceIdentifier: 'device-ctx-no-org-token' });
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    const row = res.body.data.find(
+      (d: { deviceIdentifier: string }) => d.deviceIdentifier === 'device-ctx-no-org-token',
+    );
+
+    expect(row).toBeUndefined();
+  });
+
+  it("Test D6: customerContext never reflects another organization's token", async () => {
+    const orgA = await setupOrg();
+    const orgB = await setupOrg();
+    await setFormFields(orgA.accessToken, orgA.queue.id, [{ key: 'note', label: 'Org A Note', type: 'text' }]);
+    await setFormFields(orgB.accessToken, orgB.queue.id, [{ key: 'note', label: 'Org B Note', type: 'text' }]);
+    const deviceIdentifier = 'device-ctx-cross-org';
+    const tokenA = await createToken({
+      queueId: orgA.queue.id,
+      serviceId: orgA.service.id,
+      deviceIdentifier,
+      formData: { note: 'from A' },
+    });
+    await createToken({
+      queueId: orgB.queue.id,
+      serviceId: orgB.service.id,
+      deviceIdentifier,
+      formData: { note: 'from B' },
+    });
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${orgA.accessToken}`);
+    const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+
+    expect(row.customerContext.tokenId).toBe(tokenA.id);
+    expect(row.customerContext.formFields).toEqual([
+      { key: 'note', label: 'Org A Note', type: 'text', value: 'from A' },
+    ]);
+  });
+
+  it('Test D8: empty formData produces an empty formFields list without crashing', async () => {
+    const org = await setupOrg();
+    await setFormFields(org.accessToken, org.queue.id, [{ key: 'note', label: 'Note', type: 'text', required: false }]);
+    const deviceIdentifier = 'device-ctx-empty';
+    await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier, formData: {} });
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    expect(res.status).toBe(200);
+    const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+    expect(row.customerContext.formFields).toEqual([]);
+  });
+
+  it('Test D9: a defined field with no submitted value is omitted, not crashed on', async () => {
+    const org = await setupOrg();
+    await setFormFields(org.accessToken, org.queue.id, [
+      { key: 'note', label: 'Note', type: 'text', required: false },
+      { key: 'phone', label: 'Phone', type: 'phone', required: false },
+    ]);
+    const deviceIdentifier = 'device-ctx-partial';
+    await createToken({
+      queueId: org.queue.id,
+      serviceId: org.service.id,
+      deviceIdentifier,
+      formData: { note: 'hello' },
+    });
+
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    expect(res.status).toBe(200);
+    const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+    expect(row.customerContext.formFields).toEqual([{ key: 'note', label: 'Note', type: 'text', value: 'hello' }]);
+  });
+
+  it('Test D10: block status remains organization-scoped and independent of customerContext (Issue #3 regression)', async () => {
+    const orgA = await setupOrg();
+    const orgB = await setupOrg();
+    const deviceIdentifier = 'device-ctx-block-regression';
+    await createToken({ queueId: orgA.queue.id, serviceId: orgA.service.id, deviceIdentifier });
+    await createToken({ queueId: orgB.queue.id, serviceId: orgB.service.id, deviceIdentifier });
+    const device = await prisma.device.findUniqueOrThrow({ where: { deviceIdentifier } });
+    await api().post(`/api/devices/${device.id}/block`).set('Authorization', `Bearer ${orgA.accessToken}`);
+
+    const resA = await api().get('/api/devices').set('Authorization', `Bearer ${orgA.accessToken}`);
+    const resB = await api().get('/api/devices').set('Authorization', `Bearer ${orgB.accessToken}`);
+    const rowA = resA.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+    const rowB = resB.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
+
+    expect(rowA.status).toBe('BLOCKED');
+    expect(rowB.status).toBe('ACTIVE');
+    expect(rowA.customerContext).not.toBeNull();
+    expect(rowB.customerContext).not.toBeNull();
+  });
+});

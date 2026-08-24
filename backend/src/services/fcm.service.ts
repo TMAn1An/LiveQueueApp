@@ -10,6 +10,10 @@ export interface SendResult {
 export interface NotificationPayload {
   title: string;
   body: string;
+  /** FCM data payload values must be strings. Optional and backward
+   * compatible — reminderDispatch.service.ts's existing call site omits it
+   * and continues to send a notification-only message exactly as before. */
+  data?: Record<string, string>;
 }
 
 /** First 8 chars + length only — the raw token itself must never be logged. */
@@ -48,6 +52,7 @@ export async function sendNotification(fcmToken: string, payload: NotificationPa
     await messaging.send({
       token: fcmToken,
       notification: { title: payload.title, body: payload.body },
+      ...(payload.data ? { data: payload.data } : {}),
     });
     logger.info({ token: redact(fcmToken) }, 'FCM notification sent');
     return { ok: true, invalidToken: false };

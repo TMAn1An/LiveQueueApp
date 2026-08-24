@@ -6,7 +6,90 @@ import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
 import { formatDateTime } from '../utils/format';
-import type { DeviceStatus } from '../types/device';
+import type { CustomerContext, Device, DeviceStatus } from '../types/device';
+
+function CustomerContextPanel({ context }: { context: CustomerContext | null }) {
+  if (!context) {
+    return <p className="text-xs italic text-slate-400">No recent queue activity.</p>;
+  }
+
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
+      {context.formFields.map((field) => (
+        <div key={field.key}>
+          <dt className="text-slate-400">{field.label}</dt>
+          <dd className="text-slate-700">
+            {field.type === 'phone' ? (
+              <a href={`tel:${field.value}`} className="text-blue-600 hover:underline">
+                {field.value}
+              </a>
+            ) : field.type === 'email' ? (
+              <a href={`mailto:${field.value}`} className="text-blue-600 hover:underline">
+                {field.value}
+              </a>
+            ) : (
+              field.value
+            )}
+          </dd>
+        </div>
+      ))}
+      <div>
+        <dt className="text-slate-400">Token</dt>
+        <dd className="text-slate-700">{context.serialNumber}</dd>
+      </div>
+      <div>
+        <dt className="text-slate-400">Queue</dt>
+        <dd className="text-slate-700">{context.queue.name}</dd>
+      </div>
+      <div>
+        <dt className="text-slate-400">Service</dt>
+        <dd className="text-slate-700">{context.service.name}</dd>
+      </div>
+      <div>
+        <dt className="text-slate-400">Status</dt>
+        <dd>
+          <StatusBadge status={context.status} />
+        </dd>
+      </div>
+      <div>
+        <dt className="text-slate-400">Taken</dt>
+        <dd className="text-slate-700">{formatDateTime(context.createdAt)}</dd>
+      </div>
+    </dl>
+  );
+}
+
+function DeviceRow({
+  device,
+  onBlock,
+  onUnblock,
+}: {
+  device: Device;
+  onBlock: (deviceId: string) => void;
+  onUnblock: (deviceId: string) => void;
+}) {
+  return (
+    <div className="border-b border-slate-100 py-4 last:border-b-0">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-xs text-slate-500">{device.deviceIdentifier}</span>
+          <StatusBadge status={device.status} />
+        </div>
+        <Button
+          variant={device.status === 'ACTIVE' ? 'danger' : 'secondary'}
+          onClick={() => (device.status === 'ACTIVE' ? onBlock(device.id) : onUnblock(device.id))}
+        >
+          {device.status === 'ACTIVE' ? 'Block Device' : 'Unblock Device'}
+        </Button>
+      </div>
+
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Customer / Visit</h3>
+      <CustomerContextPanel context={device.customerContext} />
+
+      <p className="mt-2 text-xs text-slate-400">Last seen: {formatDateTime(device.lastSeenAt)}</p>
+    </div>
+  );
+}
 
 export function BlockedDevicesPage() {
   const [page, setPage] = useState(1);
@@ -44,39 +127,16 @@ export function BlockedDevicesPage() {
         ) : !result?.data.length ? (
           <EmptyState message="No devices found." />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
-                <th className="py-2 pr-4">Device Identifier</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Last Seen</th>
-                <th className="py-2 pr-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.data.map((device) => (
-                <tr key={device.id} className="border-b border-slate-100">
-                  <td className="py-2 pr-4 font-mono text-xs">{device.deviceIdentifier}</td>
-                  <td className="py-2 pr-4">
-                    <StatusBadge status={device.status} />
-                  </td>
-                  <td className="py-2 pr-4">{formatDateTime(device.lastSeenAt)}</td>
-                  <td className="py-2 pr-4">
-                    <Button
-                      variant={device.status === 'ACTIVE' ? 'danger' : 'secondary'}
-                      onClick={() =>
-                        device.status === 'ACTIVE'
-                          ? blockDevice.mutate(device.id)
-                          : unblockDevice.mutate(device.id)
-                      }
-                    >
-                      {device.status === 'ACTIVE' ? 'Block' : 'Unblock'}
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div>
+            {result.data.map((device) => (
+              <DeviceRow
+                key={device.id}
+                device={device}
+                onBlock={(deviceId) => blockDevice.mutate(deviceId)}
+                onUnblock={(deviceId) => unblockDevice.mutate(deviceId)}
+              />
+            ))}
+          </div>
         )}
         <Pagination pagination={result?.pagination} onPageChange={setPage} />
       </Card>

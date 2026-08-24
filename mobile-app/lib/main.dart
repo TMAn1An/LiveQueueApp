@@ -132,6 +132,7 @@ class LiveQueueApp extends StatelessWidget {
             tokenRepository: context.read<TokenRepository>(),
             historyRepository: context.read<HistoryRepository>(),
             notificationService: context.read<NotificationService>(),
+            fcmService: context.read<FcmService>(),
           ),
         ),
         ChangeNotifierProvider<HistoryProvider>(
