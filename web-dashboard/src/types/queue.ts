@@ -39,6 +39,8 @@ export interface Queue {
   createdAt: string;
   updatedAt: string;
   services: QueueServiceItem[];
+  /** Only present on the queue-list response (GET /api/queues) — not on single-queue reads. */
+  counterCount?: number;
 }
 
 export interface Counter {

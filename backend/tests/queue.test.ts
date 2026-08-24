@@ -42,6 +42,29 @@ describe('Queue CRUD', () => {
     expect(res.body.data).toHaveLength(2);
   });
 
+  it('includes an accurate counterCount per queue in the list response (Issue 1: discoverability)', async () => {
+    const ctx = await registerOwner();
+    const queueA = await createQueue(ctx.accessToken, { name: 'Queue A' });
+    const queueB = await createQueue(ctx.accessToken, { name: 'Queue B' });
+
+    await api()
+      .post(`/api/queues/${queueA.id}/counters`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ name: 'Counter 1' });
+    await api()
+      .post(`/api/queues/${queueA.id}/counters`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ name: 'Counter 2' });
+
+    const res = await api().get('/api/queues').set('Authorization', `Bearer ${ctx.accessToken}`);
+    expect(res.status).toBe(200);
+
+    const a = res.body.data.find((q: { id: string }) => q.id === queueA.id);
+    const b = res.body.data.find((q: { id: string }) => q.id === queueB.id);
+    expect(a.counterCount).toBe(2);
+    expect(b.counterCount).toBe(0);
+  });
+
   it('gets a single queue by id', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);

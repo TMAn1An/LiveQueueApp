@@ -33,14 +33,24 @@ async function findQueueOrThrow(
   return queue;
 }
 
+/**
+ * Counter count is a DB-level aggregate (Prisma `_count`, a single COUNT
+ * subquery per row via one query overall — not one request per queue),
+ * used only here to power the dashboard's queue-list "Counters" column
+ * (Issue 1: discoverability). No other queue endpoint needs it, so
+ * serializeQueue/QueueWithServices stay untouched.
+ */
 export async function listQueues(organizationId: string) {
   const queues = await prisma.queue.findMany({
     where: { organizationId, deletedAt: null },
-    include: { services: true },
+    include: { services: true, _count: { select: { counters: true } } },
     orderBy: { createdAt: 'desc' },
   });
 
-  return queues.map(serializeQueue);
+  return queues.map(({ _count, ...queue }) => ({
+    ...serializeQueue(queue),
+    counterCount: _count.counters,
+  }));
 }
 
 export async function getQueue(organizationId: string, queueId: string) {
