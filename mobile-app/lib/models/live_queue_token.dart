@@ -3,6 +3,12 @@ import 'counter_info.dart';
 /// Mirrors the backend's TokenStatus enum exactly (backend/prisma/schema.prisma).
 enum TokenStatus { waiting, called, inProgress, completed, skipped, unknown }
 
+/// Shared by LiveQueueToken.isActive and TokenHistoryScreen (which only has
+/// a bare TokenStatus, not a full LiveQueueToken, to check) — kept in one
+/// place so "what counts as still-active" is never defined twice.
+bool isActiveTokenStatus(TokenStatus status) =>
+    status == TokenStatus.waiting || status == TokenStatus.called || status == TokenStatus.inProgress;
+
 TokenStatus parseTokenStatus(String raw) {
   switch (raw) {
     case 'WAITING':
@@ -57,7 +63,7 @@ class LiveQueueToken {
   final DateTime? completedAt;
   final DateTime? skippedAt;
 
-  bool get isActive => status == TokenStatus.waiting || status == TokenStatus.called || status == TokenStatus.inProgress;
+  bool get isActive => isActiveTokenStatus(status);
 
   factory LiveQueueToken.fromJson(Map<String, dynamic> json) {
     return LiveQueueToken(
