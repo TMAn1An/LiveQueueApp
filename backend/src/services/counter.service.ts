@@ -72,7 +72,10 @@ export async function deleteCounter(organizationId: string, counterId: string) {
 
 /**
  * Assignment must verify the target staff member belongs to the same
- * organization as the counter — never trust a staffId in isolation.
+ * organization as the counter — never trust a staffId in isolation. A staff
+ * member (regardless of role) may be assigned to at most one counter at a
+ * time — physically they can only be at one counter — so any existing
+ * assignment elsewhere is rejected rather than silently reassigned.
  */
 export async function assignCounter(organizationId: string, counterId: string, staffId: string) {
   const counter = await findCounterScoped(organizationId, counterId);
@@ -87,6 +90,17 @@ export async function assignCounter(organizationId: string, counterId: string, s
       403,
       'STAFF_ORGANIZATION_MISMATCH',
       'Staff member does not belong to this organization.',
+    );
+  }
+
+  const existingAssignment = await prisma.counter.findFirst({
+    where: { staffId, id: { not: counterId } },
+  });
+  if (existingAssignment) {
+    throw new AppError(
+      409,
+      'STAFF_ALREADY_ASSIGNED',
+      'This staff member is already assigned to another counter.',
     );
   }
 

@@ -133,6 +133,73 @@ describe('Counter staff assignment', () => {
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('STAFF_NOT_FOUND');
   });
+
+  it('rejects assigning a staff member who is already assigned to a different counter', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const counterA = await createCounter(ctx.accessToken, queue.id, 'Counter A');
+    const counterB = await createCounter(ctx.accessToken, queue.id, 'Counter B');
+
+    await api()
+      .patch(`/api/counters/${counterA.id}/assign`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ staffId: ctx.staffId });
+
+    const res = await api()
+      .patch(`/api/counters/${counterB.id}/assign`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ staffId: ctx.staffId });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('STAFF_ALREADY_ASSIGNED');
+
+    // Counter B must remain unassigned — the rejected call had no side effect.
+    const check = await api()
+      .get(`/api/queues/${queue.id}/counters`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+    const b = check.body.data.find((c: { id: string }) => c.id === counterB.id);
+    expect(b.staffId).toBeNull();
+  });
+
+  it('allows re-assigning a counter to the staff member already assigned to it (no-op, not a conflict)', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const counter = await createCounter(ctx.accessToken, queue.id);
+
+    await api()
+      .patch(`/api/counters/${counter.id}/assign`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ staffId: ctx.staffId });
+
+    const res = await api()
+      .patch(`/api/counters/${counter.id}/assign`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ staffId: ctx.staffId });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.staffId).toBe(ctx.staffId);
+  });
+
+  it('allows a different, unassigned staff member to be assigned to a second counter', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const counterA = await createCounter(ctx.accessToken, queue.id, 'Counter A');
+    const counterB = await createCounter(ctx.accessToken, queue.id, 'Counter B');
+    const other = await createRestrictedStaff(ctx.organizationId);
+
+    await api()
+      .patch(`/api/counters/${counterA.id}/assign`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ staffId: ctx.staffId });
+
+    const res = await api()
+      .patch(`/api/counters/${counterB.id}/assign`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ staffId: other.staffId });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.staffId).toBe(other.staffId);
+  });
 });
 
 describe('Counter permissions', () => {
