@@ -25,6 +25,7 @@ coverage/
 .claude/
 .agents/
 skills-lock.json
+CLAUDE.md
 
 # OS
 .DS_Store
