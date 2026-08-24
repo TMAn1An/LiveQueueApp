@@ -1,6 +1,6 @@
 import type { StaffRole } from '@prisma/client';
 import { prisma } from '../config/prisma';
-import type { Permission } from '../constants/permissions';
+import { getEffectivePermissions, type Permission } from '../constants/permissions';
 import { verifyAccessToken } from './tokens';
 
 export interface AuthContext {
@@ -40,6 +40,6 @@ export async function resolveAuthContext(rawToken: string): Promise<AuthContext 
     organizationId: staff.organizationId,
     email: staff.email,
     role: staff.role,
-    permissions: staff.permissions as Permission[],
+    permissions: getEffectivePermissions(staff.role),
   };
 }

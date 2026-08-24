@@ -4,7 +4,7 @@ import { AppError } from '../utils/AppError';
 import { hashPassword, verifyPassword } from '../utils/password';
 import { signAccessToken } from '../utils/tokens';
 import { createSession, revokeSession, rotateSession, type SessionMeta } from './session.service';
-import { OWNER_PERMISSIONS, type Permission } from '../constants/permissions';
+import { getEffectivePermissions } from '../constants/permissions';
 
 interface RegisterInput {
   organizationName: string;
@@ -72,7 +72,7 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
         email: input.email,
         passwordHash,
         role: 'OWNER',
-        permissions: OWNER_PERMISSIONS,
+        permissions: getEffectivePermissions('OWNER'),
       },
     });
 
@@ -84,7 +84,7 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
   return {
     staff: toSafeStaff(staff),
     organization: toSafeOrganization(organization),
-    permissions: staff.permissions as Permission[],
+    permissions: getEffectivePermissions(staff.role),
     ...tokens,
   };
 }
@@ -122,7 +122,7 @@ export async function login(input: LoginInput, meta: SessionMeta) {
   return {
     staff: toSafeStaff(updatedStaff),
     organization: toSafeOrganization(staff.organization),
-    permissions: updatedStaff.permissions as Permission[],
+    permissions: getEffectivePermissions(updatedStaff.role),
     ...tokens,
   };
 }
@@ -140,7 +140,7 @@ export async function getCurrentUser(staffId: string) {
   return {
     staff: toSafeStaff(staff),
     organization: toSafeOrganization(staff.organization),
-    permissions: staff.permissions as Permission[],
+    permissions: getEffectivePermissions(staff.role),
   };
 }
 

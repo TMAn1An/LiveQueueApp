@@ -42,13 +42,13 @@ describe('GET /api/devices (staff-only)', () => {
     expect(res.body.data[0].deviceIdentifier).toBe('device-to-block');
   });
 
-  it('requires manage_blocked_devices permission', async () => {
+  it('allows ACCOUNTANT (manage_blocked_devices is part of the frozen ACCOUNTANT policy)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+    const accountant = await createRestrictedStaff(ctx.organizationId);
 
-    const res = await api().get('/api/devices').set('Authorization', `Bearer ${restricted.accessToken}`);
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${accountant.accessToken}`);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 
   it('rejects an unauthenticated request', async () => {
@@ -109,17 +109,28 @@ describe('PATCH /api/devices/:deviceId/status', () => {
     expect(res.status).toBe(404);
   });
 
-  it('requires manage_blocked_devices permission', async () => {
+  it('allows ACCOUNTANT to block/unblock devices (frozen RBAC policy)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+    const accountant = await createRestrictedStaff(ctx.organizationId);
     const registered = await api().post('/api/devices/register').send({ deviceIdentifier: 'device-perm' });
 
     const res = await api()
       .patch(`/api/devices/${registered.body.data.id}/status`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`)
+      .set('Authorization', `Bearer ${accountant.accessToken}`)
       .send({ status: 'BLOCKED' });
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('BLOCKED');
+  });
+
+  it('rejects an unauthenticated status change request', async () => {
+    const registered = await api().post('/api/devices/register').send({ deviceIdentifier: 'device-perm-2' });
+
+    const res = await api()
+      .patch(`/api/devices/${registered.body.data.id}/status`)
+      .send({ status: 'BLOCKED' });
+
+    expect(res.status).toBe(401);
   });
 
   it('rejects an invalid status value', async () => {

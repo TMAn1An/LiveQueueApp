@@ -9,11 +9,7 @@ export async function list(req: Request, res: Response) {
 }
 
 export async function create(req: Request, res: Response) {
-  const staff = await staffService.createStaff(
-    req.auth!.organizationId,
-    req.auth!.permissions,
-    req.body,
-  );
+  const staff = await staffService.createStaff(req.auth!.organizationId, req.body);
   res.status(201).json({ success: true, data: staff });
   await auditService.recordAuditEventSafely({
     actor: auditService.actorFromAuth(req.auth!),
@@ -35,7 +31,6 @@ export async function get(req: Request, res: Response) {
 export async function update(req: Request, res: Response) {
   const staff = await staffService.updateStaff(
     req.auth!.organizationId,
-    req.auth!.permissions,
     req.params.staffId as string,
     req.body,
   );

@@ -166,9 +166,9 @@ describe('Queue soft deletion', () => {
 });
 
 describe('Queue permissions', () => {
-  it('blocks queue creation for staff without manage_queues', async () => {
+  it('blocks queue creation for ACCOUNTANT (manage_queues is not part of that role)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['view_reports']);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .post('/api/queues')
@@ -178,10 +178,10 @@ describe('Queue permissions', () => {
     expect(res.status).toBe(403);
   });
 
-  it('blocks queue update and status change for staff without manage_queues', async () => {
+  it('blocks queue update, pause/resume, and delete for ACCOUNTANT', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const updateRes = await api()
       .put(`/api/queues/${queue.id}`)
@@ -201,10 +201,10 @@ describe('Queue permissions', () => {
     expect(deleteRes.status).toBe(403);
   });
 
-  it('allows any authenticated staff to read queues regardless of permissions', async () => {
+  it('allows ACCOUNTANT to read queues (view-only, per the frozen RBAC policy)', async () => {
     const ctx = await registerOwner();
     await createQueue(ctx.accessToken);
-    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .get('/api/queues')

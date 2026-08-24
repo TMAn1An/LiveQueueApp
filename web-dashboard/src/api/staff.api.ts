@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { Permission, StaffRole, StaffStatus, Staff } from '../types/auth';
+import type { StaffRole, StaffStatus, Staff } from '../types/auth';
 
 export function listStaff(page = 1, pageSize = 20) {
   return apiFetch<Staff[]>('/api/staff', { query: { page, pageSize } });
@@ -10,7 +10,6 @@ export interface CreateStaffInput {
   email: string;
   password: string;
   role: Exclude<StaffRole, 'OWNER'>;
-  permissions: Permission[];
 }
 
 export function createStaff(input: CreateStaffInput) {
@@ -22,7 +21,6 @@ export interface UpdateStaffInput {
   email?: string;
   password?: string;
   role?: Exclude<StaffRole, 'OWNER'>;
-  permissions?: Permission[];
   status?: StaffStatus;
 }
 

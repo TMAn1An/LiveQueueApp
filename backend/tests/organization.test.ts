@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createRestrictedStaff, registerOwner } from './helpers/app';
+import { api, createRestrictedStaff, createStaffWithRole, registerOwner } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 
@@ -37,9 +37,9 @@ describe('PUT /api/organizations/me', () => {
     expect(res.body.data.name).toBe('Renamed Org');
   });
 
-  it('rejects a non-owner even with manage_organization permission', async () => {
+  it('rejects a non-owner even with manage_organization permission (ADMIN has it by default)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['manage_organization']);
+    const restricted = await createStaffWithRole(ctx.organizationId, 'ADMIN');
 
     const res = await api()
       .put('/api/organizations/me')
@@ -49,9 +49,9 @@ describe('PUT /api/organizations/me', () => {
     expect(res.status).toBe(403);
   });
 
-  it('rejects a staff member without manage_organization', async () => {
+  it('rejects a staff member without manage_organization (ACCOUNTANT)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .put('/api/organizations/me')
@@ -102,9 +102,23 @@ describe('DELETE /api/organizations/me', () => {
     expect(stillExists).not.toBeNull();
   });
 
-  it('rejects a non-owner from deleting the organization', async () => {
+  it('rejects a non-owner from deleting the organization, even ADMIN with manage_organization', async () => {
     const ctx = await registerOwner({ organizationName: 'Acme Corp' });
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['manage_organization']);
+    const restricted = await createStaffWithRole(ctx.organizationId, 'ADMIN');
+
+    const res = await api()
+      .delete('/api/organizations/me')
+      .set('Authorization', `Bearer ${restricted.accessToken}`)
+      .send({ confirmName: 'Acme Corp' });
+
+    expect(res.status).toBe(403);
+    const stillExists = await prisma.organization.findUnique({ where: { id: ctx.organizationId } });
+    expect(stillExists).not.toBeNull();
+  });
+
+  it('rejects an ACCOUNTANT from deleting the organization', async () => {
+    const ctx = await registerOwner({ organizationName: 'Acme Corp' });
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .delete('/api/organizations/me')

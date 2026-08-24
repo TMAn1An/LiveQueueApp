@@ -7,12 +7,12 @@ import { listAuditLogsSchema } from '../validators/auditLog.validators';
 
 const router = Router();
 
-// Gated by the existing view_reports permission (approved Phase 7 decision
-// — no new permission was created for this).
+// Dedicated permission (frozen RBAC policy) — deliberately separate from
+// view_reports so ACCOUNTANT can have reports without audit-log access.
 router.get(
   '/',
   authenticate,
-  requirePermission('view_reports'),
+  requirePermission('view_audit_logs'),
   validate(listAuditLogsSchema),
   auditLogController.list,
 );

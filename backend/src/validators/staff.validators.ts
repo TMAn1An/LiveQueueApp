@@ -1,12 +1,10 @@
 import { z } from 'zod';
 import { emailSchema, passwordSchema } from './auth.validators';
-import { PERMISSIONS } from '../constants/permissions';
 
 // OWNER is deliberately excluded — an organization has exactly one owner,
 // created only at registration (ADR-005/spec 4.1). Staff management creates
 // and edits ADMIN/ACCOUNTANT staff, never a second OWNER.
 const manageableRole = z.enum(['ADMIN', 'ACCOUNTANT']);
-const permissionsSchema = z.array(z.enum(PERMISSIONS)).default([]);
 const staffStatus = z.enum(['ACTIVE', 'SUSPENDED']);
 
 export const staffIdParams = z.object({
@@ -26,7 +24,6 @@ export const createStaffSchema = {
     email: emailSchema,
     password: passwordSchema,
     role: manageableRole,
-    permissions: permissionsSchema,
   }),
 };
 
@@ -37,7 +34,6 @@ export const updateStaffSchema = {
     email: emailSchema.optional(),
     password: passwordSchema.optional(),
     role: manageableRole.optional(),
-    permissions: z.array(z.enum(PERMISSIONS)).optional(),
     status: staffStatus.optional(),
   }),
 };

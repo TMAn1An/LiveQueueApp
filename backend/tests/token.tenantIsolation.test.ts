@@ -67,7 +67,7 @@ describe('Token tenant isolation', () => {
     expect(res.body.error.code).toBe('COUNTER_NOT_FOUND');
   });
 
-  it('requires operate_tokens permission for call/start/complete/skip/next', async () => {
+  it('requires authentication for call/next', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
@@ -75,18 +75,26 @@ describe('Token tenant isolation', () => {
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['manage_queues']);
+    const callRes = await api().post(`/api/tokens/${token.id}/call`).send({ counterId: counter.id });
+    expect(callRes.status).toBe(401);
+
+    const nextRes = await api().post(`/api/queues/${queue.id}/next`).send({ counterId: counter.id });
+    expect(nextRes.status).toBe(401);
+  });
+
+  it('allows ACCOUNTANT to call/next (operate_tokens is part of the frozen ACCOUNTANT policy)', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
+    const token = await createToken({ queueId: queue.id, serviceId: service.id });
+    const accountant = await createRestrictedStaff(ctx.organizationId);
 
     const callRes = await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`)
+      .set('Authorization', `Bearer ${accountant.accessToken}`)
       .send({ counterId: counter.id });
-    expect(callRes.status).toBe(403);
-
-    const nextRes = await api()
-      .post(`/api/queues/${queue.id}/next`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`)
-      .send({ counterId: counter.id });
-    expect(nextRes.status).toBe(403);
+    expect(callRes.status).toBe(200);
   });
 });

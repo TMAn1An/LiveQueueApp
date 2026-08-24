@@ -2,7 +2,6 @@
 export const PERMISSIONS = [
   'manage_organization',
   'manage_staff',
-  'manage_roles',
   'manage_queues',
   'manage_services',
   'manage_counters',
@@ -10,6 +9,7 @@ export const PERMISSIONS = [
   'view_reports',
   'export_reports',
   'manage_blocked_devices',
+  'view_audit_logs',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

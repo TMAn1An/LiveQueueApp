@@ -4,6 +4,7 @@ import { AuthProvider } from './context/AuthContext';
 import { AuthLayout } from './layouts/AuthLayout';
 import { AppLayout } from './layouts/AppLayout';
 import { ProtectedRoute } from './layouts/ProtectedRoute';
+import { PermissionRoute } from './layouts/PermissionRoute';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -40,11 +41,19 @@ function App() {
                 <Route path="/queues" element={<QueuesPage />} />
                 <Route path="/queues/:queueId" element={<QueueDetailsPage />} />
                 <Route path="/queues/:queueId/counters" element={<QueueCountersPage />} />
-                <Route path="/staff" element={<StaffPage />} />
-                <Route path="/devices" element={<BlockedDevicesPage />} />
+                <Route element={<PermissionRoute permission="manage_staff" />}>
+                  <Route path="/staff" element={<StaffPage />} />
+                </Route>
+                <Route element={<PermissionRoute permission="manage_blocked_devices" />}>
+                  <Route path="/devices" element={<BlockedDevicesPage />} />
+                </Route>
                 <Route path="/reports" element={<ReportsPage />} />
-                <Route path="/audit-logs" element={<AuditLogsPage />} />
-                <Route path="/organization" element={<OrganizationSettingsPage />} />
+                <Route element={<PermissionRoute permission="view_audit_logs" />}>
+                  <Route path="/audit-logs" element={<AuditLogsPage />} />
+                </Route>
+                <Route element={<PermissionRoute permission="manage_organization" />}>
+                  <Route path="/organization" element={<OrganizationSettingsPage />} />
+                </Route>
                 <Route path="/profile" element={<ProfilePage />} />
               </Route>
             </Route>

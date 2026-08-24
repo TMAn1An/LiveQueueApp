@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createRestrictedStaff, registerOwner } from './helpers/app';
+import { api, createRestrictedStaff, createStaffWithRole, registerOwner } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 import { recordAuditEvent } from '../src/services/audit.service';
@@ -161,14 +161,37 @@ describe('GET /api/audit-logs', () => {
     expect(res.status).toBe(401);
   });
 
-  it('requires the view_reports permission', async () => {
+  it('requires the view_audit_logs permission (ACCOUNTANT does not have it)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['manage_queues']);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .get('/api/audit-logs')
       .set('Authorization', `Bearer ${restricted.accessToken}`);
     expect(res.status).toBe(403);
+  });
+
+  it('is granted separately from view_reports — ACCOUNTANT has view_reports but is still denied audit logs', async () => {
+    const ctx = await registerOwner();
+    const restricted = await createRestrictedStaff(ctx.organizationId);
+
+    const reportsRes = await api()
+      .get('/api/reports')
+      .set('Authorization', `Bearer ${restricted.accessToken}`);
+    expect(reportsRes.status).toBe(200);
+
+    const auditRes = await api()
+      .get('/api/audit-logs')
+      .set('Authorization', `Bearer ${restricted.accessToken}`);
+    expect(auditRes.status).toBe(403);
+  });
+
+  it('allows ADMIN (full access, including audit logs)', async () => {
+    const ctx = await registerOwner();
+    const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
+
+    const res = await api().get('/api/audit-logs').set('Authorization', `Bearer ${admin.accessToken}`);
+    expect(res.status).toBe(200);
   });
 
   it('allows a staff member holding view_reports', async () => {

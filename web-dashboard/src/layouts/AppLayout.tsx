@@ -25,9 +25,11 @@ export function AppLayout() {
           <NavLink to="/queues" className={navLinkClass}>
             Queues
           </NavLink>
-          <NavLink to="/staff" className={navLinkClass}>
-            Staff
-          </NavLink>
+          {hasPermission('manage_staff') && (
+            <NavLink to="/staff" className={navLinkClass}>
+              Staff
+            </NavLink>
+          )}
           {hasPermission('manage_blocked_devices') && (
             <NavLink to="/devices" className={navLinkClass}>
               Blocked Devices
@@ -38,14 +40,16 @@ export function AppLayout() {
               Reports
             </NavLink>
           )}
-          {hasPermission('view_reports') && (
+          {hasPermission('view_audit_logs') && (
             <NavLink to="/audit-logs" className={navLinkClass}>
               Audit Logs
             </NavLink>
           )}
-          <NavLink to="/organization" className={navLinkClass}>
-            Organization Settings
-          </NavLink>
+          {hasPermission('manage_organization') && (
+            <NavLink to="/organization" className={navLinkClass}>
+              Organization Settings
+            </NavLink>
+          )}
           <NavLink to="/profile" className={navLinkClass}>
             Profile
           </NavLink>

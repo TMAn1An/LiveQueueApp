@@ -9,7 +9,7 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { Pagination } from '../components/Pagination';
 import { ApiError } from '../api/client';
-import { PERMISSIONS, type Permission, type Staff, type StaffRole } from '../types/auth';
+import type { Staff, StaffRole } from '../types/auth';
 
 const MANAGEABLE_ROLES: Exclude<StaffRole, 'OWNER'>[] = ['ADMIN', 'ACCOUNTANT'];
 
@@ -19,19 +19,12 @@ function CreateStaffModal({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<Exclude<StaffRole, 'OWNER'>>('ADMIN');
-  const [permissions, setPermissions] = useState<Permission[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  function togglePermission(permission: Permission) {
-    setPermissions((prev) =>
-      prev.includes(permission) ? prev.filter((p) => p !== permission) : [...prev, permission],
-    );
-  }
 
   async function handleSubmit() {
     setError(null);
     try {
-      await createStaff.mutateAsync({ name, email, password, role, permissions });
+      await createStaff.mutateAsync({ name, email, password, role });
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create staff member.');
@@ -84,21 +77,9 @@ function CreateStaffModal({ onClose }: { onClose: () => void }) {
           className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
         />
       </div>
-      <div className="mb-4">
-        <label className="mb-1 block text-xs text-slate-500">Permissions</label>
-        <div className="grid grid-cols-2 gap-1">
-          {PERMISSIONS.map((p) => (
-            <label key={p} className="flex items-center gap-1 text-xs text-slate-600">
-              <input
-                type="checkbox"
-                checked={permissions.includes(p)}
-                onChange={() => togglePermission(p)}
-              />
-              {p}
-            </label>
-          ))}
-        </div>
-      </div>
+      <p className="mb-4 text-xs text-slate-400">
+        Permissions are determined entirely by the selected role and cannot be customized.
+      </p>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>
           Cancel

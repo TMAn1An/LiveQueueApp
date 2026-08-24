@@ -268,7 +268,7 @@ describe('GET /api/queues/:queueId/form-fields (Phase 6 addition)', () => {
   it('any authenticated staff member may read (no manage_queues required)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .get(`/api/queues/${queue.id}/form-fields`)
@@ -291,10 +291,10 @@ describe('GET /api/queues/:queueId/form-fields (Phase 6 addition)', () => {
 });
 
 describe('Dynamic form permissions', () => {
-  it('blocks form replacement without manage_queues', async () => {
+  it('blocks form replacement for ACCOUNTANT (no manage_queues)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['manage_services']);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .put(`/api/queues/${queue.id}/form-fields`)

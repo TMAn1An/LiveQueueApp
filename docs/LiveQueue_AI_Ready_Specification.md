@@ -511,12 +511,13 @@ Rules:
 
 # 7.4 Permissions
 
-Recommended permissions:
+There are exactly three staff roles — `OWNER`, `ADMIN`, `ACCOUNTANT` — each with a fixed permission set. There is no per-user permission customization and no separate roles-management permission; roles are assigned directly by name through the staff create/update endpoints. See `docs/ARCHITECTURE_DECISIONS.md`'s ADR-020 for the full rationale and role matrix.
+
+Permission set:
 
 ```text
 manage_organization
 manage_staff
-manage_roles
 manage_queues
 manage_services
 manage_counters
@@ -524,7 +525,11 @@ operate_tokens
 view_reports
 export_reports
 manage_blocked_devices
+view_audit_logs
 ```
+
+- `OWNER` and `ADMIN` hold all 10. Admin's only restrictions — cannot delete the Owner, cannot delete the organization — are enforced by dedicated role checks, independent of this permission list.
+- `ACCOUNTANT` holds exactly `manage_counters`, `operate_tokens`, `view_reports`, `export_reports`, `manage_blocked_devices`.
 
 The backend must enforce permissions.
 

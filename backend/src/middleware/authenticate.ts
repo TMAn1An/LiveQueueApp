@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 import { AppError } from '../utils/AppError';
 import { verifyAccessToken } from '../utils/tokens';
 import { prisma } from '../config/prisma';
-import type { Permission } from '../constants/permissions';
+import { getEffectivePermissions } from '../constants/permissions';
 
 /**
  * Verifies the JWT access token and loads the current staff + organization
@@ -52,7 +52,9 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     organizationId: staff.organizationId,
     email: staff.email,
     role: staff.role,
-    permissions: staff.permissions as Permission[],
+    // Derived from role, never trusted from the stored `permissions` column
+    // (frozen RBAC policy) — see getEffectivePermissions's doc comment.
+    permissions: getEffectivePermissions(staff.role),
   };
 
   next();

@@ -56,13 +56,18 @@ describe('GET /api/reports', () => {
     expect(res.status).toBe(422);
   });
 
-  it('requires view_reports permission', async () => {
+  it('requires authentication', async () => {
+    const res = await api().get('/api/reports');
+    expect(res.status).toBe(401);
+  });
+
+  it('allows ACCOUNTANT (view_reports is part of the frozen ACCOUNTANT policy)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, []);
+    const accountant = await createRestrictedStaff(ctx.organizationId);
 
-    const res = await api().get('/api/reports').set('Authorization', `Bearer ${restricted.accessToken}`);
+    const res = await api().get('/api/reports').set('Authorization', `Bearer ${accountant.accessToken}`);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 
   it("does not mix another organization's tokens into the count", async () => {
@@ -96,14 +101,22 @@ describe('GET /api/reports/export', () => {
     expect(res.text).toContain('Queue Performance');
   });
 
-  it('requires export_reports permission (distinct from view_reports)', async () => {
+  it('requires authentication', async () => {
+    const res = await api().get('/api/reports/export');
+    expect(res.status).toBe(401);
+  });
+
+  it('allows ACCOUNTANT (export_reports is part of the frozen ACCOUNTANT policy)', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['view_reports']);
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    await createToken({ queueId: queue.id, serviceId: service.id });
+    const accountant = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .get('/api/reports/export')
-      .set('Authorization', `Bearer ${restricted.accessToken}`);
+      .set('Authorization', `Bearer ${accountant.accessToken}`);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
   });
 });

@@ -390,7 +390,7 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
   it('a permission-denied request never creates an audit event', async () => {
     const ctx = await registerOwner();
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['operate_tokens']);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const res = await api()
       .post('/api/queues')

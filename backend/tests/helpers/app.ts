@@ -1,8 +1,9 @@
 import request from 'supertest';
+import type { StaffRole } from '@prisma/client';
 import { createApp } from '../../src/app';
 import { prisma } from '../../src/config/prisma';
 import { hashPassword } from '../../src/utils/password';
-import type { Permission } from '../../src/constants/permissions';
+import { getEffectivePermissions } from '../../src/constants/permissions';
 
 export const app = createApp();
 export const api = () => request(app);
@@ -49,25 +50,28 @@ export interface RestrictedStaffContext {
 }
 
 /**
- * There is no staff-invite endpoint yet (Phase 6), so permission-enforcement
- * tests seed a staff row directly with a restricted permission set, then log
- * in through the real endpoint to get a real access token.
+ * There is no staff-invite endpoint yet (Phase 6), so authorization tests
+ * seed a staff row directly with a given role, then log in through the real
+ * endpoint to get a real access token. Permissions are derived entirely from
+ * `role` under the frozen RBAC policy (backend/src/constants/permissions.ts)
+ * — there is no such thing as an arbitrary per-staff permission set anymore,
+ * so this helper takes a role, not a permission list.
  */
-export async function createRestrictedStaff(
+export async function createStaffWithRole(
   organizationId: string,
-  permissions: Permission[],
+  role: Exclude<StaffRole, 'OWNER'>,
 ): Promise<RestrictedStaffContext> {
-  const email = `restricted-${Math.random().toString(36).slice(2, 8)}@example.com`;
+  const email = `${role.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const password = 'Password123';
 
   const staff = await prisma.staff.create({
     data: {
       organizationId,
-      name: 'Restricted Staff',
+      name: `Test ${role}`,
       email,
       passwordHash: await hashPassword(password),
-      role: 'ADMIN',
-      permissions,
+      role,
+      permissions: getEffectivePermissions(role),
       status: 'ACTIVE',
     },
   });
@@ -75,7 +79,7 @@ export async function createRestrictedStaff(
   const loginRes = await api().post('/api/auth/login').send({ email, password });
   if (loginRes.status !== 200) {
     throw new Error(
-      `createRestrictedStaff login failed: ${loginRes.status} ${JSON.stringify(loginRes.body)}`,
+      `createStaffWithRole login failed: ${loginRes.status} ${JSON.stringify(loginRes.body)}`,
     );
   }
 
@@ -84,6 +88,16 @@ export async function createRestrictedStaff(
     organizationId,
     accessToken: loginRes.body.data.accessToken,
   };
+}
+
+/**
+ * ACCOUNTANT is the only genuinely-restricted role under the frozen policy
+ * (ADMIN has full access apart from the two Owner/organization-deletion hard
+ * rules) — kept as the default "give me someone who lacks most things" helper
+ * for tests that don't care about the specific role, only that they're denied.
+ */
+export function createRestrictedStaff(organizationId: string): Promise<RestrictedStaffContext> {
+  return createStaffWithRole(organizationId, 'ACCOUNTANT');
 }
 
 export interface QueueResponse {

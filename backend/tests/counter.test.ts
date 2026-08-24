@@ -136,40 +136,69 @@ describe('Counter staff assignment', () => {
 });
 
 describe('Counter permissions', () => {
-  it('blocks counter creation, update, status change, assignment, and delete without manage_counters', async () => {
+  it('blocks counter creation, update, status change, assignment, and delete without any staff permissions', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['manage_queues']);
-
+    // No role under the frozen RBAC policy lacks manage_counters (OWNER,
+    // ADMIN, and ACCOUNTANT all have it) — an unauthenticated/invalid token
+    // is the only way left to demonstrate the route is actually gated.
     const createRes = await api()
       .post(`/api/queues/${queue.id}/counters`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`)
       .send({ name: 'X' });
-    expect(createRes.status).toBe(403);
+    expect(createRes.status).toBe(401);
 
-    const updateRes = await api()
-      .put(`/api/counters/${counter.id}`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`)
-      .send({ name: 'X' });
-    expect(updateRes.status).toBe(403);
+    const updateRes = await api().put(`/api/counters/${counter.id}`).send({ name: 'X' });
+    expect(updateRes.status).toBe(401);
 
     const statusRes = await api()
       .patch(`/api/counters/${counter.id}/status`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`)
       .send({ status: 'ON_BREAK' });
-    expect(statusRes.status).toBe(403);
+    expect(statusRes.status).toBe(401);
 
     const assignRes = await api()
       .patch(`/api/counters/${counter.id}/assign`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`)
       .send({ staffId: ctx.staffId });
-    expect(assignRes.status).toBe(403);
+    expect(assignRes.status).toBe(401);
+
+    const deleteRes = await api().delete(`/api/counters/${counter.id}`);
+    expect(deleteRes.status).toBe(401);
+  });
+
+  it('allows ACCOUNTANT to create, update, change status, assign, and delete counters (frozen RBAC policy)', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const accountant = await createRestrictedStaff(ctx.organizationId);
+
+    const createRes = await api()
+      .post(`/api/queues/${queue.id}/counters`)
+      .set('Authorization', `Bearer ${accountant.accessToken}`)
+      .send({ name: 'X' });
+    expect(createRes.status).toBe(201);
+    const counterId = createRes.body.data.id;
+
+    const updateRes = await api()
+      .put(`/api/counters/${counterId}`)
+      .set('Authorization', `Bearer ${accountant.accessToken}`)
+      .send({ name: 'Y' });
+    expect(updateRes.status).toBe(200);
+
+    const statusRes = await api()
+      .patch(`/api/counters/${counterId}/status`)
+      .set('Authorization', `Bearer ${accountant.accessToken}`)
+      .send({ status: 'ON_BREAK' });
+    expect(statusRes.status).toBe(200);
+
+    const assignRes = await api()
+      .patch(`/api/counters/${counterId}/assign`)
+      .set('Authorization', `Bearer ${accountant.accessToken}`)
+      .send({ staffId: ctx.staffId });
+    expect(assignRes.status).toBe(200);
 
     const deleteRes = await api()
-      .delete(`/api/counters/${counter.id}`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`);
-    expect(deleteRes.status).toBe(403);
+      .delete(`/api/counters/${counterId}`)
+      .set('Authorization', `Bearer ${accountant.accessToken}`);
+    expect(deleteRes.status).toBe(204);
   });
 });
 

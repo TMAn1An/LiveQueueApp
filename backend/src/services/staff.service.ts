@@ -3,35 +3,11 @@ import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { hashPassword } from '../utils/password';
-import type { Permission } from '../constants/permissions';
+import { getEffectivePermissions } from '../constants/permissions';
 import type { createStaffSchema, updateStaffSchema } from '../validators/staff.validators';
 
 type CreateStaffInput = z.infer<typeof createStaffSchema.body>;
 type UpdateStaffInput = z.infer<typeof updateStaffSchema.body>;
-
-/**
- * A staff member can never grant — to themselves or anyone else — a
- * permission they do not already hold (Phase 6 pre-commit review finding).
- * `manage_staff` alone must not be usable to mint or self-escalate into
- * `manage_organization` or any other permission the caller lacks. Only
- * checked when `requestedPermissions` is actually part of the request body —
- * an update that doesn't touch `permissions` has nothing to grant.
- */
-function assertGrantablePermissions(
-  callerPermissions: Permission[],
-  requestedPermissions: Permission[] | undefined,
-): void {
-  if (!requestedPermissions) return;
-
-  const ungranted = requestedPermissions.find((p) => !callerPermissions.includes(p));
-  if (ungranted) {
-    throw new AppError(
-      403,
-      'PERMISSION_ESCALATION_DENIED',
-      `You cannot grant a permission you do not have: ${ungranted}.`,
-    );
-  }
-}
 
 /**
  * Spec 7.3's "Owner cannot be deleted by normal staff" establishes the
@@ -52,7 +28,11 @@ function assertNotOwner(existing: Pick<Staff, 'role'>): void {
   }
 }
 
-/** Never return passwordHash to the client (spec 7.3). */
+/**
+ * Never return passwordHash to the client (spec 7.3). `permissions` is
+ * always derived fresh from `role` (frozen RBAC policy) rather than read
+ * from the stored column, so a response can never reflect stale data.
+ */
 function serializeStaff(staff: Staff) {
   return {
     id: staff.id,
@@ -60,7 +40,7 @@ function serializeStaff(staff: Staff) {
     name: staff.name,
     email: staff.email,
     role: staff.role,
-    permissions: staff.permissions,
+    permissions: getEffectivePermissions(staff.role),
     status: staff.status,
     lastLoginAt: staff.lastLoginAt,
     createdAt: staff.createdAt,
@@ -98,13 +78,7 @@ export async function getStaff(organizationId: string, staffId: string) {
   return serializeStaff(staff);
 }
 
-export async function createStaff(
-  organizationId: string,
-  callerPermissions: Permission[],
-  input: CreateStaffInput,
-) {
-  assertGrantablePermissions(callerPermissions, input.permissions);
-
+export async function createStaff(organizationId: string, input: CreateStaffInput) {
   const existing = await prisma.staff.findUnique({ where: { email: input.email } });
   if (existing) {
     throw new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'This email is already registered.');
@@ -118,22 +92,19 @@ export async function createStaff(
       email: input.email,
       passwordHash,
       role: input.role,
-      permissions: input.permissions,
+      // Role-derived, not client-suppliable (frozen RBAC policy) — kept in
+      // sync on the stored row purely for observability; no code path reads
+      // this column back as authoritative (see getEffectivePermissions).
+      permissions: getEffectivePermissions(input.role),
     },
   });
 
   return serializeStaff(staff);
 }
 
-export async function updateStaff(
-  organizationId: string,
-  callerPermissions: Permission[],
-  staffId: string,
-  input: UpdateStaffInput,
-) {
+export async function updateStaff(organizationId: string, staffId: string, input: UpdateStaffInput) {
   const existing = await findStaffScoped(organizationId, staffId);
   assertNotOwner(existing);
-  assertGrantablePermissions(callerPermissions, input.permissions);
 
   if (input.email && input.email !== existing.email) {
     const emailOwner = await prisma.staff.findUnique({ where: { email: input.email } });
@@ -143,6 +114,11 @@ export async function updateStaff(
   }
 
   const passwordHash = input.password ? await hashPassword(input.password) : undefined;
+  // Self-healing on every touch: whether or not this update changes `role`,
+  // the stored `permissions` column is recomputed from the *effective* role
+  // so no stale value can ever linger past an edit (frozen RBAC policy —
+  // "no stale permissions may survive a role change").
+  const effectiveRole = input.role ?? existing.role;
 
   const staff = await prisma.staff.update({
     where: { id: staffId },
@@ -150,7 +126,7 @@ export async function updateStaff(
       name: input.name,
       email: input.email,
       role: input.role,
-      permissions: input.permissions,
+      permissions: getEffectivePermissions(effectiveRole),
       status: input.status,
       ...(passwordHash ? { passwordHash } : {}),
     },

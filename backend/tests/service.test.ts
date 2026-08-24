@@ -95,11 +95,11 @@ describe('Service CRUD', () => {
 });
 
 describe('Service permissions', () => {
-  it('blocks service creation, update, status change, and delete without manage_services', async () => {
+  it('blocks service creation, update, status change, and delete for ACCOUNTANT (no manage_services)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
-    const restricted = await createRestrictedStaff(ctx.organizationId, ['manage_queues']);
+    const restricted = await createRestrictedStaff(ctx.organizationId);
 
     const createRes = await api()
       .post(`/api/queues/${queue.id}/services`)
