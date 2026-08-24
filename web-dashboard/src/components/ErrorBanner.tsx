@@ -1,5 +1,21 @@
+import { useEffect, useState } from 'react';
+
+const AUTO_DISMISS_MS = 15_000;
+
 export function ErrorBanner({ message }: { message: string | null }) {
-  if (!message) return null;
+  const [visible, setVisible] = useState(Boolean(message));
+
+  useEffect(() => {
+    if (!message) {
+      setVisible(false);
+      return;
+    }
+    setVisible(true);
+    const timer = setTimeout(() => setVisible(false), AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  if (!message || !visible) return null;
   return (
     <div
       role="alert"
