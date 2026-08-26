@@ -11,16 +11,17 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 - V2 is delivered through small, independently reviewable and releasable checkpoints, each committed (and pushed, per the standing checkpoint rule below) once implemented and verified.
 - Existing V1 behavior remains unchanged unless a specific V2 requirement explicitly changes it.
 
-**V2 checkpoint roadmap:**
+**V2 checkpoint roadmap** (reordered 2026-08-26, see ADR-023 — email verification moved ahead of queue-behavior work since it closes a pre-existing V1 trust-boundary gap, and ETA/multi-service/duration-override were consolidated into one checkpoint as a single coherent model):
 
-1. Password change + `ACCOUNTANT` → `STAFF` terminology migration
-2. Queue fairness and multi-counter engine (strict FIFO + active-counter capacity)
-3. Service duration + authoritative ETA engine (actual work ahead, staff-adjustable duration, +2min auto-extension)
-4. Mobile live countdown + notification verification
+1. Password change + `ACCOUNTANT` → `STAFF` terminology migration — **done**
+2. Registration / email verification (required, 15-minute link, 1-hour pending-registration window, unverified accounts blocked from queue features)
+3. Strict FCFS + multi-counter queue engine (active-counter capacity, backend + dashboard enforcement)
+4. ETA + live countdown + variable service duration (multi-service total duration, actual work ahead, staff-adjustable duration, +2min auto-extension, mobile countdown)
 5. Queue repeat-visit policy
-6. Multi-service selection
-7. Customer cancellation + anti-bias OTP verification for CALLED → IN_PROGRESS
-8. V2 production verification (final regression pass)
+6. Customer cancellation
+7. Anti-bias OTP verification for CALLED → IN_PROGRESS
+8. Mobile force-update system (backend-controlled minimum supported app version)
+9. V2 production verification (final regression pass)
 
 ### V2 Checkpoint 1 — Password change + role rename (2026-08-26)
 

@@ -398,3 +398,63 @@ view_audit_logs
 **Reason:** this gap was flagged during the V2 roadmap investigation — `ProfilePage.tsx` was read-only with an explicit comment noting no self-service edit endpoint existed. Staff having to ask an Owner/Admin to reset their password for a routine password change is unnecessary friction and a support burden.
 
 **Consequence:** `ProfilePage.tsx` gained a password-change form. A `password_changed` audit action was added to `AUDIT_ACTIONS` (`auditActions.ts`) and is recorded (best-effort, after the DB write succeeds) on every successful change, matching the existing `login`/`logout` audit wiring pattern.
+
+---
+
+## ADR-023: V2 checkpoint reorder, standing V2 development rules, and email-verification design (2026-08-26)
+
+**Status:** Decision recorded; email verification is investigation-only at this point — not yet implemented.
+
+**Decision 1 — Checkpoint reorder.** The V2 roadmap recorded after Checkpoint 1 (`docs/PROGRESS.md`, `docs/IMPLEMENTATION_PLAN.md`) is superseded by this order:
+
+1. Password change + `ACCOUNTANT` → `STAFF` rename — done
+2. Registration / email verification
+3. Strict FCFS + multi-counter queue engine
+4. ETA + live countdown + variable service duration
+5. Queue repeat-visit policy
+6. Customer cancellation
+7. Anti-bias OTP verification
+8. Mobile force-update system
+9. V2 production verification
+
+**Reason:** email verification closes a pre-existing V1 trust-boundary gap (`POST /api/auth/register` today creates a fully `ACTIVE` organization + owner from any email address with zero proof of ownership) — this should close before queue-behavior changes are layered on top of that same trust boundary. ETA, multi-service selection, and staff duration overrides were also consolidated from three separate checkpoints into one (`Checkpoint 4`), since they're one coherent duration/ETA model, not independent features — building a countdown on the current simplistic formula and then re-deriving it for multi-service would be redone work. Repeat-visit policy was pushed later since it depends on the queue engine (Checkpoint 3) being stable first. Mobile force-update was added as a new checkpoint (8) — a standing platform capability worth building deliberately rather than left as something to remember manually later.
+
+**Decision 2 — Standing V2 development rules.** The following apply to every remaining V2 checkpoint, superseding nothing in CLAUDE.md (they're a V2-specific refinement of it, not a replacement):
+
+1. V1 is already launched; treat it as production software.
+2. Do not change existing V1 behavior unless a V2 requirement explicitly changes it.
+3. V2 is both feature development and security/bug-fixing work.
+4. Prefer the smallest complete implementation — no Redis/queues/brokers/polling unless a checkpoint genuinely requires it.
+5. PostgreSQL remains the source of truth.
+6. Socket.io and FCM remain notification/distribution channels only, never authoritative.
+7. Security rules are backend-enforced; UI restrictions are convenience only.
+8. Queue ordering is enforced transactionally, backend-side.
+9. Multi-counter behavior must preserve strict FCFS ordering.
+10. ETA calculations use server-authoritative timestamps/data; mobile countdowns tick locally but are never authoritative.
+11. Customer-specific duration overrides recalculate every affected customer behind them.
+12. Default extra service time is +2 minutes when the current service time expires, unless staff explicitly changes the required time.
+13. Email verification is required before an organization can use queue functionality.
+14. Verification link lifetime: 15 minutes.
+15. Unverified registration lifetime: 1 hour, after which the pending organization/owner is removed.
+16. Verification tokens are single-use and stored hashed, never raw, when persisted.
+17. Password and verification endpoints are rate-limited.
+18. The backend/config can force an old mobile app version into an update-required screen.
+19. Migrations stay backward-safe for the live V1 database — never assume it's empty.
+20. Claude Code never connects to or modifies the production database during implementation.
+21. Migrations are created and tested against the local development database only.
+22. Production migrations run via Render's Pre-Deploy Command (`npx prisma migrate deploy`), never from a developer machine — see `docs/DEPLOYMENT.md` §7, which already documents this exact constraint.
+23. Minimal tests only — security-critical logic, concurrency/queue rules, migrations, and each checkpoint's core behavior; no low-value padding.
+24. End of every checkpoint: verify `git status`/diff, run required typecheck/lint/build, run only the meaningful tests; commit + push automatically if clean, otherwise stop with a concise failure report.
+25. No separate "commit" / "push" prompts needed — the clean-checkpoint rule already decides this.
+26. Every checkpoint ends with a clear PASS/FAIL result.
+27. Stop after the checkpoint report — do not roll into the next checkpoint unprompted.
+
+**Decision 3 — Email verification design** (Checkpoint 2 groundwork; not yet implemented):
+
+- **State model:** a new `StaffStatus` value `PENDING_EMAIL_VERIFICATION` (existing values `ACTIVE`/`SUSPENDED` unchanged) — `register()` creates the org + owner in this state instead of `ACTIVE`.
+- **Two independent lifetimes, deliberately not conflated:** the verification *link* expires in 15 minutes; the *pending registration* survives for 1 hour regardless of how many links were sent or expired in that window. A token expiring at minute 15 does not delete the account — only reaching the full hour unverified does. This matches the explicit product correction that a 15-minute token expiry must not be read as "delete after 15 minutes."
+- **Cleanup, not soft-marking:** when the 1-hour window lapses unverified, the pending **organization and owner are deleted together** (not just the email/staff row) — leaving only the email behind would strand a half-created organization with no owner. Reuses `node-cron` exactly as `reminderScheduler.ts` already does (a new scheduler module + its own `*_CLEANUP_CRON` env var, following `REMINDER_DISPATCH_CRON`'s existing convention), not a new job-scheduling mechanism.
+- **Token shape:** reuses `generateRefreshToken()`/`hashRefreshToken()` (`utils/tokens.ts`) exactly as-is — an opaque random value returned to the client once, only its SHA-256 hash persisted. No new secret-handling pattern needed; this is the same shape refresh tokens already use for the same reason (single-use, unguessable, safe if the database leaks).
+- **Access boundary:** a new `requireVerified` check, composed alongside (not replacing) `authenticate`, gates queue-functionality routes for a `PENDING_EMAIL_VERIFICATION` staff member. `/api/auth/me`, logout, and resend-verification stay reachable while pending, so the dashboard can show a "please verify" state and offer a resend button rather than the account being invisible to itself.
+- **Rate limiting:** resend/verify endpoints use the existing `rateLimit.ts` limiter pattern (either `authRateLimiter` or a new dedicated limiter, decided at implementation time) — no new rate-limiting mechanism.
+- **Open, unresolved product decision:** which email-delivery provider to use. A full-repository check confirms zero existing email infrastructure — no `nodemailer`/`resend`/`sendgrid`/`ses` dependency, no `EMAIL_*`/`SMTP_*` env var anywhere in `env.ts`/`.env.example`. This is genuinely new external infrastructure (unlike everything else in V2 so far, which reuses existing patterns) and needs an explicit choice before Checkpoint 2 can be implemented — not an invented default, per CLAUDE.md §12's "do not introduce infrastructure... unless there is a documented technical requirement" (the requirement is now documented; the specific provider is not yet decided).

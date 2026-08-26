@@ -203,31 +203,46 @@ Phases 1-7 above built and shipped V1 — already launched to production. Everyt
 - `STAFF` is recognized everywhere `ACCOUNTANT` previously was; no remaining `ACCOUNTANT` reference in active code
 - Full backend test suite passes; typecheck/lint clean on backend and dashboard
 
-## V2 Checkpoint 2: Queue fairness and multi-counter engine
+**Reordered 2026-08-26** (see ADR-023): the roadmap below supersedes the checkpoint 2-8 ordering originally recorded here after Checkpoint 1. Rationale: V1's trust-boundary gap (no email verification — any email/password combination can register and immediately operate a real organization) should close before queue-behavior changes are layered on top of it, and ETA/multi-service/duration-override are one coherent model, not three separate features.
 
-**Goal:** Strict server-enforced FIFO calling, with active-counter capacity determining how many tokens may be concurrently eligible — never allowing a later token to be called while an earlier eligible one still waits. Concurrency-safe under simultaneous staff actions. Existing SKIPPED → CALLED recall remains an intentional, allowed exception to strict order.
+## V2 Checkpoint 2: Registration / email verification
 
-## V2 Checkpoint 3: Service duration + authoritative ETA engine
+**Goal:** Close the pre-existing V1 gap where `POST /api/auth/register` creates a fully active organization + owner with no proof the email address is real or owned by the registrant.
 
-**Goal:** ETA computed from the actual total service duration of tokens genuinely ahead (not the current simplistic `currentTokenDuration × position / counters` approximation), across multiple active counters. Staff can adjust an individual active customer's required duration from the dashboard, with recalculation propagated to affected customers behind them in real time. A default +2 minute automatic extension applies when an active service's estimated duration expires but the token hasn't completed, via a named configurable constant/setting rather than a hardcoded magic number.
+**Design (see ADR-023 for full detail):**
+- New `Staff.status` value `PENDING_EMAIL_VERIFICATION` (in addition to existing `ACTIVE`/`SUSPENDED`) — registration creates the org + owner in this state, not `ACTIVE`.
+- A verification token is generated server-side, reusing the exact `generateRefreshToken()`/`hashRefreshToken()` shape already used for refresh tokens (opaque random value, SHA-256 hash persisted, raw value never stored) — no new secret-handling pattern invented.
+- **Verification link lifetime: 15 minutes.** **Pending-registration lifetime: 1 hour**, tracked independently — a token expiring at 15 minutes does not delete the account; only reaching the full 1-hour mark without verification does. Resending a new link does not extend the 1-hour window.
+- A `node-cron` cleanup job (reusing the exact scheduler pattern in `reminderScheduler.ts`/`REMINDER_DISPATCH_CRON`) deletes the pending **organization and owner together**, not just the email field, once the 1-hour window lapses with no verification — avoiding a half-created organization left behind.
+- A new `requireVerified` check (alongside, not replacing, `authenticate`) gates queue-functionality routes; `/api/auth/me`, logout, and resend-verification remain reachable so an unverified user can see their pending state and request a new link.
+- Resend-verification and verify endpoints are rate-limited (reusing `authRateLimiter`/a dedicated limiter, same `rateLimit.ts` pattern as every other sensitive endpoint).
+- **Open product decision, not yet resolved:** which email-delivery provider/library to use — none exists in this codebase today (confirmed: no `nodemailer`/`resend`/`sendgrid`/`ses` dependency, no `EMAIL_*`/`SMTP_*` env var). This is new external infrastructure and needs an explicit choice before implementation, not an invented default.
 
-## V2 Checkpoint 4: Mobile live countdown + notification verification
+## V2 Checkpoint 3: Strict FCFS + multi-counter queue engine
 
-**Goal:** A true locally-ticking countdown on the mobile Live Tracking screen, anchored to a server-authoritative timestamp (e.g. `estimatedReadyAt`) and re-anchored on every real-time update — no per-second polling. Verify (not rebuild) the existing FCM/state-change notification infrastructure from Issue #5, closing only genuine gaps.
+**Goal:** One coherent queue-engine rule, not two separate features — strict server-enforced FIFO calling, where active-counter capacity determines how many tokens may be concurrently eligible (N active counters ⇒ up to N eligible tokens), and a later token can never become eligible while an earlier one still waits. Staff cannot call an arbitrary later customer; the dashboard must visually lock unavailable customers, matching backend enforcement. Concurrency-safe under simultaneous staff actions at the backend level. Existing SKIPPED → CALLED recall remains an intentional, allowed exception to strict order.
+
+## V2 Checkpoint 4: ETA + live countdown + variable service duration
+
+**Goal:** One coherent ETA/service-duration model instead of three unrelated features — combines multi-service selection (total duration = sum of selected services), the actual durations of customers genuinely ahead, active-counter count, staff-adjustable per-customer required time (recalculating every affected customer behind them), the default +2-minute automatic extension when a service's estimated duration expires without completion (a named configurable constant/setting, not a hardcoded magic number), and the mobile live countdown — a server-authoritative timestamp (e.g. `estimatedReadyAt`) that the mobile app ticks locally and re-anchors on every real-time update, never polling. Do not build the countdown on top of the current simplistic `currentTokenDuration × position / counters` approximation — fix the formula first.
 
 ## V2 Checkpoint 5: Queue repeat-visit policy
 
-**Goal:** A queue-level setting for whether a device/person may take only one token ever (until a documented reset condition) or may rejoin after completing. A SKIPPED token never consumes the single-visit allowance. Enforced backend-side; idempotent retries never miscounted as a second visit.
+**Goal:** A queue-level setting for whether a device/person may take only one token ever (until a documented reset condition) or may rejoin after completing. A SKIPPED token never consumes the single-visit allowance. Enforced backend-side; idempotent retries never miscounted as a second visit. Deliberately sequenced after the queue engine (Checkpoint 3) is stable, not before.
 
-## V2 Checkpoint 6: Multi-service selection
+## V2 Checkpoint 6: Customer cancellation
 
-**Goal:** Customers may select multiple services when a queue allows it; the backend authoritatively computes and validates the total duration (never trusting a client-supplied value). Requires a safe, production-data-preserving Token↔Service persistence change — existing single-service tokens remain readable, no column dropped outright.
+**Goal:** A customer can cancel their own token while WAITING; cannot once service has started (CALLED or later). Enforced backend-side regardless of what the mobile UI shows. Consistent with the repeat-visit rule from Checkpoint 5 — a skipped token remains eligible to rejoin per that rule, a cancelled one follows whatever this checkpoint's own state-machine addition specifies.
 
-## V2 Checkpoint 7: Customer cancellation + anti-bias OTP verification
+## V2 Checkpoint 7: Anti-bias OTP verification
 
-**Goal:** A customer can cancel their own token before service starts (not after); enforced backend-side regardless of UI. A server-generated, short-lived, single-use OTP — visible only inside the customer's own app session, never a public API response, never client-generatable — must be correctly entered by staff before a CALLED token can transition to IN_PROGRESS, protecting against staff silently starting service without customer consent. Reuses existing FCM delivery, rate limiting, and auth/tenant infrastructure.
+**Goal:** `CALLED → OTP → IN_PROGRESS`. A server-generated, short-lived, single-use OTP — visible only inside the customer's own app session, never a public API response, never client-generatable — must be correctly entered by staff before a CALLED token can transition to IN_PROGRESS, protecting against staff silently starting service without customer consent/presence. Reuses existing FCM delivery, rate limiting, and auth/tenant infrastructure. Its own checkpoint, separate from cancellation, since this is a distinct security feature.
 
-## V2 Checkpoint 8: V2 production verification
+## V2 Checkpoint 8: Mobile force-update system
+
+**Goal:** A backend-controlled minimum supported app version (e.g. `minimumSupportedAndroidVersion`/`minimumSupportedIosVersion`, likely a simple app-config endpoint or existing public-config response addition) that the mobile app checks at startup — a version below the minimum shows a Force Update screen instead of continuing normally. Lets an old app be forced to update without a new backend release for every version bump. A proper platform feature recorded now rather than left as something to remember manually later.
+
+## V2 Checkpoint 9: V2 production verification
 
 **Goal:** A focused final regression pass across all V2 business rules, tenant isolation, concurrency, migrations, and cross-app compatibility — no unnecessary new tests, final build/typecheck/lint verification across all three apps.
 
