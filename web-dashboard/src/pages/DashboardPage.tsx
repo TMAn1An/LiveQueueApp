@@ -136,7 +136,12 @@ export function DashboardPage() {
                     <td className="py-2 pr-4">{row.counter?.name ?? '—'}</td>
                     <td className="py-2 pr-4">{formatDateTime(row.calledAt ?? row.createdAt)}</td>
                     <td className="py-2 pr-4">
-                      <TokenActions tokenId={row.id} queueId={row.queue.id} status={row.status} />
+                      <TokenActions
+                        tokenId={row.id}
+                        queueId={row.queue.id}
+                        status={row.status}
+                        position={row.position}
+                      />
                     </td>
                   </tr>
                 ))}

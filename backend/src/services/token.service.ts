@@ -537,12 +537,50 @@ export async function callToken(
       throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is not active.');
     }
 
+    // V2 Checkpoint 3 (ADR-025): strict FCFS, WAITING path only — a manually
+    // chosen tokenId must be the earliest WAITING token in its queue, or
+    // staff could bypass arrival order entirely (the exact V1 gap this
+    // checkpoint closes). Recall (SKIPPED -> CALLED) is deliberately exempt:
+    // a skipped token isn't WAITING, so it can never be "out of order" among
+    // waiting tokens — its own capacity constraint is the counter-busy check
+    // below, shared with this same path.
+    //
+    // A plain (non-locking) EXISTS read is sufficient here, not a race: a
+    // token's sequenceNumber is assigned once at creation and never reused,
+    // and nothing in the state machine transitions a token back *into*
+    // WAITING (SKIPPED -> CALLED goes straight to CALLED). So the set of
+    // "WAITING tokens with a smaller sequence number than this one" can only
+    // ever shrink over time, never gain a new, smaller member after this
+    // check runs — there is no window in which a concurrent transaction can
+    // turn a true "no earlier token" result into a false one before this
+    // transaction's own compare-and-swap UPDATE commits.
+    if (requireSourceStatus === 'WAITING') {
+      const earlierWaitingRows = await tx.$queryRaw<{ exists: boolean }[]>`
+        SELECT EXISTS (
+          SELECT 1 FROM tokens
+          WHERE queue_id = ${token.queueId}
+            AND status = 'WAITING'
+            AND sequence_number < ${token.sequenceNumber}
+        ) AS "exists"
+      `;
+      if (earlierWaitingRows[0]?.exists) {
+        throw new AppError(
+          409,
+          'FCFS_VIOLATION',
+          'An earlier customer is still waiting. The earliest eligible customer must be called first.',
+        );
+      }
+    }
+
     // Excludes this same tokenId: without it, two racing requests for the
     // *same already-CALLED-then-skipped* token/counter pair (only possible
     // via recall — a fresh WAITING token could never already occupy this
     // counter) would have the loser misread its own winning twin's
     // just-committed row as "a different token is busy" instead of
-    // correctly falling through to the TOKEN_STATE_CHANGED check below.
+    // correctly falling through to the TOKEN_STATE_CHANGED check below. This
+    // same check is what bounds Recall to available counter capacity
+    // (checkpoint requirement 7) — recall shares this exact function, so a
+    // busy counter rejects a recall attempt identically to a normal call.
     const busy = await tx.token.findFirst({
       where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] }, id: { not: tokenId } },
     });

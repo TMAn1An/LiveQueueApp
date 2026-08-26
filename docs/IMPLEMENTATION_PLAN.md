@@ -238,6 +238,27 @@ See ADR-023 (design) and ADR-024 (implementation, including the exact route-scop
 
 **Goal:** One coherent queue-engine rule, not two separate features — strict server-enforced FIFO calling, where active-counter capacity determines how many tokens may be concurrently eligible (N active counters ⇒ up to N eligible tokens), and a later token can never become eligible while an earlier one still waits. Staff cannot call an arbitrary later customer; the dashboard must visually lock unavailable customers, matching backend enforcement. Concurrency-safe under simultaneous staff actions at the backend level. Existing SKIPPED → CALLED recall remains an intentional, allowed exception to strict order.
 
+### Tasks
+
+- [x] Inspect `/next` and counter-occupancy semantics before changing anything — found both already correct (see ADR-025), no code change needed for either
+- [x] `callToken()`: reject a manually-called WAITING token that isn't the earliest WAITING token in its queue (`409 FCFS_VIOLATION`), checked atomically inside the existing transaction
+- [x] Confirm Recall stays exempt from the new order check but remains bounded by the existing shared counter-busy check
+- [x] Dashboard: `TokenActions.tsx` shows "Call" only for the position-1 WAITING row, a disabled "Locked" button otherwise — reusing the already-present `position` field, no backend response-shape change
+- [x] Concurrency test: two simultaneous `/call` requests for the true-earliest token never both succeed
+- [x] Commit
+
+### Acceptance
+
+- With one active counter, only the earliest WAITING token can be called; a later one is rejected and remains WAITING
+- With two active counters, calling the earliest unlocks the second-earliest; a third token stays locked until capacity/order allow it
+- Completing an earlier token unlocks the correct next-in-line token — never the one after it
+- A busy counter rejects even the correctly-earliest token (pre-existing behavior, confirmed unaffected)
+- Concurrent `/call` requests for the same token never both succeed
+- Recall (SKIPPED → CALLED) is unaffected by the order check but still respects counter capacity
+- Full backend + dashboard test suites pass with zero regressions; no migration
+
+See ADR-025 for full design/implementation detail, including why `/next` needed no changes and why the new check is race-safe without additional locking.
+
 ## V2 Checkpoint 4: ETA + live countdown + variable service duration
 
 **Goal:** One coherent ETA/service-duration model instead of three unrelated features — combines multi-service selection (total duration = sum of selected services), the actual durations of customers genuinely ahead, active-counter count, staff-adjustable per-customer required time (recalculating every affected customer behind them), the default +2-minute automatic extension when a service's estimated duration expires without completion (a named configurable constant/setting, not a hardcoded magic number), and the mobile live countdown — a server-authoritative timestamp (e.g. `estimatedReadyAt`) that the mobile app ticks locally and re-anchors on every real-time update, never polling. Do not build the countdown on top of the current simplistic `currentTokenDuration × position / counters` approximation — fix the formula first.

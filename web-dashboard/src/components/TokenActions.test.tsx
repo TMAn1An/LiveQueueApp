@@ -117,6 +117,23 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
   });
 });
 
+describe('TokenActions — strict FCFS locking (V2 Checkpoint 3)', () => {
+  it('a WAITING token at position 1 shows Call, not Locked', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" position={1} />);
+    expect(screen.getByText('Call')).toBeInTheDocument();
+    expect(screen.queryByText('Locked')).not.toBeInTheDocument();
+  });
+
+  it('a WAITING token behind position 1 shows a disabled Locked indicator, not Call', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" position={2} />);
+    expect(screen.getByText('Locked')).toBeInTheDocument();
+    expect(screen.getByText('Locked')).toBeDisabled();
+    expect(screen.queryByText('Call')).not.toBeInTheDocument();
+    // Skip remains available regardless of FCFS eligibility — unaffected by this checkpoint.
+    expect(screen.getByText('Skip')).toBeInTheDocument();
+  });
+});
+
 describe('TokenActions — Recall', () => {
   it('clicking Recall reveals a counter picker, and selecting a counter calls recallToken with its id', async () => {
     const user = userEvent.setup();

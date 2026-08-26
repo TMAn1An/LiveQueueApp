@@ -15,7 +15,7 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 
 1. Password change + `ACCOUNTANT` → `STAFF` terminology migration — **done**
 2. Registration / email verification (required, 15-minute link, 1-hour pending-registration window, unverified accounts blocked from queue features) — **done**
-3. Strict FCFS + multi-counter queue engine (active-counter capacity, backend + dashboard enforcement)
+3. Strict FCFS + multi-counter queue engine (active-counter capacity, backend + dashboard enforcement) — **done**
 4. ETA + live countdown + variable service duration (multi-service total duration, actual work ahead, staff-adjustable duration, +2min auto-extension, mobile countdown)
 5. Queue repeat-visit policy
 6. Customer cancellation
@@ -42,6 +42,17 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 - **Schema:** one purely-additive migration (`20260826094219_add_email_verification_fields`) — a new `StaffStatus` enum value plus three nullable `Staff` columns; existing production rows are entirely unaffected.
 - **Verification:** backend `typecheck`/`lint` clean, `npm test` — 50 files / 461 tests passing (12 new focused tests plus 2 new rate-limit tests; two existing test files that registered staff outside the shared test helper needed the same "auto-verify for setup convenience" fix already used by `registerOwner()`). Dashboard `tsc -b`/`oxlint`/`npm run build` clean. `prisma migrate status` clean against the local dev database only — production migration is applied by Render's Pre-Deploy Command on next deploy, not from this machine. See ADR-024 for full design/implementation detail.
 - **Intentionally unchanged:** no queue ordering, ETA, multi-service, cancellation, or OTP logic — that remains Checkpoints 3-7.
+
+### V2 Checkpoint 3 — Strict FCFS + multi-counter queue engine (2026-08-26)
+
+**Status: implemented, tested, committed. No migration.**
+
+- **The V1 gap:** `POST /api/tokens/:tokenId/call` accepted any staff-supplied `tokenId`, letting a later customer be called while an earlier one still waited. Fixed with one new check inside `callToken()` — when calling a WAITING token, the earliest WAITING token in the same queue must match, or the request is rejected `409 FCFS_VIOLATION` before any state change.
+- **Two things were already correct and needed no change**, confirmed by inspection before writing anything: `/next` already implements the full "N active counters ⇒ N eligible slots, strict order preserved" rule via its existing `ORDER BY sequence_number ASC ... FOR UPDATE SKIP LOCKED` selection (already proven by a pre-existing concurrency test); and counter occupancy already matched the checkpoint's exact rule (`CALLED`/`IN_PROGRESS` busy, everything else free) via the pre-existing per-counter `busy` check shared by `/call`, `/recall`, and `/next`.
+- **Recall stays exempt from the new order check** (a skipped token was never part of the WAITING order) but remains bounded by that same shared counter-capacity check, unchanged.
+- **Dashboard:** `TokenActions.tsx` shows "Call" only on the position-1 WAITING row per queue; every other WAITING row shows a disabled "Locked" button. No backend response-shape change — `position` was already present on every row. The backend remains the real authority regardless of what the UI shows.
+- **Verification:** backend `typecheck`/`lint` clean, `npm test` — 51 files / 467 tests passing (6 new in `token.fcfs.test.ts`, covering the checkpoint's Tests 1-7 including one concurrency case; zero regressions). Dashboard `tsc -b`/`oxlint`/`npm run build` clean, 72 tests passing (2 new). See ADR-025 for full design/implementation detail, including exactly why a plain (non-locking) existence check is race-safe here.
+- **Intentionally unchanged:** ETA/countdown formula, multi-service, repeat-visit policy, cancellation, OTP, force-update, and Checkpoint 2's email-verification work.
 
 ## Status
 
