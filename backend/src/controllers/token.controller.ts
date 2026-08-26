@@ -47,9 +47,10 @@ export async function call(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitTokenCalled(token.id);
-  // call always transitions WAITING -> CALLED, so it always affects
-  // whichever waiting tokens were behind it (approved Phase 4 decision 4).
-  await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
+  // call always transitions WAITING -> CALLED, which both removes this
+  // token from the waiting set and occupies a counter — both shift every
+  // other WAITING token's simulated ETA (V2 Checkpoint 4, ADR-026).
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
@@ -59,6 +60,11 @@ export async function start(req: Request, res: Response) {
   const { token } = await tokenService.startToken(req.auth!.organizationId, req.params.tokenId as string);
   res.status(200).json({ success: true, data: token });
   await realtime.emitTokenStarted(token.id);
+  // The ETA simulation anchors an in-service token from startedAt once it
+  // has one (rather than calledAt) — this transition can shift that
+  // counter's computed free time, so downstream WAITING tokens' ETAs may
+  // change even though nothing left/entered the waiting set itself.
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
@@ -76,6 +82,9 @@ export async function complete(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitTokenCompleted(token.id);
+  // Completing frees the counter this token occupied — every WAITING
+  // token's ETA may move earlier (V2 Checkpoint 4, ADR-026).
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
@@ -94,11 +103,12 @@ export async function skip(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitTokenSkipped(token.id);
-  // Only a WAITING -> SKIPPED transition removes a token from the waiting
-  // set; CALLED/IN_PROGRESS -> SKIPPED never affected anyone else's position.
-  if (previousStatus === 'WAITING') {
-    await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
-  }
+  // Broadcast unconditionally regardless of previousStatus (V2 Checkpoint
+  // 4, ADR-026): a WAITING -> SKIPPED transition removes a token from the
+  // waiting set, but a CALLED/IN_PROGRESS -> SKIPPED transition frees a
+  // counter — both shift the ETA simulation, unlike the pre-Checkpoint-4
+  // position-only model where only the former mattered.
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
@@ -126,9 +136,12 @@ export async function recall(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitTokenCalled(token.id);
-  // No broadcastAffectedPositions — recall's source is always SKIPPED,
-  // never WAITING, so no other waiting token's position can be affected
-  // (mirrors skip's own previousStatus === 'WAITING' guard above).
+  // Recall's source is always SKIPPED, never WAITING, so it never removes
+  // anyone from the waiting set — but it does occupy a counter, which can
+  // still shift every WAITING token's simulated ETA (V2 Checkpoint 4,
+  // ADR-026 — pre-Checkpoint-4 this call was correctly skipped, since only
+  // position, not counter occupancy, mattered then).
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }
 
@@ -151,6 +164,31 @@ export async function next(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitTokenCalled(token.id);
-  await realtime.broadcastAffectedPositions(token.queueId, token.sequenceNumber);
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
+}
+
+/**
+ * V2 Checkpoint 4 (ADR-026). Not a state-machine transition — status is
+ * untouched — so it deliberately doesn't emit a token.* lifecycle event;
+ * broadcastQueueEtaUpdate is what actually matters here, since this action
+ * exists specifically to change the ETA every WAITING token behind this
+ * one sees.
+ */
+export async function setRequiredDuration(req: Request, res: Response) {
+  const token = await tokenService.setRequiredDuration(
+    req.auth!.organizationId,
+    req.params.tokenId as string,
+    req.body.requiredDurationMinutes,
+  );
+  res.status(200).json({ success: true, data: token });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'token_duration_updated',
+    entityType: 'token',
+    entityId: token.id,
+    metadata: { requiredDurationMinutes: req.body.requiredDurationMinutes },
+    ipAddress: req.ip,
+  });
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
 }

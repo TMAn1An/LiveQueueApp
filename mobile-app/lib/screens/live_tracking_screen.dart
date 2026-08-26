@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -95,12 +97,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   const SizedBox(height: 24),
                   if (token.status == TokenStatus.waiting) ...[
                     _InfoRow(label: 'Position', value: '${token.position ?? '-'}'),
-                    _InfoRow(
-                      label: 'Estimated Wait',
-                      value: token.estimatedWaitMinutes != null
-                          ? '${token.estimatedWaitMinutes} minutes'
-                          : 'Not available',
-                    ),
+                    if (token.estimatedReadyAt != null)
+                      _CountdownRow(label: 'Estimated Wait', estimatedReadyAt: token.estimatedReadyAt!)
+                    else
+                      const _InfoRow(label: 'Estimated Wait', value: 'Not available'),
                   ],
                   if (token.status == TokenStatus.called && token.counter != null)
                     _InfoRow(label: 'Counter', value: token.counter!.name),
@@ -164,5 +164,49 @@ class _InfoRow extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// V2 Checkpoint 4 (ADR-026, Rule F): a locally-ticking countdown anchored to
+/// a server-authoritative timestamp. Never computes its own estimate — it
+/// only ever displays `now` counting down to `estimatedReadyAt`, which the
+/// provider re-anchors (a brand new [estimatedReadyAt] value flows in as a
+/// new `widget` on rebuild) whenever a fresh REST resync or
+/// token.position_changed event arrives. No polling: this widget's own
+/// [Timer] exists solely to repaint once a second, never to fetch anything.
+class _CountdownRow extends StatefulWidget {
+  const _CountdownRow({required this.label, required this.estimatedReadyAt});
+
+  final String label;
+  final DateTime estimatedReadyAt;
+
+  @override
+  State<_CountdownRow> createState() => _CountdownRowState();
+}
+
+class _CountdownRowState extends State<_CountdownRow> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final remaining = widget.estimatedReadyAt.difference(DateTime.now());
+    final clamped = remaining.isNegative ? Duration.zero : remaining;
+    final minutes = clamped.inMinutes;
+    final seconds = clamped.inSeconds % 60;
+    final display = '$minutes:${seconds.toString().padLeft(2, '0')}';
+
+    return _InfoRow(label: widget.label, value: display);
   }
 }

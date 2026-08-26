@@ -16,7 +16,7 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 1. Password change + `ACCOUNTANT` → `STAFF` terminology migration — **done**
 2. Registration / email verification (required, 15-minute link, 1-hour pending-registration window, unverified accounts blocked from queue features) — **done**
 3. Strict FCFS + multi-counter queue engine (active-counter capacity, backend + dashboard enforcement) — **done**
-4. ETA + live countdown + variable service duration (multi-service total duration, actual work ahead, staff-adjustable duration, +2min auto-extension, mobile countdown)
+4. ETA + live countdown + variable service duration (actual work ahead, staff-adjustable duration, +2min auto-extension, mobile countdown — multi-service total duration deferred to Checkpoint 5, see ADR-026) — **done**
 5. Queue repeat-visit policy
 6. Customer cancellation
 7. Anti-bias OTP verification for CALLED → IN_PROGRESS
@@ -53,6 +53,17 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 - **Dashboard:** `TokenActions.tsx` shows "Call" only on the position-1 WAITING row per queue; every other WAITING row shows a disabled "Locked" button. No backend response-shape change — `position` was already present on every row. The backend remains the real authority regardless of what the UI shows.
 - **Verification:** backend `typecheck`/`lint` clean, `npm test` — 51 files / 467 tests passing (6 new in `token.fcfs.test.ts`, covering the checkpoint's Tests 1-7 including one concurrency case; zero regressions). Dashboard `tsc -b`/`oxlint`/`npm run build` clean, 72 tests passing (2 new). See ADR-025 for full design/implementation detail, including exactly why a plain (non-locking) existence check is race-safe here.
 - **Intentionally unchanged:** ETA/countdown formula, multi-service, repeat-visit policy, cancellation, OTP, force-update, and Checkpoint 2's email-verification work.
+
+### V2 Checkpoint 4 — ETA + live countdown + variable service duration (2026-08-26)
+
+**Status: implemented, tested, committed.**
+
+- **Replaced the ETA formula entirely.** The old `ceil(currentTokenDuration × position / activeCounters)` approximation is gone — it was not just imprecise but genuinely wrong (with 2 free counters and three 10-minute jobs it reported 5/10/15 minutes instead of the correct 0/0/10; a position-1 customer behind a free counter should be called immediately, not wait a full service duration). Replaced with a real multi-server FCFS scheduling simulation (`queueEtaEngine.ts`) that assigns each WAITING token to whichever active counter frees up soonest, using the *actual* duration of whoever currently occupies each counter — not a stand-in.
+- **Staff can now override an active customer's required duration** (`PATCH /api/tokens/:tokenId/duration`, CALLED/IN_PROGRESS only) via a new "Adjust Time" dashboard action. The override becomes authoritative for that counter's occupancy calculation immediately, and every WAITING token's ETA in the queue is recomputed and broadcast (`broadcastQueueEtaUpdate`, generalized this checkpoint from a position-shift-only broadcast to a full queue-wide recompute — needed because an ETA can now shift without any token literally leaving WAITING, e.g. a duration change or an in-progress transition).
+- **Default +2-minute auto-extension**, applied uniformly whenever any currently-allocated duration (service default or staff override) expires without a further staff update — a named constant (`DEFAULT_SERVICE_EXTENSION_MINUTES`), computed live on every read, nothing persisted.
+- **Mobile live countdown** (Rule F): `estimatedReadyAt`, a server-authoritative timestamp, now flows through every token view and the `position_changed` socket event. `LiveTrackingScreen` ticks a local 1-second `Timer` against it and re-anchors automatically whenever a fresh value arrives — no polling, never computing its own estimate.
+- **Verification:** backend `typecheck`/`lint` clean, `npm test` — 53 files / 486 tests passing (19 new: 12 pure unit tests for the simulation algorithm in isolation, 7 integration tests for the new endpoint; 3 pre-existing test files updated where they encoded the old formula's specific numbers or the old narrower broadcast scope, each documented inline). Mobile `flutter analyze` clean, `flutter test` — 105/105 passing. Dashboard `tsc -b`/`oxlint`/`npm run build` clean, 75 tests passing (3 new). One purely-additive migration (`Token.requiredDurationMinutes`), applied to the local dev database only. See ADR-026 for full design/implementation detail.
+- **Intentionally unchanged:** multi-service selection (the simulation's duration input is deliberately generic so a future checkpoint can pass a summed total without touching the algorithm), repeat-visit policy, cancellation, OTP, force-update.
 
 ## Status
 

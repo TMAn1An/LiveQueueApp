@@ -7,6 +7,14 @@ import { findCounterScoped } from './counter.service';
 import { requireOwnedQueue } from '../utils/tenantScope';
 import { registerDevice } from './device.service';
 import type { AuthContext } from '../utils/authContext';
+import {
+  computeEffectiveDurationMinutes,
+  computeEffectiveEndTime,
+  minutesUntil,
+  simulateWaitingTokenEtas,
+  type CounterOccupancy,
+  type WaitingTokenInput,
+} from './queueEtaEngine';
 
 const QUEUE_ARCHIVED_MSG = 'This queue has been archived and can no longer accept new tokens.';
 const QUEUE_NOT_ACTIVE_MSG = 'This queue is currently not accepting new customers.';
@@ -275,86 +283,130 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   return getTokenCustomerView(created.id);
 }
 
-/**
- * With no counter actively serving, "duration × position ÷ counters" has no
- * meaningful denominator — an estimate here would imply active service that
- * isn't happening (approved product decision, 2026-08-22). Shared by both
- * the single-token path (computeComputedFields) and the queue-wide batch
- * path (listWaitingTokenPositions) so the formula is never duplicated.
- */
-function computeEstimatedWaitMinutes(
-  durationMinutes: number,
-  position: number,
-  activeCounters: number,
-): number | null {
-  if (activeCounters === 0) {
-    return null;
-  }
-  return Math.ceil((durationMinutes * position) / activeCounters);
+interface QueueEtaEntry {
+  id: string;
+  organizationId: string;
+  queueId: string;
+  sequenceNumber: number;
+  position: number;
+  estimatedWaitMinutes: number | null;
+  estimatedReadyAt: Date | null;
 }
 
-async function computeComputedFields(
-  token: Token,
-): Promise<{ position: number | null; estimatedWaitMinutes: number | null }> {
-  if (token.status !== 'WAITING') {
-    return { position: null, estimatedWaitMinutes: null };
-  }
-
-  const [aheadCount, service, queue, activeCounters] = await Promise.all([
-    prisma.token.count({
-      where: { queueId: token.queueId, status: 'WAITING', sequenceNumber: { lt: token.sequenceNumber } },
+/**
+ * V2 Checkpoint 4 (ADR-026): the shared core behind both
+ * computeComputedFields (single token) and listWaitingTokenPositions
+ * (queue-wide batch, used by the realtime layer) — a real multi-counter
+ * FCFS scheduling simulation (queueEtaEngine.ts), not the old
+ * `duration × position / counters` approximation. Always simulates every
+ * currently-WAITING token in the queue at once (there's no way to
+ * correctly answer "when will token X be called" without knowing the state
+ * of every active counter and everyone ahead of it) — queue sizes in a
+ * live queue-management system are small, so this stays cheap.
+ *
+ * `now` is a parameter (not read internally) purely so tests can pin it;
+ * every real call site uses the default.
+ */
+async function computeQueueEtas(queueId: string, now: Date = new Date()): Promise<QueueEtaEntry[]> {
+  const [activeCounters, waitingTokens] = await Promise.all([
+    prisma.counter.findMany({
+      where: { queueId, status: 'ACTIVE' },
+      include: {
+        // At most one match per counter, by the existing busy-check
+        // invariant (callToken/nextToken never let two CALLED/IN_PROGRESS
+        // tokens share a counter) — never trusted as a hard guarantee here,
+        // just how the data is actually shaped.
+        tokens: { where: { status: { in: ['CALLED', 'IN_PROGRESS'] } }, include: { service: true } },
+      },
     }),
-    prisma.queueService.findUnique({ where: { id: token.serviceId } }),
-    prisma.queue.findUnique({ where: { id: token.queueId } }),
-    prisma.counter.count({ where: { queueId: token.queueId, status: 'ACTIVE' } }),
-  ]);
-
-  const position = aheadCount + 1;
-  const durationMinutes = service?.durationMinutes ?? queue?.baseTimeMinutes ?? 5;
-  const estimatedWaitMinutes = computeEstimatedWaitMinutes(durationMinutes, position, activeCounters);
-
-  return { position, estimatedWaitMinutes };
-}
-
-/**
- * Batch equivalent of computeComputedFields, for every currently-WAITING
- * token in one queue at once — used by the realtime layer to recompute
- * positions after a token leaves WAITING (approved Phase 4 decision 4),
- * without an N+1 query per affected token.
- */
-export async function listWaitingTokenPositions(queueId: string): Promise<
-  Array<{
-    id: string;
-    organizationId: string;
-    queueId: string;
-    sequenceNumber: number;
-    position: number;
-    estimatedWaitMinutes: number | null;
-  }>
-> {
-  const [waitingTokens, activeCounters, queue] = await Promise.all([
     prisma.token.findMany({
       where: { queueId, status: 'WAITING' },
       orderBy: { sequenceNumber: 'asc' },
       include: { service: true },
     }),
-    prisma.counter.count({ where: { queueId, status: 'ACTIVE' } }),
-    prisma.queue.findUnique({ where: { id: queueId } }),
   ]);
 
+  if (activeCounters.length === 0) {
+    // No meaningful denominator — an estimate here would imply active
+    // service that isn't happening (approved product decision, carried
+    // forward unchanged from the pre-Checkpoint-4 design).
+    return waitingTokens.map((token, index) => ({
+      id: token.id,
+      organizationId: token.organizationId,
+      queueId: token.queueId,
+      sequenceNumber: token.sequenceNumber,
+      position: index + 1,
+      estimatedWaitMinutes: null,
+      estimatedReadyAt: null,
+    }));
+  }
+
+  const counterOccupancy: CounterOccupancy[] = activeCounters.map((counter) => {
+    const occupying = counter.tokens[0];
+    if (!occupying) {
+      return { freeAt: now };
+    }
+    const durationMinutes = computeEffectiveDurationMinutes(
+      occupying.requiredDurationMinutes,
+      occupying.service.durationMinutes,
+    );
+    // IN_PROGRESS anchors from when service actually began (startedAt);
+    // CALLED-but-not-yet-started anchors from calledAt as the best
+    // available approximation of "about to start."
+    const anchor = occupying.startedAt ?? occupying.calledAt ?? now;
+    return { freeAt: computeEffectiveEndTime(anchor, durationMinutes, now) };
+  });
+
+  const waitingInputs: WaitingTokenInput[] = waitingTokens.map((token) => ({
+    id: token.id,
+    durationMinutes: token.service.durationMinutes,
+  }));
+
+  const etaByTokenId = simulateWaitingTokenEtas(counterOccupancy, waitingInputs);
+
   return waitingTokens.map((token, index) => {
-    const position = index + 1;
-    const durationMinutes = token.service?.durationMinutes ?? queue?.baseTimeMinutes ?? 5;
-    const estimatedWaitMinutes = computeEstimatedWaitMinutes(durationMinutes, position, activeCounters);
+    const estimatedReadyAt = etaByTokenId.get(token.id) ?? null;
     return {
       id: token.id,
       organizationId: token.organizationId,
       queueId: token.queueId,
       sequenceNumber: token.sequenceNumber,
-      position,
-      estimatedWaitMinutes,
+      position: index + 1,
+      estimatedWaitMinutes: estimatedReadyAt ? minutesUntil(estimatedReadyAt, now) : null,
+      estimatedReadyAt,
     };
   });
+}
+
+async function computeComputedFields(
+  token: Token,
+): Promise<{ position: number | null; estimatedWaitMinutes: number | null; estimatedReadyAt: Date | null }> {
+  if (token.status !== 'WAITING') {
+    return { position: null, estimatedWaitMinutes: null, estimatedReadyAt: null };
+  }
+
+  const entries = await computeQueueEtas(token.queueId);
+  const entry = entries.find((e) => e.id === token.id);
+  return entry
+    ? {
+        position: entry.position,
+        estimatedWaitMinutes: entry.estimatedWaitMinutes,
+        estimatedReadyAt: entry.estimatedReadyAt,
+      }
+    : { position: null, estimatedWaitMinutes: null, estimatedReadyAt: null };
+}
+
+/**
+ * Batch equivalent of computeComputedFields, for every currently-WAITING
+ * token in one queue at once — used by the realtime layer to recompute
+ * ETAs after anything that could shift them (approved Phase 4 decision 4,
+ * broadened in V2 Checkpoint 4: not just a token leaving WAITING, but any
+ * change to counter occupancy — call/start/complete/skip/recall/a staff
+ * duration override — since every WAITING token's ETA now depends on the
+ * state of every active counter, not just its own position).
+ */
+export async function listWaitingTokenPositions(queueId: string): Promise<QueueEtaEntry[]> {
+  return computeQueueEtas(queueId);
 }
 
 /**
@@ -362,10 +414,17 @@ export async function listWaitingTokenPositions(queueId: string): Promise<
  * idempotencyKey, or formVersion — only what the customer needs to track
  * their own token, plus which counter to go to once called.
  */
-function toCustomerView(
-  token: Token & { counter?: Counter | null },
-  computed: { position: number | null; estimatedWaitMinutes: number | null },
-) {
+type ComputedFields = {
+  position: number | null;
+  estimatedWaitMinutes: number | null;
+  /** V2 Checkpoint 4: server-authoritative anchor for the mobile live
+   * countdown — the client ticks locally against this timestamp and
+   * re-anchors whenever a fresh one arrives, never treating its own clock
+   * as authoritative (Rule F). */
+  estimatedReadyAt: Date | null;
+};
+
+function toCustomerView(token: Token & { counter?: Counter | null }, computed: ComputedFields) {
   return {
     id: token.id,
     queueId: token.queueId,
@@ -375,6 +434,7 @@ function toCustomerView(
     formData: token.formData,
     position: computed.position,
     estimatedWaitMinutes: computed.estimatedWaitMinutes,
+    estimatedReadyAt: computed.estimatedReadyAt,
     counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
     createdAt: token.createdAt,
     calledAt: token.calledAt,
@@ -384,10 +444,7 @@ function toCustomerView(
   };
 }
 
-function toStaffView(
-  token: Token & { counter?: Counter | null },
-  computed: { position: number | null; estimatedWaitMinutes: number | null },
-) {
+function toStaffView(token: Token & { counter?: Counter | null }, computed: ComputedFields) {
   return { ...token, ...computed };
 }
 
@@ -696,5 +753,36 @@ export async function nextToken(organizationId: string, queueId: string, counter
       where: { id: eligible.id },
       data: { status: 'CALLED', counterId, calledAt: new Date() },
     });
+  });
+}
+
+/**
+ * V2 Checkpoint 4 (ADR-026): staff override of a currently-active
+ * customer's required service duration. Restricted to CALLED/IN_PROGRESS
+ * ("an active customer," per the product requirement) — a WAITING or
+ * terminal-state token has no occupancy for this to meaningfully affect,
+ * and allowing it there would let the field silently accumulate stale
+ * values with no relationship to an actual in-progress service. This
+ * itself is not a state-machine transition (status is untouched), so it
+ * doesn't go through assertValidTransition/transitionToken.
+ */
+export async function setRequiredDuration(
+  organizationId: string,
+  tokenId: string,
+  requiredDurationMinutes: number,
+): Promise<Token> {
+  const token = await findTokenScoped(organizationId, tokenId);
+
+  if (token.status !== 'CALLED' && token.status !== 'IN_PROGRESS') {
+    throw new AppError(
+      409,
+      'TOKEN_NOT_ACTIVE',
+      'Required duration can only be set for a currently CALLED or IN_PROGRESS customer.',
+    );
+  }
+
+  return prisma.token.update({
+    where: { id: tokenId },
+    data: { requiredDurationMinutes },
   });
 }

@@ -31,3 +31,12 @@ export const nextTokenSchema = {
     counterId: z.string().uuid('counterId must be a valid id.'),
   }),
 };
+
+// V2 Checkpoint 4: staff override of an active customer's required
+// service duration, in minutes.
+export const setRequiredDurationSchema = {
+  params: tokenIdParams,
+  body: z.object({
+    requiredDurationMinutes: z.number().int().positive('requiredDurationMinutes must be a positive integer.'),
+  }),
+};

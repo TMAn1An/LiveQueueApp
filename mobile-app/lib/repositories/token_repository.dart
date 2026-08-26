@@ -5,9 +5,15 @@ import '../services/token_api_service.dart';
 /// A position/wait update delivered by token.position_changed — a partial
 /// update, unlike the other lifecycle events (see class doc below).
 class PositionUpdate {
-  const PositionUpdate({required this.position, required this.estimatedWaitMinutes});
+  const PositionUpdate({
+    required this.position,
+    required this.estimatedWaitMinutes,
+    required this.estimatedReadyAt,
+  });
   final int position;
   final int? estimatedWaitMinutes;
+  /// V2 Checkpoint 4 (ADR-026) — see LiveQueueToken.estimatedReadyAt.
+  final DateTime? estimatedReadyAt;
 }
 
 /// True when the queue this token belongs to was just paused, false when
@@ -75,6 +81,9 @@ class TokenRepository {
       return PositionUpdate(
         position: data['position'] as int,
         estimatedWaitMinutes: data['estimatedWaitMinutes'] as int?,
+        estimatedReadyAt: data['estimatedReadyAt'] == null
+            ? null
+            : DateTime.parse(data['estimatedReadyAt'] as String),
       );
     });
   }

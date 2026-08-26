@@ -63,3 +63,12 @@ export function useNextToken() {
     onSuccess: () => invalidateLiveData(queryClient),
   });
 }
+
+export function useSetRequiredDuration() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tokenId, requiredDurationMinutes }: { tokenId: string; requiredDurationMinutes: number }) =>
+      tokenApi.setRequiredDuration(tokenId, requiredDurationMinutes),
+    onSuccess: () => invalidateLiveData(queryClient),
+  });
+}

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useCounters } from '../hooks/useCounters';
 import {
   useCallToken,
   useCompleteToken,
   useRecallToken,
+  useSetRequiredDuration,
   useSkipToken,
   useStartToken,
 } from '../hooks/useTokenActions';
@@ -28,6 +29,11 @@ import type { TokenStatus } from '../types/token';
  * enforces order, regardless of what this component renders. `position`
  * is optional and defaults to "eligible" when omitted, so every existing
  * caller/test that doesn't pass it keeps its prior behavior unchanged.
+ *
+ * V2 Checkpoint 4 (ADR-026): CALLED/IN_PROGRESS rows also get an "Adjust
+ * Time" action (PATCH /api/tokens/:tokenId/duration) — staff overriding an
+ * active customer's required duration, which the backend then uses to
+ * recompute every WAITING token's ETA in the queue.
  */
 export function TokenActions({
   tokenId,
@@ -44,12 +50,37 @@ export function TokenActions({
   const [pickingCounter, setPickingCounter] = useState(false);
   const [pickingRecallCounter, setPickingRecallCounter] = useState(false);
   const [recallError, setRecallError] = useState<string | null>(null);
+  const [adjustingDuration, setAdjustingDuration] = useState(false);
+  const [durationInput, setDurationInput] = useState('');
+  const [durationError, setDurationError] = useState<string | null>(null);
   const { data: counters } = useCounters(pickingCounter || pickingRecallCounter ? queueId : undefined);
   const callToken = useCallToken();
   const startToken = useStartToken();
   const completeToken = useCompleteToken();
   const skipToken = useSkipToken();
   const recallToken = useRecallToken();
+  const setRequiredDuration = useSetRequiredDuration();
+
+  function handleDurationSubmit(e: FormEvent) {
+    e.preventDefault();
+    const requiredDurationMinutes = Number(durationInput);
+    if (!Number.isInteger(requiredDurationMinutes) || requiredDurationMinutes <= 0) {
+      setDurationError('Enter a whole number of minutes greater than zero.');
+      return;
+    }
+    setDurationError(null);
+    setRequiredDuration.mutate(
+      { tokenId, requiredDurationMinutes },
+      {
+        onSuccess: () => {
+          setAdjustingDuration(false);
+          setDurationInput('');
+        },
+        onError: (err) =>
+          setDurationError(err instanceof ApiError ? err.message : 'Failed to update required time.'),
+      },
+    );
+  }
 
   const activeCounters = (counters ?? []).filter((c) => c.status === 'ACTIVE');
 
@@ -99,6 +130,44 @@ export function TokenActions({
             Complete
           </Button>
         )}
+        {(status === 'CALLED' || status === 'IN_PROGRESS') && !adjustingDuration && (
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setDurationError(null);
+              setAdjustingDuration(true);
+            }}
+          >
+            Adjust Time
+          </Button>
+        )}
+        {(status === 'CALLED' || status === 'IN_PROGRESS') && adjustingDuration && (
+          <form onSubmit={handleDurationSubmit} className="flex items-center gap-1">
+            <input
+              autoFocus
+              type="number"
+              min={1}
+              step={1}
+              placeholder="Minutes"
+              value={durationInput}
+              onChange={(e) => setDurationInput(e.target.value)}
+              className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            />
+            <Button type="submit" variant="primary" disabled={setRequiredDuration.isPending}>
+              Set
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setAdjustingDuration(false);
+                setDurationError(null);
+              }}
+            >
+              Cancel
+            </Button>
+          </form>
+        )}
         {(status === 'WAITING' || status === 'CALLED' || status === 'IN_PROGRESS') && (
           <Button variant="secondary" onClick={() => skipToken.mutate(tokenId)}>
             Skip
@@ -143,6 +212,11 @@ export function TokenActions({
       {recallError && (
         <div className="mt-1 max-w-xs">
           <ErrorBanner message={recallError} />
+        </div>
+      )}
+      {durationError && (
+        <div className="mt-1 max-w-xs">
+          <ErrorBanner message={durationError} />
         </div>
       )}
     </PermissionGate>

@@ -60,6 +60,16 @@ void main() {
       final token = LiveQueueToken.fromJson(baseJson()..['status'] = 'SOMETHING_NEW');
       expect(token.status, TokenStatus.unknown);
     });
+
+    test('parses estimatedReadyAt when present, and null when absent (V2 Checkpoint 4)', () {
+      final withReadyAt = LiveQueueToken.fromJson(
+        baseJson()..['estimatedReadyAt'] = '2026-08-22T10:12:00.000Z',
+      );
+      expect(withReadyAt.estimatedReadyAt, DateTime.parse('2026-08-22T10:12:00.000Z'));
+
+      final withoutReadyAt = LiveQueueToken.fromJson(baseJson());
+      expect(withoutReadyAt.estimatedReadyAt, isNull);
+    });
   });
 
   group('LiveQueueToken.isActive', () {
@@ -108,11 +118,13 @@ void main() {
         'status': 'WAITING',
         'position': 2,
         'estimatedWaitMinutes': 8,
+        'estimatedReadyAt': '2026-08-22T10:08:00.000Z',
       });
       expect(snapshot.id, 'token-1');
       expect(snapshot.status, TokenStatus.waiting);
       expect(snapshot.position, 2);
       expect(snapshot.estimatedWaitMinutes, 8);
+      expect(snapshot.estimatedReadyAt, DateTime.parse('2026-08-22T10:08:00.000Z'));
     });
   });
 }

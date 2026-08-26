@@ -261,7 +261,28 @@ See ADR-025 for full design/implementation detail, including why `/next` needed 
 
 ## V2 Checkpoint 4: ETA + live countdown + variable service duration
 
-**Goal:** One coherent ETA/service-duration model instead of three unrelated features — combines multi-service selection (total duration = sum of selected services), the actual durations of customers genuinely ahead, active-counter count, staff-adjustable per-customer required time (recalculating every affected customer behind them), the default +2-minute automatic extension when a service's estimated duration expires without completion (a named configurable constant/setting, not a hardcoded magic number), and the mobile live countdown — a server-authoritative timestamp (e.g. `estimatedReadyAt`) that the mobile app ticks locally and re-anchors on every real-time update, never polling. Do not build the countdown on top of the current simplistic `currentTokenDuration × position / counters` approximation — fix the formula first.
+**Goal:** One coherent ETA/service-duration model — the actual durations of customers genuinely ahead across every active counter (a real multi-server FCFS simulation, not the old `currentTokenDuration × position / counters` approximation), staff-adjustable per-customer required time (recalculating every WAITING token in the queue), the default +2-minute automatic extension when a service's estimated duration expires without completion (a named constant, not a hardcoded magic number), and the mobile live countdown — a server-authoritative timestamp (`estimatedReadyAt`) that the mobile app ticks locally and re-anchors on every real-time update, never polling. Multi-service selection's *total*-duration contribution is deferred to Checkpoint 5 (the simulation's duration input is generic enough to accept a summed total later without rework) — this checkpoint fixes the formula for the current single-service model first.
+
+### Tasks
+
+- [x] `queueEtaEngine.ts`: a pure, unit-tested multi-server FCFS simulation replacing the old approximation entirely
+- [x] `Token.requiredDurationMinutes` (additive migration) — staff override, authoritative when set, CALLED/IN_PROGRESS only
+- [x] Default +2-minute auto-extension, computed live from anchor + duration + now, never persisted
+- [x] `PATCH /api/tokens/:tokenId/duration` + dashboard "Adjust Time" action
+- [x] Broadened the realtime broadcast from "tokens whose position shifted" to "every WAITING token in the queue," called from every mutation that can affect counter occupancy (call/start/complete/skip/recall/duration-override)
+- [x] `estimatedReadyAt` added to every token view, the `/status` snapshot, and the `position_changed` socket payload
+- [x] Mobile: a local ticking countdown widget anchored to `estimatedReadyAt`, re-anchoring automatically on every provider update
+- [x] Commit
+
+### Acceptance
+
+- Two free counters serving 10-minute jobs report 0/0/10 minutes wait, not a flat position/counters average
+- A staff duration override on the in-service customer shifts every WAITING token's ETA behind them
+- A service whose allocated time expires without a staff update rolls forward in +2-minute increments, live, not stored
+- The mobile Live Tracking screen shows a real ticking mm:ss countdown anchored to a server timestamp, re-anchoring on reconnect/update, never polling
+- Full backend + mobile + dashboard test suites pass; one purely-additive migration, applied locally only
+
+See ADR-026 for full design/implementation detail, including exactly why the old formula was wrong (not just imprecise) and the full realtime-broadcast rationale.
 
 ## V2 Checkpoint 5: Queue repeat-visit policy
 

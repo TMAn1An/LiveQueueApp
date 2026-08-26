@@ -24,3 +24,12 @@ export function recallToken(tokenId: string, counterId: string) {
 export function nextToken(queueId: string, counterId: string) {
   return apiFetch<StaffToken>(`/api/queues/${queueId}/next`, { method: 'POST', body: { counterId } });
 }
+
+// V2 Checkpoint 4 (ADR-026): staff override of an active customer's
+// required service duration, in minutes.
+export function setRequiredDuration(tokenId: string, requiredDurationMinutes: number) {
+  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/duration`, {
+    method: 'PATCH',
+    body: { requiredDurationMinutes },
+  });
+}

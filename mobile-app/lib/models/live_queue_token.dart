@@ -40,6 +40,7 @@ class LiveQueueToken {
     required this.formData,
     required this.position,
     required this.estimatedWaitMinutes,
+    required this.estimatedReadyAt,
     required this.counter,
     required this.createdAt,
     this.calledAt,
@@ -56,6 +57,12 @@ class LiveQueueToken {
   final Map<String, dynamic> formData;
   final int? position;
   final int? estimatedWaitMinutes;
+  /// V2 Checkpoint 4 (ADR-026): server-authoritative anchor for the live
+  /// countdown — the UI ticks a local Timer against this timestamp and
+  /// re-anchors whenever a fresh one arrives; it never computes its own
+  /// estimate. Null exactly when estimatedWaitMinutes is (no active
+  /// counters, or not a WAITING token).
+  final DateTime? estimatedReadyAt;
   final CounterInfo? counter;
   final DateTime createdAt;
   final DateTime? calledAt;
@@ -75,6 +82,9 @@ class LiveQueueToken {
       formData: (json['formData'] as Map<String, dynamic>?) ?? const {},
       position: json['position'] as int?,
       estimatedWaitMinutes: json['estimatedWaitMinutes'] as int?,
+      estimatedReadyAt: json['estimatedReadyAt'] == null
+          ? null
+          : DateTime.parse(json['estimatedReadyAt'] as String),
       counter: json['counter'] == null
           ? null
           : CounterInfo.fromJson(json['counter'] as Map<String, dynamic>),
@@ -92,6 +102,8 @@ class LiveQueueToken {
     bool clearPosition = false,
     int? estimatedWaitMinutes,
     bool clearEstimatedWaitMinutes = false,
+    DateTime? estimatedReadyAt,
+    bool clearEstimatedReadyAt = false,
     CounterInfo? counter,
   }) {
     return LiveQueueToken(
@@ -104,6 +116,8 @@ class LiveQueueToken {
       position: clearPosition ? null : (position ?? this.position),
       estimatedWaitMinutes:
           clearEstimatedWaitMinutes ? null : (estimatedWaitMinutes ?? this.estimatedWaitMinutes),
+      estimatedReadyAt:
+          clearEstimatedReadyAt ? null : (estimatedReadyAt ?? this.estimatedReadyAt),
       counter: counter ?? this.counter,
       createdAt: createdAt,
       calledAt: calledAt,
@@ -123,12 +137,14 @@ class TokenStatusSnapshot {
     required this.status,
     required this.position,
     required this.estimatedWaitMinutes,
+    required this.estimatedReadyAt,
   });
 
   final String id;
   final TokenStatus status;
   final int? position;
   final int? estimatedWaitMinutes;
+  final DateTime? estimatedReadyAt;
 
   factory TokenStatusSnapshot.fromJson(Map<String, dynamic> json) {
     return TokenStatusSnapshot(
@@ -136,6 +152,9 @@ class TokenStatusSnapshot {
       status: parseTokenStatus(json['status'] as String),
       position: json['position'] as int?,
       estimatedWaitMinutes: json['estimatedWaitMinutes'] as int?,
+      estimatedReadyAt: json['estimatedReadyAt'] == null
+          ? null
+          : DateTime.parse(json['estimatedReadyAt'] as String),
     );
   }
 }

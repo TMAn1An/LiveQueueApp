@@ -116,10 +116,37 @@ describe('dispatchReminders — selection rules', () => {
   });
 
   it('excludes a token whose estimated wait has not yet dropped to the configured threshold', async () => {
-    // durationMinutes=100, 1 active counter, position=1 -> estimate=100min.
-    const setup = await setupToken(100);
-    await setCounterStatus(setup.accessToken, setup.counterId, 'ACTIVE');
-    await setPreference(setup.tokenId, setup.deviceIdentifier, 10);
+    // V2 Checkpoint 4: with a free counter, a position-1 WAITING token is
+    // immediately callable (estimate ~0min) under the real multi-counter
+    // simulation — durationMinutes alone no longer determines the wait for
+    // whoever's next. To genuinely still be ~100 minutes out, this token
+    // must be *behind* another customer who is already occupying the only
+    // active counter for a long service.
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id, { durationMinutes: 100 });
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
+
+    const blockerRes = await createTokenRequest({
+      queueId: queue.id,
+      serviceId: service.id,
+      deviceIdentifier: `reminder-blocker-${randomUUID()}`,
+    });
+    expect(blockerRes.status).toBe(201);
+    await api()
+      .post(`/api/tokens/${blockerRes.body.data.id}/call`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ counterId: counter.id });
+
+    const deviceIdentifier = `reminder-device-${randomUUID()}`;
+    const tokenRes = await createTokenRequest({ queueId: queue.id, serviceId: service.id, deviceIdentifier });
+    expect(tokenRes.status).toBe(201);
+    await api()
+      .post('/api/devices/fcm-token')
+      .send({ deviceIdentifier, fcmToken: `fake-token-${randomUUID()}` });
+    await setPreference(tokenRes.body.data.id, deviceIdentifier, 10);
+
     const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
 
     const summary = await dispatchReminders();

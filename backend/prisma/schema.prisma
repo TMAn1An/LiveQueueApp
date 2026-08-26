@@ -323,6 +323,13 @@ model Token {
   completedAt DateTime? @map("completed_at")
   skippedAt   DateTime? @map("skipped_at")
 
+  /// V2 Checkpoint 4 (ADR-026): staff-set override of how long this specific
+  /// customer's service is expected to take, in minutes. Null means "use
+  /// service.durationMinutes" (the pre-existing default). Only ever set
+  /// while the token is CALLED/IN_PROGRESS ("an active customer" per the
+  /// product requirement) — never touched by WAITING/terminal tokens.
+  requiredDurationMinutes Int? @map("required_duration_minutes")
+
   /// Phase 7 Step 7 dedup claim: set exactly once, via a conditional
   /// (compare-and-swap) UPDATE mirroring the existing state-machine pattern,
   /// the moment a reminder dispatch attempt claims this token — before the

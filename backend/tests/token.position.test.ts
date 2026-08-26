@@ -36,7 +36,7 @@ describe('Token position and estimated wait', () => {
     expect(third.position).toBe(3);
   });
 
-  it('WAITING token + active counters > 0 -> numeric estimatedWaitMinutes using the active counter count', async () => {
+  it('WAITING token + active counters > 0 -> numeric estimatedWaitMinutes from the real multi-counter simulation (V2 Checkpoint 4)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id, { durationMinutes: 10 });
@@ -49,10 +49,14 @@ describe('Token position and estimated wait', () => {
     const second = await createToken({ queueId: queue.id, serviceId: service.id });
     const third = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    // ceil(duration * position / activeCounters), with 2 active counters.
-    expect(first.estimatedWaitMinutes).toBe(5); // ceil(10*1/2)
-    expect(second.estimatedWaitMinutes).toBe(10); // ceil(10*2/2)
-    expect(third.estimatedWaitMinutes).toBe(15); // ceil(10*3/2)
+    // Two free counters, three 10-minute jobs: the first two are served
+    // immediately (one per counter), the third waits for whichever counter
+    // frees first (10 minutes) — not a flat position/counters average
+    // (the pre-Checkpoint-4 formula would have said 5/10/15).
+    expect(first.estimatedWaitMinutes).toBe(0);
+    expect(second.estimatedWaitMinutes).toBe(0);
+    expect(third.estimatedWaitMinutes).toBe(10);
+    expect(third.estimatedReadyAt).toBeDefined();
   });
 
   it('WAITING token + zero active counters -> null estimatedWaitMinutes (no flooring to 1)', async () => {

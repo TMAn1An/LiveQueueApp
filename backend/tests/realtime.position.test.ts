@@ -141,7 +141,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     expect(envelope.data.position).toBe(1);
   });
 
-  it('a CALLED -> SKIPPED transition does NOT trigger position_changed (token was already not waiting)', async () => {
+  it('a CALLED -> SKIPPED transition DOES trigger position_changed (V2 Checkpoint 4: it frees a counter, shifting ETAs)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
@@ -158,7 +158,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     // Calling `first` legitimately shifts `second`'s position (WAITING ->
     // CALLED). Explicitly wait for and consume that expected event first,
     // so its background emission (which runs after the HTTP response) can't
-    // race into the "expect nothing" window set up for the skip step below.
+    // race into the window set up for the skip step below.
     const callPositionEvent = waitForEvent<PositionEnvelope>(socketSecond, 'token.position_changed');
     await api()
       .post(`/api/tokens/${first.id}/call`)
@@ -166,13 +166,16 @@ describe('token.position_changed — targeted per-token emission', () => {
       .send({ counterId: counter.id });
     await callPositionEvent;
 
-    const events = collectEvents<PositionEnvelope>(socketSecond, 'token.position_changed', 800);
-
-    // first is now CALLED, not WAITING — skipping it must not re-broadcast
-    // second's position (which never changes as a result of this).
+    // first is now CALLED, occupying the only active counter — second's
+    // *position* (1) won't change when first is skipped, but the counter
+    // it was occupying becomes free again, which does change second's
+    // simulated ETA (V2 Checkpoint 4, ADR-026: the broadcast is no longer
+    // scoped to "only tokens whose position shifted").
+    const skipPositionEvent = waitForEvent<PositionEnvelope>(socketSecond, 'token.position_changed');
     await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    const envelope = await skipPositionEvent;
 
-    expect(await events).toHaveLength(0);
+    expect(envelope.data.position).toBe(1);
   });
 
   it('/next triggers position_changed for tokens behind the auto-selected token', async () => {

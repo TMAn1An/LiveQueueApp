@@ -136,6 +136,7 @@ class TokenTrackingProvider extends ChangeNotifier {
     token = current.copyWith(
       position: update.position,
       estimatedWaitMinutes: update.estimatedWaitMinutes,
+      estimatedReadyAt: update.estimatedReadyAt,
     );
     _maybeShowReminder();
     notifyListeners();

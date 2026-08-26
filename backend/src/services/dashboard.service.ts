@@ -109,6 +109,7 @@ export async function getLiveQueueTable(organizationId: string, page: number, pa
       counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
       position: position?.position ?? null,
       estimatedWaitMinutes: position?.estimatedWaitMinutes ?? null,
+      estimatedReadyAt: position?.estimatedReadyAt ?? null,
       createdAt: token.createdAt,
       calledAt: token.calledAt,
       startedAt: token.startedAt,

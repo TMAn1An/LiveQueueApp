@@ -7,6 +7,7 @@ import {
   useCallToken,
   useCompleteToken,
   useRecallToken,
+  useSetRequiredDuration,
   useSkipToken,
   useStartToken,
 } from '../hooks/useTokenActions';
@@ -23,6 +24,7 @@ const startMutate = vi.fn();
 const completeMutate = vi.fn();
 const skipMutate = vi.fn();
 const recallMutate = vi.fn();
+const setRequiredDurationMutate = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -41,6 +43,10 @@ beforeEach(() => {
   vi.mocked(useRecallToken).mockReturnValue({
     mutate: recallMutate,
   } as unknown as ReturnType<typeof useRecallToken>);
+  vi.mocked(useSetRequiredDuration).mockReturnValue({
+    mutate: setRequiredDurationMutate,
+    isPending: false,
+  } as unknown as ReturnType<typeof useSetRequiredDuration>);
 });
 
 describe('TokenActions — state-gated buttons (mirrors the backend state machine)', () => {
@@ -114,6 +120,32 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
     await user.click(screen.getByText('Skip'));
 
     expect(skipMutate).toHaveBeenCalledWith('t1');
+  });
+});
+
+describe('TokenActions — Adjust Time (V2 Checkpoint 4)', () => {
+  it('clicking Adjust Time reveals a minutes input, and submitting calls setRequiredDuration', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
+
+    await user.click(screen.getByText('Adjust Time'));
+    await user.type(screen.getByPlaceholderText('Minutes'), '18');
+    await user.click(screen.getByText('Set'));
+
+    expect(setRequiredDurationMutate).toHaveBeenCalledWith(
+      { tokenId: 't1', requiredDurationMinutes: 18 },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('is available for IN_PROGRESS tokens too, not just CALLED', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" />);
+    expect(screen.getByText('Adjust Time')).toBeInTheDocument();
+  });
+
+  it('is not offered for a WAITING token', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" position={1} />);
+    expect(screen.queryByText('Adjust Time')).not.toBeInTheDocument();
   });
 });
 

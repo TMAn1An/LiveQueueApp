@@ -153,15 +153,20 @@ export const emitTokenSkipped = (tokenId: string) =>
   emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_SKIPPED, tokenId);
 
 /**
- * Targeted per-token position_changed emission (approved Phase 4 decision
- * 4). Only tokens whose position actually shifted — those behind the token
- * that just left WAITING — are notified; tokens ahead of it are unaffected
- * and receive nothing. Never broadcast to the public queue room.
+ * Recomputes and emits position_changed for every currently-WAITING token
+ * in a queue (approved Phase 4 decision 4; broadened in V2 Checkpoint 4 —
+ * see ADR-026). Pre-Checkpoint-4, only tokens *behind* a just-removed
+ * sequence number needed recomputing, since estimatedWaitMinutes was a
+ * pure function of one token's own position. Under the real multi-counter
+ * FCFS simulation, every WAITING token's ETA depends on the current state
+ * of every active counter — a duration override, a start, or a skip from
+ * CALLED/IN_PROGRESS (freeing a counter without removing anyone from
+ * WAITING) can shift everyone's ETA, not just those "behind" some point —
+ * so this always recomputes and emits to the whole waiting set. Queue
+ * sizes in a live queue-management system stay small, so this remains
+ * cheap; never broadcast to the public queue room (unchanged).
  */
-export function broadcastAffectedPositions(
-  queueId: string,
-  removedSequenceNumber: number,
-): Promise<void> {
+export function broadcastQueueEtaUpdate(queueId: string): Promise<void> {
   return guarded(async () => {
     const io = getIO();
     if (!io) return; // skip the recompute query entirely when nothing is listening
@@ -169,17 +174,17 @@ export function broadcastAffectedPositions(
     const positions = await tokenService.listWaitingTokenPositions(queueId);
 
     for (const entry of positions) {
-      if (entry.sequenceNumber <= removedSequenceNumber) {
-        continue; // ahead of the removed token — position unaffected
-      }
-
       const base = {
         type: SOCKET_EVENTS.TOKEN_POSITION_CHANGED,
         organizationId: entry.organizationId,
         queueId: entry.queueId,
         tokenId: entry.id,
       } as const;
-      const data = { position: entry.position, estimatedWaitMinutes: entry.estimatedWaitMinutes };
+      const data = {
+        position: entry.position,
+        estimatedWaitMinutes: entry.estimatedWaitMinutes,
+        estimatedReadyAt: entry.estimatedReadyAt,
+      };
 
       emitToRoom(organizationRoom(entry.organizationId), SOCKET_EVENTS.TOKEN_POSITION_CHANGED, {
         ...base,

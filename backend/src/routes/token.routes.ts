@@ -7,7 +7,12 @@ import { publicRateLimiter, tokenCreateRateLimiter } from '../middleware/rateLim
 import { requirePermission } from '../middleware/requirePermission';
 import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
-import { callTokenSchema, createTokenSchema, tokenIdOnlySchema } from '../validators/token.validators';
+import {
+  callTokenSchema,
+  createTokenSchema,
+  setRequiredDurationSchema,
+  tokenIdOnlySchema,
+} from '../validators/token.validators';
 import { setNotificationPreferenceSchema } from '../validators/notificationPreference.validators';
 
 const router = Router();
@@ -79,6 +84,14 @@ router.post(
   requirePermission('operate_tokens'),
   validate(callTokenSchema),
   tokenController.recall,
+);
+router.patch(
+  '/:tokenId/duration',
+  authenticate,
+  requireVerified,
+  requirePermission('operate_tokens'),
+  validate(setRequiredDurationSchema),
+  tokenController.setRequiredDuration,
 );
 
 export default router;

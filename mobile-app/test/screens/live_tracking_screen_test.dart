@@ -50,6 +50,7 @@ LiveQueueToken _token({
   required TokenStatus status,
   int? position,
   int? estimatedWaitMinutes,
+  DateTime? estimatedReadyAt,
   CounterInfo? counter,
 }) {
   return LiveQueueToken(
@@ -61,6 +62,7 @@ LiveQueueToken _token({
     formData: const {},
     position: position,
     estimatedWaitMinutes: estimatedWaitMinutes,
+    estimatedReadyAt: estimatedReadyAt,
     counter: counter,
     createdAt: DateTime.utc(2026, 1, 1),
   );
@@ -80,17 +82,40 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('shows serial number, status, position, and estimated wait while WAITING', (tester) async {
+  testWidgets('shows serial number, status, position, and a live countdown while WAITING', (tester) async {
     final provider = _FakeTokenTrackingProvider();
     provider.pushState(
-      token: _token(status: TokenStatus.waiting, position: 4, estimatedWaitMinutes: 18),
+      token: _token(
+        status: TokenStatus.waiting,
+        position: 4,
+        estimatedWaitMinutes: 18,
+        estimatedReadyAt: DateTime.now().add(const Duration(minutes: 18)),
+      ),
     );
     await _pump(tester, provider);
 
     expect(find.text('A007'), findsOneWidget);
     expect(find.text('Waiting'), findsOneWidget);
     expect(find.text('4'), findsOneWidget);
-    expect(find.text('18 minutes'), findsOneWidget);
+    // V2 Checkpoint 4: a live mm:ss countdown, not a static "N minutes"
+    // string — match the shape rather than an exact value, since real time
+    // elapses between building `estimatedReadyAt` above and this assertion.
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is Text && RegExp(r'^\d{1,2}:\d{2}$').hasMatch(widget.data ?? ''),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('shows "Not available" when no estimate exists yet (e.g. zero active counters)', (tester) async {
+    final provider = _FakeTokenTrackingProvider();
+    provider.pushState(
+      token: _token(status: TokenStatus.waiting, position: 1, estimatedWaitMinutes: null),
+    );
+    await _pump(tester, provider);
+
+    expect(find.text('Not available'), findsOneWidget);
   });
 
   testWidgets('shows the counter name and turn banner when CALLED', (tester) async {
