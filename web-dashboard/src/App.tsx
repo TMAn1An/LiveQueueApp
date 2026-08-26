@@ -7,6 +7,7 @@ import { ProtectedRoute } from './layouts/ProtectedRoute';
 import { PermissionRoute } from './layouts/PermissionRoute';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
+import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { QueuesPage } from './pages/QueuesPage';
 import { QueueDetailsPage } from './pages/QueueDetailsPage';
@@ -33,6 +34,7 @@ function App() {
             <Route element={<AuthLayout />}>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
+              <Route path="/verify-email" element={<VerifyEmailPage />} />
             </Route>
 
             <Route element={<ProtectedRoute />}>

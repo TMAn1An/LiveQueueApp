@@ -6,6 +6,7 @@ import * as formFieldController from '../controllers/formField.controller';
 import * as tokenController from '../controllers/token.controller';
 import { authenticate } from '../middleware/authenticate';
 import { requirePermission } from '../middleware/requirePermission';
+import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
   createQueueSchema,
@@ -22,18 +23,20 @@ const router = Router();
 
 // Any authenticated staff member of the organization may read (approved
 // Phase 2 decision 1) — only mutations require the specific permission.
-router.get('/', authenticate, queueController.list);
+router.get('/', authenticate, requireVerified, queueController.list);
 router.post(
   '/',
   authenticate,
+  requireVerified,
   requirePermission('manage_queues'),
   validate(createQueueSchema),
   queueController.create,
 );
-router.get('/:queueId', authenticate, validate(queueIdOnlySchema), queueController.get);
+router.get('/:queueId', authenticate, requireVerified, validate(queueIdOnlySchema), queueController.get);
 router.put(
   '/:queueId',
   authenticate,
+  requireVerified,
   requirePermission('manage_queues'),
   validate(updateQueueSchema),
   queueController.update,
@@ -41,6 +44,7 @@ router.put(
 router.delete(
   '/:queueId',
   authenticate,
+  requireVerified,
   requirePermission('manage_queues'),
   validate(queueIdOnlySchema),
   queueController.remove,
@@ -48,6 +52,7 @@ router.delete(
 router.patch(
   '/:queueId/status',
   authenticate,
+  requireVerified,
   requirePermission('manage_queues'),
   validate(updateQueueStatusSchema),
   queueController.updateStatus,
@@ -58,6 +63,7 @@ router.patch(
 router.post(
   '/:queueId/services',
   authenticate,
+  requireVerified,
   requirePermission('manage_services'),
   validate(createServiceSchema),
   serviceController.create,
@@ -66,12 +72,14 @@ router.post(
 router.get(
   '/:queueId/counters',
   authenticate,
+  requireVerified,
   validate(listCountersSchema),
   counterController.list,
 );
 router.post(
   '/:queueId/counters',
   authenticate,
+  requireVerified,
   requirePermission('manage_counters'),
   validate(createCounterSchema),
   counterController.create,
@@ -82,12 +90,14 @@ router.post(
 router.get(
   '/:queueId/form-fields',
   authenticate,
+  requireVerified,
   validate(queueIdOnlySchema),
   formFieldController.list,
 );
 router.put(
   '/:queueId/form-fields',
   authenticate,
+  requireVerified,
   requirePermission('manage_queues'),
   validate(replaceFormFieldsSchema),
   formFieldController.replace,
@@ -98,6 +108,7 @@ router.put(
 router.post(
   '/:queueId/next',
   authenticate,
+  requireVerified,
   requirePermission('operate_tokens'),
   validate(nextTokenSchema),
   tokenController.next,

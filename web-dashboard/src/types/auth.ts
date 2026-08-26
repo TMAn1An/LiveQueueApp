@@ -15,7 +15,7 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 export type StaffRole = 'OWNER' | 'ADMIN' | 'STAFF';
-export type StaffStatus = 'ACTIVE' | 'SUSPENDED';
+export type StaffStatus = 'ACTIVE' | 'SUSPENDED' | 'PENDING_EMAIL_VERIFICATION';
 export type OrganizationStatus = 'ACTIVE' | 'SUSPENDED';
 
 export interface Staff {

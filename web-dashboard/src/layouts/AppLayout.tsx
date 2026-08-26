@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useOrganizationSocket } from '../hooks/useOrganizationSocket';
+import { EmailVerificationBanner } from '../components/EmailVerificationBanner';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-3 py-2 text-sm font-medium ${
@@ -69,6 +70,9 @@ export function AppLayout() {
           </button>
         </header>
         <main className="p-6">
+          {staff?.status === 'PENDING_EMAIL_VERIFICATION' && (
+            <EmailVerificationBanner email={staff.email} />
+          )}
           <Outlet />
         </main>
       </div>

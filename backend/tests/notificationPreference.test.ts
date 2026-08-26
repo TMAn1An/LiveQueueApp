@@ -18,6 +18,20 @@ async function setupWaitingTokenForDevice(deviceIdentifier: string) {
     });
   const accessToken = ownerRes.body.data.accessToken;
 
+  // V2 Checkpoint 2 (ADR-024): registration now starts
+  // PENDING_EMAIL_VERIFICATION — this setup helper needs an immediately-
+  // usable organization, unrelated to the verification flow itself.
+  // Mirrors helpers/app.ts's registerOwner fix.
+  await prisma.staff.update({
+    where: { id: ownerRes.body.data.staff.id as string },
+    data: {
+      status: 'ACTIVE',
+      emailVerificationTokenHash: null,
+      emailVerificationExpiresAt: null,
+      registrationExpiresAt: null,
+    },
+  });
+
   const queueRes = await createQueue(accessToken);
   const service = await createService(accessToken, queueRes.id);
   await createCounter(accessToken, queueRes.id);

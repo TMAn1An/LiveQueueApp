@@ -49,6 +49,31 @@ const envSchema = z.object({
   FIREBASE_SERVICE_ACCOUNT_PATH: z.string().optional(),
 
   REMINDER_DISPATCH_CRON: z.string().default('*/1 * * * *'),
+
+  // Email verification (V2 Checkpoint 2, ADR-024). Resend, mirroring
+  // FIREBASE_CREDENTIALS's optional/guarded pattern exactly: unset means
+  // "verification emails are not actually sent" (a warning is logged, the
+  // request still succeeds) rather than a startup failure — lets local dev
+  // and the test suite run with no external account required.
+  RESEND_API_KEY: z.string().optional(),
+  // 'onboarding@resend.dev' is Resend's own always-works sender for
+  // accounts that haven't verified a custom sending domain yet — a
+  // reasonable zero-config default for local dev, expected to be overridden
+  // with a real verified sender in production.
+  EMAIL_FROM: z.string().default('LiveQueue <onboarding@resend.dev>'),
+  // The dashboard's own origin — verification links point here
+  // (`${APP_BASE_URL}/verify-email?token=...`), not at this API server,
+  // since the dashboard (a client-rendered SPA) is what actually completes
+  // verification by calling this API in turn.
+  APP_BASE_URL: z.string().default('http://localhost:5173'),
+
+  RATE_LIMIT_EMAIL_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
+  RATE_LIMIT_EMAIL_MAX: z.coerce.number().int().positive().default(3),
+
+  // Pending-registration cleanup (V2 Checkpoint 2). Every 5 minutes is far
+  // more granular than the 1-hour deadline it's checking needs — matches
+  // REMINDER_DISPATCH_CRON's existing convention, not a new scheduling idea.
+  PENDING_REGISTRATION_CLEANUP_CRON: z.string().default('*/5 * * * *'),
 });
 
 function loadEnv() {

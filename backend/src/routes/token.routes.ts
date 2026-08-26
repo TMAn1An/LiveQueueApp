@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authenticate';
 import { optionalAuthenticate } from '../middleware/optionalAuthenticate';
 import { publicRateLimiter, tokenCreateRateLimiter } from '../middleware/rateLimit';
 import { requirePermission } from '../middleware/requirePermission';
+import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import { callTokenSchema, createTokenSchema, tokenIdOnlySchema } from '../validators/token.validators';
 import { setNotificationPreferenceSchema } from '../validators/notificationPreference.validators';
@@ -42,6 +43,7 @@ router.put(
 router.post(
   '/:tokenId/call',
   authenticate,
+  requireVerified,
   requirePermission('operate_tokens'),
   validate(callTokenSchema),
   tokenController.call,
@@ -49,6 +51,7 @@ router.post(
 router.post(
   '/:tokenId/start',
   authenticate,
+  requireVerified,
   requirePermission('operate_tokens'),
   validate(tokenIdOnlySchema),
   tokenController.start,
@@ -56,6 +59,7 @@ router.post(
 router.post(
   '/:tokenId/complete',
   authenticate,
+  requireVerified,
   requirePermission('operate_tokens'),
   validate(tokenIdOnlySchema),
   tokenController.complete,
@@ -63,6 +67,7 @@ router.post(
 router.post(
   '/:tokenId/skip',
   authenticate,
+  requireVerified,
   requirePermission('operate_tokens'),
   validate(tokenIdOnlySchema),
   tokenController.skip,
@@ -70,6 +75,7 @@ router.post(
 router.post(
   '/:tokenId/recall',
   authenticate,
+  requireVerified,
   requirePermission('operate_tokens'),
   validate(callTokenSchema),
   tokenController.recall,

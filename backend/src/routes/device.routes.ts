@@ -3,6 +3,7 @@ import * as deviceController from '../controllers/device.controller';
 import { authenticate } from '../middleware/authenticate';
 import { publicRateLimiter, sensitiveRateLimiter } from '../middleware/rateLimit';
 import { requirePermission } from '../middleware/requirePermission';
+import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
   deviceBlockActionSchema,
@@ -33,6 +34,7 @@ router.post(
 router.get(
   '/',
   authenticate,
+  requireVerified,
   requirePermission('manage_blocked_devices'),
   validate(listDevicesSchema),
   deviceController.list,
@@ -41,6 +43,7 @@ router.post(
   '/:deviceId/block',
   sensitiveRateLimiter,
   authenticate,
+  requireVerified,
   requirePermission('manage_blocked_devices'),
   validate(deviceBlockActionSchema),
   deviceController.block,
@@ -49,6 +52,7 @@ router.delete(
   '/:deviceId/block',
   sensitiveRateLimiter,
   authenticate,
+  requireVerified,
   requirePermission('manage_blocked_devices'),
   validate(deviceBlockActionSchema),
   deviceController.unblock,

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
 import * as auditService from '../services/audit.service';
+import * as emailVerificationService from '../services/emailVerification.service';
 import type { SessionMeta } from '../services/session.service';
 
 function sessionMeta(req: Request): SessionMeta {
@@ -74,4 +75,26 @@ export async function changePassword(req: Request, res: Response) {
     entityId: actor.staffId,
     ipAddress: req.ip,
   });
+}
+
+/**
+ * Public — the raw token in the query string is the only credential needed
+ * (V2 Checkpoint 2, ADR-024). No req.auth is required or used, so this
+ * works whether or not the browser that clicks the link is signed in.
+ */
+export async function verifyEmail(req: Request, res: Response) {
+  const result = await emailVerificationService.verifyEmailToken(req.query.token as string);
+  res.status(200).json({ success: true, data: { verified: true } });
+  await auditService.recordAuditEventSafely({
+    actor: { staffId: result.id, organizationId: result.organizationId, staffEmail: result.email },
+    action: 'email_verified',
+    entityType: 'staff',
+    entityId: result.id,
+    ipAddress: req.ip,
+  });
+}
+
+export async function resendVerificationEmail(req: Request, res: Response) {
+  await emailVerificationService.resendVerificationEmail(req.auth!.staffId);
+  res.status(204).send();
 }

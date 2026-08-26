@@ -28,6 +28,8 @@ process.env.RATE_LIMIT_SENSITIVE_WINDOW_MS = '300000';
 process.env.RATE_LIMIT_SENSITIVE_MAX = '2';
 process.env.RATE_LIMIT_REPORT_WINDOW_MS = '300000';
 process.env.RATE_LIMIT_REPORT_MAX = '2';
+process.env.RATE_LIMIT_EMAIL_WINDOW_MS = '300000';
+process.env.RATE_LIMIT_EMAIL_MAX = '2';
 
 type App = ReturnType<typeof import('../src/app').createApp>;
 
@@ -58,6 +60,24 @@ async function registerOwner(): Promise<Owner> {
   if (res.status !== 201) {
     throw new Error(`registerOwner failed: ${res.status} ${JSON.stringify(res.body)}`);
   }
+
+  // V2 Checkpoint 2 (ADR-024): registration now starts
+  // PENDING_EMAIL_VERIFICATION, and several tests below (report/sensitive
+  // limiters) exercise routes gated by requireVerified — mirrors
+  // helpers/app.ts's registerOwner fix exactly. Dynamically imported for
+  // the same reason as createApp/resetDb above: prisma transitively
+  // imports env.ts.
+  const { prisma } = await import('../src/config/prisma.js');
+  await prisma.staff.update({
+    where: { id: res.body.data.staff.id as string },
+    data: {
+      status: 'ACTIVE',
+      emailVerificationTokenHash: null,
+      emailVerificationExpiresAt: null,
+      registrationExpiresAt: null,
+    },
+  });
+
   return { accessToken: res.body.data.accessToken, organizationId: res.body.data.organization.id };
 }
 
@@ -198,6 +218,23 @@ describe('rate limiting (Phase 7)', () => {
       let last;
       for (let i = 0; i < 3; i++) {
         last = await api().get('/api/reports');
+      }
+      expect(last!.status).toBe(429);
+    });
+  });
+
+  describe('email verification resend rate limiter', () => {
+    it('still requires authentication under the limit — rate limiting never substitutes for it', async () => {
+      const res = await api().post('/api/auth/email-verification/resend');
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 429 once the limit is exceeded', async () => {
+      let last;
+      for (let i = 0; i < 3; i++) {
+        last = await api()
+          .post('/api/auth/email-verification/resend')
+          .set(authHeader(owner.accessToken));
       }
       expect(last!.status).toBe(429);
     });

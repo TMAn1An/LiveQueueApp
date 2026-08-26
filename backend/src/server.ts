@@ -5,6 +5,10 @@ import { logger } from './config/logger';
 import { prisma } from './config/prisma';
 import { attachSocketServer } from './realtime/socketServer';
 import { startReminderScheduler, stopReminderScheduler } from './scheduler/reminderScheduler';
+import {
+  startPendingRegistrationCleanupScheduler,
+  stopPendingRegistrationCleanupScheduler,
+} from './scheduler/pendingRegistrationCleanupScheduler';
 
 const app = createApp();
 const server = http.createServer(app);
@@ -13,11 +17,13 @@ attachSocketServer(server);
 server.listen(env.PORT, () => {
   logger.info(`LiveQueue backend listening on port ${env.PORT} (${env.NODE_ENV})`);
   startReminderScheduler();
+  startPendingRegistrationCleanupScheduler();
 });
 
 async function shutdown(signal: string) {
   logger.info(`${signal} received, shutting down gracefully`);
   await stopReminderScheduler();
+  await stopPendingRegistrationCleanupScheduler();
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);

@@ -209,14 +209,30 @@ Phases 1-7 above built and shipped V1 — already launched to production. Everyt
 
 **Goal:** Close the pre-existing V1 gap where `POST /api/auth/register` creates a fully active organization + owner with no proof the email address is real or owned by the registrant.
 
-**Design (see ADR-023 for full detail):**
-- New `Staff.status` value `PENDING_EMAIL_VERIFICATION` (in addition to existing `ACTIVE`/`SUSPENDED`) — registration creates the org + owner in this state, not `ACTIVE`.
-- A verification token is generated server-side, reusing the exact `generateRefreshToken()`/`hashRefreshToken()` shape already used for refresh tokens (opaque random value, SHA-256 hash persisted, raw value never stored) — no new secret-handling pattern invented.
-- **Verification link lifetime: 15 minutes.** **Pending-registration lifetime: 1 hour**, tracked independently — a token expiring at 15 minutes does not delete the account; only reaching the full 1-hour mark without verification does. Resending a new link does not extend the 1-hour window.
-- A `node-cron` cleanup job (reusing the exact scheduler pattern in `reminderScheduler.ts`/`REMINDER_DISPATCH_CRON`) deletes the pending **organization and owner together**, not just the email field, once the 1-hour window lapses with no verification — avoiding a half-created organization left behind.
-- A new `requireVerified` check (alongside, not replacing, `authenticate`) gates queue-functionality routes; `/api/auth/me`, logout, and resend-verification remain reachable so an unverified user can see their pending state and request a new link.
-- Resend-verification and verify endpoints are rate-limited (reusing `authRateLimiter`/a dedicated limiter, same `rateLimit.ts` pattern as every other sensitive endpoint).
-- **Open product decision, not yet resolved:** which email-delivery provider/library to use — none exists in this codebase today (confirmed: no `nodemailer`/`resend`/`sendgrid`/`ses` dependency, no `EMAIL_*`/`SMTP_*` env var). This is new external infrastructure and needs an explicit choice before implementation, not an invented default.
+### Tasks
+
+- [x] `Staff.status` gains `PENDING_EMAIL_VERIFICATION`; registration creates the org + owner in this state, plus token-hash/expiry/deadline columns (additive migration, no data backfill)
+- [x] Verification token generated server-side, reusing `generateRefreshToken()`/`hashRefreshToken()` exactly as-is
+- [x] Two independent lifetimes: 15-minute link, 1-hour pending-registration deadline (resend never extends it)
+- [x] `node-cron` cleanup job deletes the pending organization + owner together once the 1-hour window lapses, mirroring `reminderScheduler.ts`
+- [x] `requireVerified` middleware, applied to the queue-management route group only; `/me`/logout/verification endpoints stay reachable while pending
+- [x] `GET /api/auth/email-verification/verify` (public) and `POST /api/auth/email-verification/resend` (authenticated, rate-limited) endpoints
+- [x] Resend (Node SDK) wired with the same optional/guarded pattern Firebase Admin already uses
+- [x] Dashboard: verification-required banner + resend action, `/verify-email` page
+- [x] Regression-verify the full existing test suite (two setup helpers outside the shared `registerOwner()` needed the same auto-verify fix)
+- [x] Commit
+
+### Acceptance
+
+- A new registration returns `status: PENDING_EMAIL_VERIFICATION` and triggers a verification email
+- The verification token is stored hashed, never in plaintext; an expired or unknown token is rejected with a generic error
+- A valid token transitions the account to `ACTIVE` and clears the verification fields
+- Resend invalidates the previous token and issues a new one without moving the 1-hour deadline
+- A pending account is rejected (403 `EMAIL_VERIFICATION_REQUIRED`) from queue-management routes but can still reach `/me`, logout, and the verification endpoints
+- A pending registration older than 1 hour is deleted (organization + owner together); a verified account or a still-fresh pending one is never touched by cleanup
+- Full backend test suite passes; typecheck/lint/build clean on backend and dashboard; local migration applied and verified, production migration left to Render's Pre-Deploy Command
+
+See ADR-023 (design) and ADR-024 (implementation, including the exact route-scoping rationale for `requireVerified`) for full detail.
 
 ## V2 Checkpoint 3: Strict FCFS + multi-counter queue engine
 

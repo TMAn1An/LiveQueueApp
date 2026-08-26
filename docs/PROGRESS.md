@@ -14,7 +14,7 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 **V2 checkpoint roadmap** (reordered 2026-08-26, see ADR-023 — email verification moved ahead of queue-behavior work since it closes a pre-existing V1 trust-boundary gap, and ETA/multi-service/duration-override were consolidated into one checkpoint as a single coherent model):
 
 1. Password change + `ACCOUNTANT` → `STAFF` terminology migration — **done**
-2. Registration / email verification (required, 15-minute link, 1-hour pending-registration window, unverified accounts blocked from queue features)
+2. Registration / email verification (required, 15-minute link, 1-hour pending-registration window, unverified accounts blocked from queue features) — **done**
 3. Strict FCFS + multi-counter queue engine (active-counter capacity, backend + dashboard enforcement)
 4. ETA + live countdown + variable service duration (multi-service total duration, actual work ahead, staff-adjustable duration, +2min auto-extension, mobile countdown)
 5. Queue repeat-visit policy
@@ -31,6 +31,17 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 - **`ACCOUNTANT` → `STAFF` role rename:** the `StaffRole` enum value is renamed in place (`ALTER TYPE "StaffRole" RENAME VALUE 'ACCOUNTANT' TO 'STAFF'`, migration `20260826090000_rename_accountant_role_to_staff`) — existing production rows keep referencing the same role under its new name, no backfill needed. All 20 code references identified by a full-repository grep were updated: `permissions.ts` (`STAFF_PERMISSIONS`), `staff.validators.ts`, the frontend `StaffRole` type and `StaffPage.tsx`, and 11 backend test files (mechanical identifier rename only — no test behavior changed). The role's permission set itself is unchanged (`manage_counters`, `operate_tokens`, `view_reports`, `export_reports`, `manage_blocked_devices`); `OWNER`/`ADMIN` are untouched. See ADR-021.
 - **Verification:** backend `npm run typecheck` clean, `npm run lint` clean, `npm test` — 49 files / 448 tests passing (includes 5 new tests in `auth.changePassword.test.ts` and the 11 mechanically-updated test files). Dashboard `npx tsc -b` clean, `oxlint` — same 3 pre-existing warnings as before this change (confirmed via a stash-and-compare), no new warnings. `prisma migrate status` clean after applying the new migration.
 - **Intentionally unchanged:** no queue/ETA/multi-service/cancellation/OTP logic touched — that is Checkpoints 2-7.
+
+### V2 Checkpoint 2 — Registration / email verification (2026-08-26)
+
+**Status: implemented, tested, committed.**
+
+- **Mandatory email verification:** a new registration starts `PENDING_EMAIL_VERIFICATION`, not `ACTIVE` — closing the V1 gap where any email/password could immediately operate a real organization. A Resend-delivered link (`GET /api/auth/email-verification/verify?token=...`, opened via the dashboard's `/verify-email` page) must be clicked within **15 minutes**; the pending registration itself survives **1 hour** regardless of how many links were sent — a scheduled cleanup job (`node-cron`, mirroring the existing reminder scheduler) deletes the pending organization and owner together once that hour lapses unverified. `POST /api/auth/email-verification/resend` (rate-limited, 3/15min) issues a fresh token that invalidates the previous one without touching the 1-hour deadline.
+- **Enforcement:** a new `requireVerified` middleware blocks a pending account from every queue-management route (queues, services, counters, staff token operations, dashboard, reports, blocked devices) while `/api/auth/me`, logout, and the verification endpoints themselves stay reachable — so the dashboard can show a persistent "verify your email" banner with a resend button. Staff/organization/audit-log management is deliberately left ungated (see ADR-024 for the exact scoping rationale). The backend is the actual authority — the dashboard banner is informative only.
+- **Provider:** Resend, added via its official Node SDK, wired with the same optional/guarded pattern Firebase Admin already uses — no `RESEND_API_KEY` configured means emails simply aren't sent, never a startup or request failure.
+- **Schema:** one purely-additive migration (`20260826094219_add_email_verification_fields`) — a new `StaffStatus` enum value plus three nullable `Staff` columns; existing production rows are entirely unaffected.
+- **Verification:** backend `typecheck`/`lint` clean, `npm test` — 50 files / 461 tests passing (12 new focused tests plus 2 new rate-limit tests; two existing test files that registered staff outside the shared test helper needed the same "auto-verify for setup convenience" fix already used by `registerOwner()`). Dashboard `tsc -b`/`oxlint`/`npm run build` clean. `prisma migrate status` clean against the local dev database only — production migration is applied by Render's Pre-Deploy Command on next deploy, not from this machine. See ADR-024 for full design/implementation detail.
+- **Intentionally unchanged:** no queue ordering, ETA, multi-service, cancellation, or OTP logic — that remains Checkpoints 3-7.
 
 ## Status
 

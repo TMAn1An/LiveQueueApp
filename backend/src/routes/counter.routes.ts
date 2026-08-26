@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as counterController from '../controllers/counter.controller';
 import { authenticate } from '../middleware/authenticate';
 import { requirePermission } from '../middleware/requirePermission';
+import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
   assignCounterSchema,
@@ -17,6 +18,7 @@ const router = Router();
 router.put(
   '/:counterId',
   authenticate,
+  requireVerified,
   requirePermission('manage_counters'),
   validate(updateCounterSchema),
   counterController.update,
@@ -24,6 +26,7 @@ router.put(
 router.delete(
   '/:counterId',
   authenticate,
+  requireVerified,
   requirePermission('manage_counters'),
   validate(counterIdOnlySchema),
   counterController.remove,
@@ -31,6 +34,7 @@ router.delete(
 router.patch(
   '/:counterId/status',
   authenticate,
+  requireVerified,
   requirePermission('manage_counters'),
   validate(updateCounterStatusSchema),
   counterController.updateStatus,
@@ -38,6 +42,7 @@ router.patch(
 router.patch(
   '/:counterId/assign',
   authenticate,
+  requireVerified,
   requirePermission('manage_counters'),
   validate(assignCounterSchema),
   counterController.assign,

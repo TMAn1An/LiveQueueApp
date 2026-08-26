@@ -1,4 +1,4 @@
-import type { StaffRole } from '@prisma/client';
+import type { StaffRole, StaffStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { getEffectivePermissions, type Permission } from '../constants/permissions';
 import { verifyAccessToken } from './tokens';
@@ -8,6 +8,7 @@ export interface AuthContext {
   organizationId: string;
   email: string;
   role: StaffRole;
+  status: StaffStatus;
   permissions: Permission[];
 }
 
@@ -40,6 +41,10 @@ export async function resolveAuthContext(rawToken: string): Promise<AuthContext 
     organizationId: staff.organizationId,
     email: staff.email,
     role: staff.role,
+    // Always 'ACTIVE' here in practice — the guard above already rejects
+    // any other status — carried through only to satisfy the shared
+    // Request.auth shape (V2 Checkpoint 2, ADR-024).
+    status: staff.status,
     permissions: getEffectivePermissions(staff.role),
   };
 }

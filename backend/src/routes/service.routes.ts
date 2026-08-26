@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as serviceController from '../controllers/service.controller';
 import { authenticate } from '../middleware/authenticate';
 import { requirePermission } from '../middleware/requirePermission';
+import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
   serviceIdOnlySchema,
@@ -16,6 +17,7 @@ const router = Router();
 router.put(
   '/:serviceId',
   authenticate,
+  requireVerified,
   requirePermission('manage_services'),
   validate(updateServiceSchema),
   serviceController.update,
@@ -23,6 +25,7 @@ router.put(
 router.delete(
   '/:serviceId',
   authenticate,
+  requireVerified,
   requirePermission('manage_services'),
   validate(serviceIdOnlySchema),
   serviceController.remove,
@@ -30,6 +33,7 @@ router.delete(
 router.patch(
   '/:serviceId/status',
   authenticate,
+  requireVerified,
   requirePermission('manage_services'),
   validate(updateServiceStatusSchema),
   serviceController.updateStatus,

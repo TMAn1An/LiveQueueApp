@@ -1,4 +1,4 @@
-import type { StaffRole } from '@prisma/client';
+import type { StaffRole, StaffStatus } from '@prisma/client';
 import type { Permission } from '../constants/permissions';
 
 declare global {
@@ -9,6 +9,7 @@ declare global {
         organizationId: string;
         email: string;
         role: StaffRole;
+        status: StaffStatus;
         permissions: Permission[];
       };
     }

@@ -48,3 +48,10 @@ export const changePasswordSchema = {
     })
     .strict(),
 };
+
+// V2 Checkpoint 2: the raw token from the emailed verification link.
+export const verifyEmailSchema = {
+  query: z.object({
+    token: z.string().min(1, 'token is required.'),
+  }),
+};

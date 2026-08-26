@@ -37,7 +37,14 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     include: { organization: true },
   });
 
-  if (!staff || staff.status !== 'ACTIVE') {
+  // V2 Checkpoint 2 (ADR-024): PENDING_EMAIL_VERIFICATION is deliberately
+  // allowed through here — only SUSPENDED is fatal at this layer. A pending
+  // staff member still needs /me, /logout, and /email-verification/* to
+  // work so the dashboard can show its verification-required state and
+  // offer a resend; requireVerified (applied selectively to queue-
+  // management routes only) is what actually blocks a pending account from
+  // using queue functionality, not this middleware.
+  if (!staff || staff.status === 'SUSPENDED') {
     next(new AppError(401, 'UNAUTHENTICATED', 'Account is not active.'));
     return;
   }
@@ -52,6 +59,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     organizationId: staff.organizationId,
     email: staff.email,
     role: staff.role,
+    status: staff.status,
     // Derived from role, never trusted from the stored `permissions` column
     // (frozen RBAC policy) — see getEffectivePermissions's doc comment.
     permissions: getEffectivePermissions(staff.role),

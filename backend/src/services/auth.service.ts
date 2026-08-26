@@ -11,6 +11,11 @@ import {
   type SessionMeta,
 } from './session.service';
 import { getEffectivePermissions } from '../constants/permissions';
+import {
+  dispatchVerificationEmail,
+  generateVerificationToken,
+  newRegistrationDeadline,
+} from './emailVerification.service';
 
 interface RegisterInput {
   organizationName: string;
@@ -60,6 +65,17 @@ async function issueTokens(staff: Staff, meta: SessionMeta) {
   return { accessToken, refreshToken: rawRefreshToken };
 }
 
+/**
+ * V2 Checkpoint 2 (ADR-024): the new owner starts PENDING_EMAIL_VERIFICATION,
+ * not ACTIVE — closing the V1 gap where any email/password could
+ * immediately operate a real organization with zero proof of ownership.
+ * The verification token hash + both expiry timestamps are written inside
+ * the same transaction as the org/staff rows (DB-only, no external call
+ * while holding a lock); the actual email send happens after commit,
+ * guarded, exactly like every other "notify after the DB transaction
+ * succeeds" pattern in this codebase (CLAUDE.md §5) — a Resend outage must
+ * never fail an otherwise-successful registration.
+ */
 export async function register(input: RegisterInput, meta: SessionMeta) {
   const existing = await prisma.staff.findUnique({ where: { email: input.email } });
   if (existing) {
@@ -71,6 +87,7 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
   // the owner's display name defaults to the email's local part and can be
   // changed later once staff-profile management ships.
   const ownerName = input.email.split('@')[0] as string;
+  const verificationToken = generateVerificationToken();
 
   const { staff, organization } = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({
@@ -85,6 +102,10 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
         passwordHash,
         role: 'OWNER',
         permissions: getEffectivePermissions('OWNER'),
+        status: 'PENDING_EMAIL_VERIFICATION',
+        emailVerificationTokenHash: verificationToken.hash,
+        emailVerificationExpiresAt: verificationToken.expiresAt,
+        registrationExpiresAt: newRegistrationDeadline(),
       },
     });
 
@@ -92,6 +113,12 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
   });
 
   const tokens = await issueTokens(staff, meta);
+
+  // Registration still returns a usable session (spec: register -> enter
+  // dashboard -> see verification-required state -> verify -> full access)
+  // — the pending status alone is what gates queue functionality
+  // (requireVerified), not the session itself.
+  await dispatchVerificationEmail(staff.email, verificationToken.raw);
 
   return {
     staff: toSafeStaff(staff),

@@ -31,3 +31,14 @@ export function changePassword(input: {
 }) {
   return apiFetch<void>('/api/auth/password', { method: 'PATCH', body: input });
 }
+
+export function verifyEmail(token: string) {
+  return apiFetch<{ verified: boolean }>('/api/auth/email-verification/verify', {
+    method: 'GET',
+    query: { token },
+  });
+}
+
+export function resendVerificationEmail() {
+  return apiFetch<void>('/api/auth/email-verification/resend', { method: 'POST' });
+}

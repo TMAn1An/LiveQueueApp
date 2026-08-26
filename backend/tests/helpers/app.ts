@@ -32,6 +32,25 @@ export async function registerOwner(
     throw new Error(`registerOwner failed: ${res.status} ${JSON.stringify(res.body)}`);
   }
 
+  // V2 Checkpoint 2 (ADR-024): a real registration now starts
+  // PENDING_EMAIL_VERIFICATION, not ACTIVE. This helper is used by
+  // hundreds of existing tests across the suite that all assume an
+  // immediately-usable organization and have nothing to do with the
+  // verification flow itself — so it bypasses the real verify-token
+  // exchange with a direct DB write, mirroring createStaffWithRole's
+  // existing "bypass realism for setup convenience" pattern below. The
+  // real pending/verify/resend/expiry/cleanup behavior is exercised
+  // directly against POST /api/auth/register in auth.emailVerification.test.ts.
+  await prisma.staff.update({
+    where: { id: res.body.data.staff.id as string },
+    data: {
+      status: 'ACTIVE',
+      emailVerificationTokenHash: null,
+      emailVerificationExpiresAt: null,
+      registrationExpiresAt: null,
+    },
+  });
+
   return {
     organizationName,
     email,

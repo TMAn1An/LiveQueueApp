@@ -68,3 +68,12 @@ export const reportRateLimiter = createLimiter(
   env.RATE_LIMIT_REPORT_WINDOW_MS,
   env.RATE_LIMIT_REPORT_MAX,
 );
+
+/**
+ * Email-verification send/resend (V2 Checkpoint 2) — deliberately its own,
+ * tighter category rather than reusing authRateLimiter/sensitiveRateLimiter:
+ * this is the only rate-limited action in the app that costs a real email
+ * send, so "prevent email abuse" warrants a stricter default (3/15min) than
+ * either existing category.
+ */
+export const emailRateLimiter = createLimiter(env.RATE_LIMIT_EMAIL_WINDOW_MS, env.RATE_LIMIT_EMAIL_MAX);

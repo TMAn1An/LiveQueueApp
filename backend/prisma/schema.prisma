@@ -21,6 +21,11 @@ enum StaffRole {
 enum StaffStatus {
   ACTIVE
   SUSPENDED
+  /// V2 Checkpoint 2 (ADR-024): a just-registered owner starts here, not
+  /// ACTIVE, until they prove ownership of the supplied email address.
+  /// Never set by createStaff/updateStaff (staff invites remain instantly
+  /// ACTIVE, unchanged from V1) — only register() uses this value.
+  PENDING_EMAIL_VERIFICATION
 }
 
 enum QueueStatus {
@@ -97,6 +102,18 @@ model Staff {
   permissions  String[]
   status       StaffStatus @default(ACTIVE)
   lastLoginAt  DateTime?   @map("last_login_at")
+
+  /// V2 Checkpoint 2 (ADR-024) — only ever populated while status is
+  /// PENDING_EMAIL_VERIFICATION; all three are cleared back to null on
+  /// successful verification. Only the hash is ever persisted (never the
+  /// raw token), same pattern as Session.refreshTokenHash.
+  emailVerificationTokenHash  String?   @map("email_verification_token_hash")
+  /// 15-minute verification-link expiry — independent of registrationExpiresAt.
+  emailVerificationExpiresAt  DateTime? @map("email_verification_expires_at")
+  /// 1-hour pending-registration deadline, set once at registration and never
+  /// extended by a resend — the cleanup scheduler deletes the organization
+  /// (cascading to this row) once this passes while still unverified.
+  registrationExpiresAt       DateTime? @map("registration_expires_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

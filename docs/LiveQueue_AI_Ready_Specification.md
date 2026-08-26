@@ -178,6 +178,8 @@ A customer does not need a traditional email/password account.
 
 ## 4.1 Organization registration
 
+As of V2 Checkpoint 2 (ADR-024), registration no longer creates an immediately-usable organization — the owner must first prove ownership of the supplied email address:
+
 ```text
 Owner opens dashboard
         ↓
@@ -189,12 +191,20 @@ Backend validates input
         ↓
 Organization is created
         ↓
-Owner staff account is created
+Owner staff account is created, status = PENDING_EMAIL_VERIFICATION
         ↓
-Owner receives JWT
+Owner receives JWT (dashboard opens, but queue functionality is blocked)
         ↓
-Dashboard opens
+Verification email is sent (Resend)
+        ↓
+Owner clicks the link within 15 minutes (or requests a resend)
+        ↓
+Backend verifies the token, status becomes ACTIVE
+        ↓
+Full dashboard/queue access
 ```
+
+If the owner does not verify within **1 hour** of registration (independent of how many 15-minute links were sent or expired within that window), the pending organization and owner are deleted together — the email becomes available for a fresh registration. See ADR-024 for the full design (token shape, the `requireVerified` access boundary, and the cleanup job).
 
 ## 4.2 Staff login
 
