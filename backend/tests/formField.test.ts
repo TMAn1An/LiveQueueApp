@@ -291,7 +291,7 @@ describe('GET /api/queues/:queueId/form-fields (Phase 6 addition)', () => {
 });
 
 describe('Dynamic form permissions', () => {
-  it('blocks form replacement for ACCOUNTANT (no manage_queues)', async () => {
+  it('blocks form replacement for STAFF (no manage_queues)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const restricted = await createRestrictedStaff(ctx.organizationId);

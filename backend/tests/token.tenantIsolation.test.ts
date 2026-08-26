@@ -82,7 +82,7 @@ describe('Token tenant isolation', () => {
     expect(nextRes.status).toBe(401);
   });
 
-  it('allows ACCOUNTANT to call/next (operate_tokens is part of the frozen ACCOUNTANT policy)', async () => {
+  it('allows STAFF to call/next (operate_tokens is part of the frozen STAFF policy)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);

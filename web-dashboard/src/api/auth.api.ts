@@ -23,3 +23,11 @@ export function refresh(refreshToken: string) {
 export function logout(refreshToken: string) {
   return apiFetch<void>('/api/auth/logout', { method: 'POST', body: { refreshToken } });
 }
+
+export function changePassword(input: {
+  currentPassword: string;
+  newPassword: string;
+  refreshToken: string;
+}) {
+  return apiFetch<void>('/api/auth/password', { method: 'PATCH', body: input });
+}

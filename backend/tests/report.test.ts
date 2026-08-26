@@ -61,7 +61,7 @@ describe('GET /api/reports', () => {
     expect(res.status).toBe(401);
   });
 
-  it('allows ACCOUNTANT (view_reports is part of the frozen ACCOUNTANT policy)', async () => {
+  it('allows STAFF (view_reports is part of the frozen STAFF policy)', async () => {
     const ctx = await registerOwner();
     const accountant = await createRestrictedStaff(ctx.organizationId);
 
@@ -106,7 +106,7 @@ describe('GET /api/reports/export', () => {
     expect(res.status).toBe(401);
   });
 
-  it('allows ACCOUNTANT (export_reports is part of the frozen ACCOUNTANT policy)', async () => {
+  it('allows STAFF (export_reports is part of the frozen STAFF policy)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);

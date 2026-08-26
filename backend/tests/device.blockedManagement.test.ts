@@ -82,7 +82,7 @@ describe('GET /api/devices (staff-only, organization-scoped)', () => {
     ]);
   });
 
-  it('allows ACCOUNTANT (manage_blocked_devices is part of the frozen ACCOUNTANT policy)', async () => {
+  it('allows STAFF (manage_blocked_devices is part of the frozen STAFF policy)', async () => {
     const ctx = await registerOwner();
     const accountant = await createRestrictedStaff(ctx.organizationId);
 
@@ -157,7 +157,7 @@ describe('POST /api/devices/:deviceId/block and DELETE /api/devices/:deviceId/bl
     expect(res.status).toBe(404);
   });
 
-  it('allows ACCOUNTANT to block/unblock devices (frozen RBAC policy)', async () => {
+  it('allows STAFF to block/unblock devices (frozen RBAC policy)', async () => {
     const org = await setupOrg();
     const accountant = await createRestrictedStaff(org.organizationId);
     await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier: 'device-perm' });
@@ -340,7 +340,7 @@ describe('Organization-scoped device blocking — tenant isolation', () => {
     expect(finalCount).toBe(1);
   });
 
-  it('Test 8: permission regression — OWNER/ADMIN/ACCOUNTANT allowed, unauthenticated rejected', async () => {
+  it('Test 8: permission regression — OWNER/ADMIN/STAFF allowed, unauthenticated rejected', async () => {
     const org = await setupOrg();
     const admin = await createStaffWithRoleForTest(org.organizationId, 'ADMIN');
     const accountant = await createRestrictedStaff(org.organizationId);

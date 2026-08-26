@@ -161,7 +161,7 @@ describe('GET /api/audit-logs', () => {
     expect(res.status).toBe(401);
   });
 
-  it('requires the view_audit_logs permission (ACCOUNTANT does not have it)', async () => {
+  it('requires the view_audit_logs permission (STAFF does not have it)', async () => {
     const ctx = await registerOwner();
     const restricted = await createRestrictedStaff(ctx.organizationId);
 
@@ -171,7 +171,7 @@ describe('GET /api/audit-logs', () => {
     expect(res.status).toBe(403);
   });
 
-  it('is granted separately from view_reports — ACCOUNTANT has view_reports but is still denied audit logs', async () => {
+  it('is granted separately from view_reports — STAFF has view_reports but is still denied audit logs', async () => {
     const ctx = await registerOwner();
     const restricted = await createRestrictedStaff(ctx.organizationId);
 

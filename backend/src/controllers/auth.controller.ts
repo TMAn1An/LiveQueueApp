@@ -59,3 +59,19 @@ export async function logout(req: Request, res: Response) {
     ipAddress: req.ip,
   });
 }
+
+export async function changePassword(req: Request, res: Response) {
+  const actor = auditService.actorFromAuth(req.auth!);
+  await authService.changePassword(req.auth!.staffId, req.body);
+  res.status(204).send();
+  // Only reached after a successful change — a thrown AppError (wrong
+  // current password) short-circuits before this line, matching login's
+  // "only record the event that actually happened" convention.
+  await auditService.recordAuditEventSafely({
+    actor,
+    action: 'password_changed',
+    entityType: 'staff',
+    entityId: actor.staffId,
+    ipAddress: req.ip,
+  });
+}

@@ -368,3 +368,33 @@ view_audit_logs
 **Reason:** an explicit product decision to make authorization predictable and auditable — three fixed roles are easier to reason about, test exhaustively, and audit than an open-ended per-staff permission matrix, and match how the dashboard/product is actually used (no observed need for finer-grained custom roles).
 
 **Consequence:** `CreateStaffModal`'s permission-checkbox UI was removed from the dashboard (`web-dashboard/src/pages/StaffPage.tsx`) — permissions are no longer choosable, only role is. `createStaffSchema`/`updateStaffSchema` no longer accept a `permissions` field at all (silently stripped by Zod if sent, per its default non-strict object behavior — not rejected, just ignored). New page-level route guards (`web-dashboard/src/layouts/PermissionRoute.tsx`) prevent direct URL navigation to Staff/Blocked-Devices/Audit-Logs pages for a role lacking the relevant permission, on top of the pre-existing nav-link hiding — still UI-only convenience, never the security boundary, exactly as `PermissionGate`'s own doc comment states. 378 backend authorization tests (up from 369 pre-freeze) cover the full role × endpoint matrix directly against the API, not just through the dashboard.
+
+---
+
+## ADR-021: `ACCOUNTANT` role renamed to `STAFF` (V2 Checkpoint 1, 2026-08-26)
+
+**Status:** Implemented, tested, approved.
+
+**Decision:** The third staff role (see ADR-020's role matrix) is renamed from `ACCOUNTANT` to `STAFF`. This is a V1 → V2 product-terminology correction, not a permissions change: the role's fixed permission set (`manage_counters`, `operate_tokens`, `view_reports`, `export_reports`, `manage_blocked_devices`) is unchanged, and `OWNER`/`ADMIN` are unaffected.
+
+**Reason:** LiveQueue is a general-purpose queue management system, not one specific to accounting/finance use — `ACCOUNTANT` was domain-specific terminology left over from an early naming choice and did not describe what the role is actually used for in practice (general staff operating counters/tokens with reporting access, across any kind of organization).
+
+**Mechanism:** `StaffRole` is a Postgres enum (`backend/prisma/schema.prisma`) with existing production rows already referencing the `ACCOUNTANT` value, so the migration (`20260826090000_rename_accountant_role_to_staff`) uses `ALTER TYPE "StaffRole" RENAME VALUE 'ACCOUNTANT' TO 'STAFF'` — an in-place catalog rename, not a drop/recreate/backfill. Every existing staff row keeps referencing the same enum label under its new name with zero data migration and no downtime window. All code-level identifiers were renamed to match: `ACCOUNTANT_PERMISSIONS` → `STAFF_PERMISSIONS` in `permissions.ts`, the `manageableRole` enum in `staff.validators.ts`, the frontend `StaffRole` type (`web-dashboard/src/types/auth.ts`), and the dashboard's manageable-role list (`StaffPage.tsx`). All 11 backend test files referencing the old name were mechanically updated (identifier rename only, no test behavior changed) and the full existing authorization suite was re-run rather than trusting a grep alone.
+
+**Consequence:** Any external integration or stored client-side value still expecting the literal string `ACCOUNTANT` (e.g. a previously-cached dashboard session) will see `STAFF` after this deploy — there is no compatibility shim, per this project's "no backwards-compatibility hacks for internal state" convention. `docs/LiveQueue_AI_Ready_Specification.md` sections 2.5/3.3/7.4 were updated to describe the current `STAFF` role name; historical sections describing what shipped in the original MVP (e.g. section 38's scope checklist) were deliberately left as `Accountant`, since they are a record of what that specific release contained, not living documentation.
+
+---
+
+## ADR-022: Self-service staff password change (V2 Checkpoint 1, 2026-08-26)
+
+**Status:** Implemented, tested, approved.
+
+**Decision:** Added `PATCH /api/auth/password`, letting an authenticated staff member change their own password. This is additive — the existing admin-driven `PUT /api/staff/:staffId` password-set path (no current-password check, since it's an authorized admin override of someone else's account) is unchanged.
+
+**Mechanism:** Reuses `hashPassword`/`verifyPassword` (`utils/password.ts`) and `passwordSchema` (`auth.validators.ts`) exactly as-is — no duplicated hashing/validation logic. The request body is a `.strict()` Zod schema (`currentPassword`, `newPassword`, `refreshToken` only) so an extra field such as a client-supplied `staffId` or `role` is rejected outright rather than silently ignored, closing off any privilege-escalation attempt through this endpoint. The authenticated identity comes from `req.auth.staffId` (set by the `authenticate` middleware from a fresh DB read) — never from the request body. `sensitiveRateLimiter` (already used for staff create/update/delete) protects the current-password verification step from brute-forcing.
+
+**Session handling:** the endpoint requires the caller's own current `refreshToken` in the body — the same pattern already established by `/logout` and `/refresh` — and uses it to identify which `Session` row to keep alive. A new `revokeOtherSessions(staffId, keepRawRefreshToken)` (`session.service.ts`) revokes every other active session for that staff member, mirroring `rotateSession`'s existing reuse-detection bulk-revoke query but scoped to exclude the caller's own session instead of revoking unconditionally. The in-flight access token (a short-lived stateless JWT, not tied to a `Session` row) is unaffected by session revocation, so the calling device keeps working immediately without needing to re-authenticate.
+
+**Reason:** this gap was flagged during the V2 roadmap investigation — `ProfilePage.tsx` was read-only with an explicit comment noting no self-service edit endpoint existed. Staff having to ask an Owner/Admin to reset their password for a routine password change is unnecessary friction and a support burden.
+
+**Consequence:** `ProfilePage.tsx` gained a password-change form. A `password_changed` audit action was added to `AUDIT_ACTIONS` (`auditActions.ts`) and is recorded (best-effort, after the DB write succeeds) on every successful change, matching the existing `login`/`logout` audit wiring pattern.

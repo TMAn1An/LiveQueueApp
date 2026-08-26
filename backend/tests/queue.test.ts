@@ -189,7 +189,7 @@ describe('Queue soft deletion', () => {
 });
 
 describe('Queue permissions', () => {
-  it('blocks queue creation for ACCOUNTANT (manage_queues is not part of that role)', async () => {
+  it('blocks queue creation for STAFF (manage_queues is not part of that role)', async () => {
     const ctx = await registerOwner();
     const restricted = await createRestrictedStaff(ctx.organizationId);
 
@@ -201,7 +201,7 @@ describe('Queue permissions', () => {
     expect(res.status).toBe(403);
   });
 
-  it('blocks queue update, pause/resume, and delete for ACCOUNTANT', async () => {
+  it('blocks queue update, pause/resume, and delete for STAFF', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const restricted = await createRestrictedStaff(ctx.organizationId);
@@ -224,7 +224,7 @@ describe('Queue permissions', () => {
     expect(deleteRes.status).toBe(403);
   });
 
-  it('allows ACCOUNTANT to read queues (view-only, per the frozen RBAC policy)', async () => {
+  it('allows STAFF to read queues (view-only, per the frozen RBAC policy)', async () => {
     const ctx = await registerOwner();
     await createQueue(ctx.accessToken);
     const restricted = await createRestrictedStaff(ctx.organizationId);

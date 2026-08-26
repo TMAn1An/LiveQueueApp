@@ -15,7 +15,7 @@ enum OrganizationStatus {
 enum StaffRole {
   OWNER
   ADMIN
-  ACCOUNTANT
+  STAFF
 }
 
 enum StaffStatus {

@@ -9,6 +9,7 @@
 export const AUDIT_ACTIONS = [
   'login',
   'logout',
+  'password_changed',
   'staff_created',
   'staff_updated',
   'queue_created',

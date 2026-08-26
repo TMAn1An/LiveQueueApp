@@ -8,7 +8,7 @@ import { listAuditLogsSchema } from '../validators/auditLog.validators';
 const router = Router();
 
 // Dedicated permission (frozen RBAC policy) — deliberately separate from
-// view_reports so ACCOUNTANT can have reports without audit-log access.
+// view_reports so STAFF can have reports without audit-log access.
 router.get(
   '/',
   authenticate,

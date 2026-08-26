@@ -35,3 +35,16 @@ export const logoutSchema = {
     refreshToken: z.string().min(1, 'refreshToken is required.'),
   }),
 };
+
+// .strict() rejects any extra field (e.g. a client-supplied staffId or role)
+// outright rather than silently ignoring it — this endpoint's identity comes
+// only from req.auth, never the body (V2 Checkpoint 1 / ADR-022).
+export const changePasswordSchema = {
+  body: z
+    .object({
+      currentPassword: z.string().min(1, 'Current password is required.'),
+      newPassword: passwordSchema,
+      refreshToken: z.string().min(1, 'refreshToken is required.'),
+    })
+    .strict(),
+};

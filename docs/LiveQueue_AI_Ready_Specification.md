@@ -96,7 +96,7 @@ Default roles:
 
 - `OWNER`
 - `ADMIN`
-- `ACCOUNTANT`
+- `STAFF` (named `ACCOUNTANT` prior to V2 Checkpoint 1 — see docs/ARCHITECTURE_DECISIONS.md ADR-021)
 
 Permissions must be explicit.
 
@@ -138,9 +138,11 @@ Typical permissions:
 - Operate tokens
 - View reports
 
-## 3.3 Accountant
+## 3.3 Staff
 
-Accountant should have limited access.
+(This role was named "Accountant" prior to V2 Checkpoint 1; it was renamed to the general-purpose "Staff" because this is a general queue management system, not one specific to accounting — see ADR-021.)
+
+Staff should have limited access.
 
 Typical permissions:
 
@@ -149,7 +151,7 @@ Typical permissions:
 - View reports
 - Export reports
 
-Accountant should not operate tokens or manage security settings unless explicitly granted permission.
+Staff should not operate tokens or manage security settings unless explicitly granted permission.
 
 ## 3.4 Customer
 
@@ -511,7 +513,7 @@ Rules:
 
 # 7.4 Permissions
 
-There are exactly three staff roles — `OWNER`, `ADMIN`, `ACCOUNTANT` — each with a fixed permission set. There is no per-user permission customization and no separate roles-management permission; roles are assigned directly by name through the staff create/update endpoints. See `docs/ARCHITECTURE_DECISIONS.md`'s ADR-020 for the full rationale and role matrix.
+There are exactly three staff roles — `OWNER`, `ADMIN`, `STAFF` — each with a fixed permission set. (`STAFF` was named `ACCOUNTANT` prior to V2 Checkpoint 1 — see ADR-021; the permission set itself did not change.) There is no per-user permission customization and no separate roles-management permission; roles are assigned directly by name through the staff create/update endpoints. See `docs/ARCHITECTURE_DECISIONS.md`'s ADR-020 for the full rationale and role matrix.
 
 Permission set:
 
@@ -529,7 +531,7 @@ view_audit_logs
 ```
 
 - `OWNER` and `ADMIN` hold all 10. Admin's only restrictions — cannot delete the Owner, cannot delete the organization — are enforced by dedicated role checks, independent of this permission list.
-- `ACCOUNTANT` holds exactly `manage_counters`, `operate_tokens`, `view_reports`, `export_reports`, `manage_blocked_devices`.
+- `STAFF` holds exactly `manage_counters`, `operate_tokens`, `view_reports`, `export_reports`, `manage_blocked_devices`.
 
 The backend must enforce permissions.
 

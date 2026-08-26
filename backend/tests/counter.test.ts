@@ -208,7 +208,7 @@ describe('Counter permissions', () => {
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
     // No role under the frozen RBAC policy lacks manage_counters (OWNER,
-    // ADMIN, and ACCOUNTANT all have it) — an unauthenticated/invalid token
+    // ADMIN, and STAFF all have it) — an unauthenticated/invalid token
     // is the only way left to demonstrate the route is actually gated.
     const createRes = await api()
       .post(`/api/queues/${queue.id}/counters`)
@@ -232,7 +232,7 @@ describe('Counter permissions', () => {
     expect(deleteRes.status).toBe(401);
   });
 
-  it('allows ACCOUNTANT to create, update, change status, assign, and delete counters (frozen RBAC policy)', async () => {
+  it('allows STAFF to create, update, change status, assign, and delete counters (frozen RBAC policy)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const accountant = await createRestrictedStaff(ctx.organizationId);

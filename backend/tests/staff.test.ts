@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { api, createRestrictedStaff, createStaffWithRole, registerOwner } from './helpers/app';
 import { resetDb } from './helpers/db';
-import { ACCOUNTANT_PERMISSIONS, ADMIN_PERMISSIONS } from '../src/constants/permissions';
+import { STAFF_PERMISSIONS, ADMIN_PERMISSIONS } from '../src/constants/permissions';
 
 beforeEach(async () => {
   await resetDb();
@@ -61,7 +61,7 @@ describe('POST /api/staff', () => {
     expect(res.status).toBe(422);
   });
 
-  it('requires manage_staff permission (ACCOUNTANT does not have it)', async () => {
+  it('requires manage_staff permission (STAFF does not have it)', async () => {
     const ctx = await registerOwner();
     const restricted = await createRestrictedStaff(ctx.organizationId);
 
@@ -74,13 +74,13 @@ describe('POST /api/staff', () => {
     const ctx = await registerOwner();
 
     const res = await createStaff(ctx.accessToken, {
-      role: 'ACCOUNTANT',
+      role: 'STAFF',
       permissions: ['manage_organization', 'manage_staff'],
     });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.role).toBe('ACCOUNTANT');
-    expect(res.body.data.permissions.sort()).toEqual([...ACCOUNTANT_PERMISSIONS].sort());
+    expect(res.body.data.role).toBe('STAFF');
+    expect(res.body.data.permissions.sort()).toEqual([...STAFF_PERMISSIONS].sort());
   });
 
   it('rejects an unauthenticated request', async () => {
@@ -146,16 +146,16 @@ describe('PUT /api/staff/:staffId', () => {
     const res = await api()
       .put(`/api/staff/${created.body.data.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ name: 'Renamed', role: 'ACCOUNTANT', status: 'SUSPENDED' });
+      .send({ name: 'Renamed', role: 'STAFF', status: 'SUSPENDED' });
 
     expect(res.status).toBe(200);
     expect(res.body.data.name).toBe('Renamed');
-    expect(res.body.data.role).toBe('ACCOUNTANT');
-    expect(res.body.data.permissions.sort()).toEqual([...ACCOUNTANT_PERMISSIONS].sort());
+    expect(res.body.data.role).toBe('STAFF');
+    expect(res.body.data.permissions.sort()).toEqual([...STAFF_PERMISSIONS].sort());
     expect(res.body.data.status).toBe('SUSPENDED');
   });
 
-  it('ADMIN -> ACCOUNTANT role change leaves no stale Admin-only access behind', async () => {
+  it('ADMIN -> STAFF role change leaves no stale Admin-only access behind', async () => {
     const ctx = await registerOwner();
     const created = await createStaff(ctx.accessToken, { role: 'ADMIN' });
     const password = 'Password123';
@@ -167,24 +167,24 @@ describe('PUT /api/staff/:staffId', () => {
     await api()
       .put(`/api/staff/${created.body.data.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ role: 'ACCOUNTANT' });
+      .send({ role: 'STAFF' });
 
     const loginRes = await api()
       .post('/api/auth/login')
       .send({ email: created.body.data.email, password });
     expect(loginRes.status).toBe(200);
-    expect(loginRes.body.data.permissions.sort()).toEqual([...ACCOUNTANT_PERMISSIONS].sort());
+    expect(loginRes.body.data.permissions.sort()).toEqual([...STAFF_PERMISSIONS].sort());
 
     const staffRes = await api()
       .post('/api/staff')
       .set('Authorization', `Bearer ${loginRes.body.data.accessToken}`)
-      .send({ name: 'X', email: 'blocked@example.com', password: 'Password123', role: 'ACCOUNTANT' });
+      .send({ name: 'X', email: 'blocked@example.com', password: 'Password123', role: 'STAFF' });
     expect(staffRes.status).toBe(403);
   });
 
-  it('ACCOUNTANT -> ADMIN role change grants the complete Admin permission set', async () => {
+  it('STAFF -> ADMIN role change grants the complete Admin permission set', async () => {
     const ctx = await registerOwner();
-    const created = await createStaff(ctx.accessToken, { role: 'ACCOUNTANT' });
+    const created = await createStaff(ctx.accessToken, { role: 'STAFF' });
     const password = 'Password123';
     await api()
       .put(`/api/staff/${created.body.data.id}`)
@@ -223,7 +223,7 @@ describe('PUT /api/staff/:staffId', () => {
     expect(loginRes.body.error.code).toBe('ACCOUNT_SUSPENDED');
   });
 
-  it('requires manage_staff permission (ACCOUNTANT does not have it)', async () => {
+  it('requires manage_staff permission (STAFF does not have it)', async () => {
     const ctx = await registerOwner();
     const created = await createStaff(ctx.accessToken);
     const restricted = await createRestrictedStaff(ctx.organizationId);
@@ -267,9 +267,9 @@ describe('PUT /api/staff/:staffId', () => {
 describe('Permission escalation (frozen RBAC policy — permissions are role-derived, not client-suppliable)', () => {
   it('POST /api/staff ignores a client-supplied permissions field entirely — role alone determines the result', async () => {
     const ctx = await registerOwner();
-    const limited = await createStaffWithRole(ctx.organizationId, 'ACCOUNTANT');
+    const limited = await createStaffWithRole(ctx.organizationId, 'STAFF');
 
-    // ACCOUNTANT lacks manage_staff, so this is rejected at the route layer
+    // STAFF lacks manage_staff, so this is rejected at the route layer
     // regardless of what's in the body — but even an OWNER-issued create
     // with a rigged permissions array (below) cannot escalate a role.
     const deniedRes = await createStaff(limited.accessToken, {
@@ -280,20 +280,20 @@ describe('Permission escalation (frozen RBAC policy — permissions are role-der
 
     const res = await createStaff(ctx.accessToken, {
       email: 'legit-hire@example.com',
-      role: 'ACCOUNTANT',
+      role: 'STAFF',
       permissions: ['manage_organization', 'manage_staff'],
     });
 
     expect(res.status).toBe(201);
-    expect(res.body.data.role).toBe('ACCOUNTANT');
-    expect(res.body.data.permissions.sort()).toEqual([...ACCOUNTANT_PERMISSIONS].sort());
+    expect(res.body.data.role).toBe('STAFF');
+    expect(res.body.data.permissions.sort()).toEqual([...STAFF_PERMISSIONS].sort());
   });
 
   it('PUT /api/staff/:staffId ignores a caller granting themselves an out-of-role permission', async () => {
     const ctx = await registerOwner();
-    const limited = await createStaffWithRole(ctx.organizationId, 'ACCOUNTANT');
+    const limited = await createStaffWithRole(ctx.organizationId, 'STAFF');
 
-    // ACCOUNTANT lacks manage_staff, so this self-edit is rejected before
+    // STAFF lacks manage_staff, so this self-edit is rejected before
     // any permissions field would even be considered.
     const res = await api()
       .put(`/api/staff/${limited.staffId}`)
@@ -305,13 +305,13 @@ describe('Permission escalation (frozen RBAC policy — permissions are role-der
     const check = await api()
       .get(`/api/staff/${limited.staffId}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`);
-    expect(check.body.data.permissions.sort()).toEqual([...ACCOUNTANT_PERMISSIONS].sort());
+    expect(check.body.data.permissions.sort()).toEqual([...STAFF_PERMISSIONS].sort());
   });
 
   it('PUT /api/staff/:staffId ignores a permissions field even from a caller who holds manage_staff (ADMIN)', async () => {
     const ctx = await registerOwner();
     const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
-    const target = await createStaff(ctx.accessToken, { role: 'ACCOUNTANT' });
+    const target = await createStaff(ctx.accessToken, { role: 'STAFF' });
 
     const res = await api()
       .put(`/api/staff/${target.body.data.id}`)
@@ -320,9 +320,9 @@ describe('Permission escalation (frozen RBAC policy — permissions are role-der
 
     expect(res.status).toBe(200);
     expect(res.body.data.name).toBe('Still An Accountant');
-    expect(res.body.data.role).toBe('ACCOUNTANT');
+    expect(res.body.data.role).toBe('STAFF');
     // The supplied permissions array is silently ignored — role is authoritative.
-    expect(res.body.data.permissions.sort()).toEqual([...ACCOUNTANT_PERMISSIONS].sort());
+    expect(res.body.data.permissions.sort()).toEqual([...STAFF_PERMISSIONS].sort());
   });
 
   it('the owner retains the full permission set regardless of any request body content', async () => {
@@ -341,7 +341,7 @@ describe('Permission escalation (frozen RBAC policy — permissions are role-der
 });
 
 describe('Owner protection on update — ADMIN must never demote/modify the OWNER', () => {
-  it('rejects an ACCOUNTANT reaching the owner at all (no manage_staff)', async () => {
+  it('rejects an STAFF reaching the owner at all (no manage_staff)', async () => {
     const ctx = await registerOwner();
     const accountant = await createRestrictedStaff(ctx.organizationId);
 
@@ -486,7 +486,7 @@ describe('DELETE /api/staff/:staffId', () => {
     expect(stillThere.body.data.role).toBe('OWNER');
   });
 
-  it('requires manage_staff permission (ACCOUNTANT does not have it)', async () => {
+  it('requires manage_staff permission (STAFF does not have it)', async () => {
     const ctx = await registerOwner();
     const created = await createStaff(ctx.accessToken);
     const restricted = await createRestrictedStaff(ctx.organizationId);

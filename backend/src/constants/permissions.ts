@@ -23,7 +23,7 @@ export type Permission = (typeof PERMISSIONS)[number];
 // a permission check" requirement.
 export const OWNER_PERMISSIONS: Permission[] = [...PERMISSIONS];
 export const ADMIN_PERMISSIONS: Permission[] = [...PERMISSIONS];
-export const ACCOUNTANT_PERMISSIONS: Permission[] = [
+export const STAFF_PERMISSIONS: Permission[] = [
   'manage_counters',
   'operate_tokens',
   'view_reports',
@@ -45,7 +45,7 @@ export function getEffectivePermissions(role: StaffRole): Permission[] {
       return OWNER_PERMISSIONS;
     case 'ADMIN':
       return ADMIN_PERMISSIONS;
-    case 'ACCOUNTANT':
-      return ACCOUNTANT_PERMISSIONS;
+    case 'STAFF':
+      return STAFF_PERMISSIONS;
   }
 }

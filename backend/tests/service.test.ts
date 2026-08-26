@@ -95,7 +95,7 @@ describe('Service CRUD', () => {
 });
 
 describe('Service permissions', () => {
-  it('blocks service creation, update, status change, and delete for ACCOUNTANT (no manage_services)', async () => {
+  it('blocks service creation, update, status change, and delete for STAFF (no manage_services)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);

@@ -16,6 +16,7 @@ interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (organizationName: string, email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   hasPermission: (permission: Permission) => boolean;
 }
 
@@ -135,12 +136,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearAuth();
   }
 
+  // Requires the caller's own refresh token, same as logout() — the backend
+  // uses it to identify which session to keep alive while revoking every
+  // other active session for this staff member (ADR-022).
+  async function changePassword(currentPassword: string, newPassword: string) {
+    const currentRefreshToken = refreshTokenRef.current;
+    if (!currentRefreshToken) {
+      throw new Error('No active session.');
+    }
+    await authApi.changePassword({ currentPassword, newPassword, refreshToken: currentRefreshToken });
+  }
+
   function hasPermission(permission: Permission): boolean {
     return state.permissions.includes(permission);
   }
 
   return (
-    <AuthContext.Provider value={{ ...state, login, register, logout, hasPermission }}>
+    <AuthContext.Provider
+      value={{ ...state, login, register, logout, changePassword, hasPermission }}
+    >
       {children}
     </AuthContext.Provider>
   );

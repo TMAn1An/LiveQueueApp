@@ -3,8 +3,8 @@ import { emailSchema, passwordSchema } from './auth.validators';
 
 // OWNER is deliberately excluded — an organization has exactly one owner,
 // created only at registration (ADR-005/spec 4.1). Staff management creates
-// and edits ADMIN/ACCOUNTANT staff, never a second OWNER.
-const manageableRole = z.enum(['ADMIN', 'ACCOUNTANT']);
+// and edits ADMIN/STAFF staff, never a second OWNER.
+const manageableRole = z.enum(['ADMIN', 'STAFF']);
 const staffStatus = z.enum(['ACTIVE', 'SUSPENDED']);
 
 export const staffIdParams = z.object({

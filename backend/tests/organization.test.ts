@@ -49,7 +49,7 @@ describe('PUT /api/organizations/me', () => {
     expect(res.status).toBe(403);
   });
 
-  it('rejects a staff member without manage_organization (ACCOUNTANT)', async () => {
+  it('rejects a staff member without manage_organization (STAFF)', async () => {
     const ctx = await registerOwner();
     const restricted = await createRestrictedStaff(ctx.organizationId);
 
@@ -116,7 +116,7 @@ describe('DELETE /api/organizations/me', () => {
     expect(stillExists).not.toBeNull();
   });
 
-  it('rejects an ACCOUNTANT from deleting the organization', async () => {
+  it('rejects an STAFF from deleting the organization', async () => {
     const ctx = await registerOwner({ organizationName: 'Acme Corp' });
     const restricted = await createRestrictedStaff(ctx.organizationId);
 

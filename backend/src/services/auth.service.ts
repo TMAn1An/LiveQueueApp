@@ -3,7 +3,13 @@ import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { hashPassword, verifyPassword } from '../utils/password';
 import { signAccessToken } from '../utils/tokens';
-import { createSession, revokeSession, rotateSession, type SessionMeta } from './session.service';
+import {
+  createSession,
+  revokeOtherSessions,
+  revokeSession,
+  rotateSession,
+  type SessionMeta,
+} from './session.service';
 import { getEffectivePermissions } from '../constants/permissions';
 
 interface RegisterInput {
@@ -15,6 +21,12 @@ interface RegisterInput {
 interface LoginInput {
   email: string;
   password: string;
+}
+
+interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+  refreshToken: string;
 }
 
 function toSafeStaff(staff: Staff) {
@@ -163,4 +175,25 @@ export async function refresh(rawRefreshToken: string, meta: SessionMeta) {
 
 export async function logout(rawRefreshToken: string, staffId: string) {
   await revokeSession(rawRefreshToken, staffId);
+}
+
+/**
+ * Self-service password change (V2 Checkpoint 1, ADR-022). `staffId` comes
+ * from `req.auth` (the authenticate middleware's fresh DB read) — the caller
+ * can never target another staff member's account through this function.
+ */
+export async function changePassword(staffId: string, input: ChangePasswordInput) {
+  const staff = await prisma.staff.findUnique({ where: { id: staffId } });
+  if (!staff) {
+    throw new AppError(401, 'UNAUTHENTICATED', 'Account no longer exists.');
+  }
+
+  const currentValid = await verifyPassword(input.currentPassword, staff.passwordHash);
+  if (!currentValid) {
+    throw new AppError(401, 'INVALID_CREDENTIALS', 'Current password is incorrect.');
+  }
+
+  const passwordHash = await hashPassword(input.newPassword);
+  await prisma.staff.update({ where: { id: staffId }, data: { passwordHash } });
+  await revokeOtherSessions(staffId, input.refreshToken);
 }

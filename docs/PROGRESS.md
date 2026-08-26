@@ -1,6 +1,35 @@
 # LiveQueue — Progress
 
-## Current Phase: Phase 6 (Dashboard) — Committed as f5b9bb1; pending push/synchronization with origin/master
+## LiveQueue V2 — Production Bug Fixes & Improvements
+
+**V1 is already launched to production, tested, and in active use.** Everything below "## Status" is the historical record of how V1 (Phases 1-7) was built and is preserved as-is — it is not rewritten to look like V2 features existed in V1.
+
+From this point forward, work proceeds as **LiveQueue V2**: production bug fixes, correctness improvements, and new product requirements layered on top of the already-shipped system. V2 is **not** a rebuild —
+
+- The existing three-app architecture (`backend`, `web-dashboard`, `mobile-app`) is preserved unchanged.
+- V2 focuses on production correctness, queue fairness, ETA accuracy, customer protection, and usability — not new infrastructure.
+- V2 is delivered through small, independently reviewable and releasable checkpoints, each committed (and pushed, per the standing checkpoint rule below) once implemented and verified.
+- Existing V1 behavior remains unchanged unless a specific V2 requirement explicitly changes it.
+
+**V2 checkpoint roadmap:**
+
+1. Password change + `ACCOUNTANT` → `STAFF` terminology migration
+2. Queue fairness and multi-counter engine (strict FIFO + active-counter capacity)
+3. Service duration + authoritative ETA engine (actual work ahead, staff-adjustable duration, +2min auto-extension)
+4. Mobile live countdown + notification verification
+5. Queue repeat-visit policy
+6. Multi-service selection
+7. Customer cancellation + anti-bias OTP verification for CALLED → IN_PROGRESS
+8. V2 production verification (final regression pass)
+
+### V2 Checkpoint 1 — Password change + role rename (2026-08-26)
+
+**Status: implemented, tested, committed.**
+
+- **Self-service password change:** `PATCH /api/auth/password` lets an authenticated staff member change their own password (current-password verification, existing `passwordSchema` rules, `.strict()` body so no extra field such as `staffId`/`role` is accepted). Reuses `hashPassword`/`verifyPassword` and `sensitiveRateLimiter` as-is — no new hashing/validation/rate-limiting logic. A new `revokeOtherSessions()` (`session.service.ts`) revokes every other active session for that staff member while the calling session (identified by the caller's own `refreshToken`, the same pattern `/logout` already uses) stays usable. `ProfilePage.tsx` on the dashboard gained the form; the existing admin-driven `PUT /api/staff/:staffId` password-set path is unchanged. See ADR-022.
+- **`ACCOUNTANT` → `STAFF` role rename:** the `StaffRole` enum value is renamed in place (`ALTER TYPE "StaffRole" RENAME VALUE 'ACCOUNTANT' TO 'STAFF'`, migration `20260826090000_rename_accountant_role_to_staff`) — existing production rows keep referencing the same role under its new name, no backfill needed. All 20 code references identified by a full-repository grep were updated: `permissions.ts` (`STAFF_PERMISSIONS`), `staff.validators.ts`, the frontend `StaffRole` type and `StaffPage.tsx`, and 11 backend test files (mechanical identifier rename only — no test behavior changed). The role's permission set itself is unchanged (`manage_counters`, `operate_tokens`, `view_reports`, `export_reports`, `manage_blocked_devices`); `OWNER`/`ADMIN` are untouched. See ADR-021.
+- **Verification:** backend `npm run typecheck` clean, `npm run lint` clean, `npm test` — 49 files / 448 tests passing (includes 5 new tests in `auth.changePassword.test.ts` and the 11 mechanically-updated test files). Dashboard `npx tsc -b` clean, `oxlint` — same 3 pre-existing warnings as before this change (confirmed via a stash-and-compare), no new warnings. `prisma migrate status` clean after applying the new migration.
+- **Intentionally unchanged:** no queue/ETA/multi-service/cancellation/OTP logic touched — that is Checkpoints 2-7.
 
 ## Status
 

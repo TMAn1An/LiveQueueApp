@@ -95,3 +95,20 @@ export async function revokeSession(rawRefreshToken: string, staffId: string) {
     data: { revokedAt: new Date() },
   });
 }
+
+/**
+ * Revokes every active session for a staff member except the one identified
+ * by `keepRawRefreshToken` (V2 Checkpoint 1 — self-service password change,
+ * ADR-022). Scoped by staffId in the WHERE clause, so this can never touch
+ * another staff member's session regardless of what token is passed. If
+ * `keepRawRefreshToken` doesn't match any active session for this staffId
+ * (e.g. it's already stale), every session ends up revoked — a safe
+ * fail-closed outcome, not a security hole.
+ */
+export async function revokeOtherSessions(staffId: string, keepRawRefreshToken: string) {
+  const keepHash = hashRefreshToken(keepRawRefreshToken);
+  await prisma.session.updateMany({
+    where: { staffId, revokedAt: null, refreshTokenHash: { not: keepHash } },
+    data: { revokedAt: new Date() },
+  });
+}

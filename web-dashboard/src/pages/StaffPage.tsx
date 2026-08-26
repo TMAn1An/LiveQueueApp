@@ -11,7 +11,7 @@ import { Pagination } from '../components/Pagination';
 import { ApiError } from '../api/client';
 import type { Staff, StaffRole } from '../types/auth';
 
-const MANAGEABLE_ROLES: Exclude<StaffRole, 'OWNER'>[] = ['ADMIN', 'ACCOUNTANT'];
+const MANAGEABLE_ROLES: Exclude<StaffRole, 'OWNER'>[] = ['ADMIN', 'STAFF'];
 
 function CreateStaffModal({ onClose }: { onClose: () => void }) {
   const createStaff = useCreateStaff();

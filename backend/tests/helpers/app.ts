@@ -91,13 +91,13 @@ export async function createStaffWithRole(
 }
 
 /**
- * ACCOUNTANT is the only genuinely-restricted role under the frozen policy
+ * STAFF is the only genuinely-restricted role under the frozen policy
  * (ADMIN has full access apart from the two Owner/organization-deletion hard
  * rules) — kept as the default "give me someone who lacks most things" helper
  * for tests that don't care about the specific role, only that they're denied.
  */
 export function createRestrictedStaff(organizationId: string): Promise<RestrictedStaffContext> {
-  return createStaffWithRole(organizationId, 'ACCOUNTANT');
+  return createStaffWithRole(organizationId, 'STAFF');
 }
 
 export interface QueueResponse {
