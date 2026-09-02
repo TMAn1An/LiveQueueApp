@@ -32,9 +32,13 @@ describe('Token tenant isolation', () => {
     expect(callRes.status).toBe(404);
     expect(callRes.body.error.code).toBe('TOKEN_NOT_FOUND');
 
+    // V2 Checkpoint 7 (ADR-029): /start now requires a body; the placeholder
+    // code is irrelevant here — tenant-scoped lookup rejects before any OTP
+    // check runs.
     const startRes = await api()
       .post(`/api/tokens/${token.id}/start`)
-      .set('Authorization', `Bearer ${orgB.accessToken}`);
+      .set('Authorization', `Bearer ${orgB.accessToken}`)
+      .send({ verificationCode: '000000' });
     expect(startRes.status).toBe(404);
 
     const completeRes = await api()

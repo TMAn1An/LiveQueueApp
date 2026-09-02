@@ -1,7 +1,8 @@
 /**
- * The 12 events defined by the specification (section 8). The specification
- * is authoritative over IMPLEMENTATION_PLAN.md's narrower list (approved
- * Phase 4 decision 1) — no service.* events, nothing invented beyond this.
+ * The 12 events defined by the specification (section 8), plus token.cancelled
+ * (V2 Checkpoint 7, ADR-029) — CANCELLED is a new real token lifecycle state
+ * the specification predates, so the minimal matching lifecycle event is
+ * added here rather than overloading an existing event type.
  */
 export const SOCKET_EVENTS = {
   QUEUE_CREATED: 'queue.created',
@@ -12,6 +13,7 @@ export const SOCKET_EVENTS = {
   TOKEN_STARTED: 'token.started',
   TOKEN_COMPLETED: 'token.completed',
   TOKEN_SKIPPED: 'token.skipped',
+  TOKEN_CANCELLED: 'token.cancelled',
   TOKEN_POSITION_CHANGED: 'token.position_changed',
   COUNTER_CREATED: 'counter.created',
   COUNTER_UPDATED: 'counter.updated',

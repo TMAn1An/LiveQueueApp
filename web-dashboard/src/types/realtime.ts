@@ -8,6 +8,7 @@ export const SOCKET_EVENTS = [
   'token.started',
   'token.completed',
   'token.skipped',
+  'token.cancelled',
   'token.position_changed',
   'counter.created',
   'counter.updated',

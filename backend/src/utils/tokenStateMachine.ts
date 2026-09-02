@@ -7,8 +7,10 @@ import { AppError } from './AppError';
  * assertValidTransition so the rules can't drift between endpoints.
  */
 const ALLOWED_TRANSITIONS: Record<TokenStatus, TokenStatus[]> = {
-  WAITING: ['CALLED', 'SKIPPED'],
-  CALLED: ['IN_PROGRESS', 'SKIPPED'],
+  // V2 Checkpoint 7: customer cancellation is allowed only up to the moment
+  // service actually begins — WAITING and CALLED, never IN_PROGRESS or later.
+  WAITING: ['CALLED', 'SKIPPED', 'CANCELLED'],
+  CALLED: ['IN_PROGRESS', 'SKIPPED', 'CANCELLED'],
   IN_PROGRESS: ['COMPLETED', 'SKIPPED'],
   COMPLETED: [],
   // A deliberate staff Recall (spec: Skipped Token Recall) — the only path
@@ -16,6 +18,12 @@ const ALLOWED_TRANSITIONS: Record<TokenStatus, TokenStatus[]> = {
   // already earned their position; recall re-announces them rather than
   // making them wait through the line again (approved design decision).
   SKIPPED: ['CALLED'],
+  // V2 Checkpoint 7: terminal, and deliberately NOT recallable (unlike
+  // SKIPPED) — cancellation is intentional abandonment; a customer who wants
+  // service again must create a new token, subject to the queue's own
+  // policies (allowRepeatVisits does not apply here — only COMPLETED
+  // consumes that allowance, see token.service.ts::createToken).
+  CANCELLED: [],
 };
 
 export function assertValidTransition(current: TokenStatus, next: TokenStatus): void {

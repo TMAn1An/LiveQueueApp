@@ -119,12 +119,28 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                         textAlign: TextAlign.center,
                       ),
                     ),
-                  if (!token.isActive) ...[
-                    Text(
-                      token.status == TokenStatus.completed
-                          ? 'This token has been completed.'
-                          : 'This token was skipped.',
+                  // V2 Checkpoint 7 (ADR-029): shown only while CALLED — the
+                  // customer reads this code aloud to staff to start service.
+                  if (token.status == TokenStatus.called) ...[
+                    const SizedBox(height: 16),
+                    const _VerificationCodeSection(),
+                  ],
+                  // V2 Checkpoint 7 (ADR-029): cancellation is only ever
+                  // valid while WAITING or CALLED — the backend enforces
+                  // this regardless, this just avoids offering a button that
+                  // would always fail once service has started.
+                  if (token.status == TokenStatus.waiting || token.status == TokenStatus.called) ...[
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: tracking.isCancelling ? null : () => _confirmCancel(context, tracking),
+                        child: Text(tracking.isCancelling ? 'Cancelling…' : 'Leave Queue'),
+                      ),
                     ),
+                  ],
+                  if (!token.isActive) ...[
+                    Text(_terminalStatusMessage(token.status)),
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
@@ -143,6 +159,38 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               ),
             ),
     );
+  }
+
+  String _terminalStatusMessage(TokenStatus status) {
+    switch (status) {
+      case TokenStatus.completed:
+        return 'This token has been completed.';
+      case TokenStatus.cancelled:
+        return 'You cancelled this token.';
+      case TokenStatus.skipped:
+      case TokenStatus.waiting:
+      case TokenStatus.called:
+      case TokenStatus.inProgress:
+      case TokenStatus.unknown:
+        return 'This token was skipped.';
+    }
+  }
+
+  Future<void> _confirmCancel(BuildContext context, TokenTrackingProvider tracking) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Leave this queue?'),
+        content: const Text('You will lose your place in line. This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false), child: const Text('Never mind')),
+          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Leave Queue')),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await tracking.cancelToken();
+    }
   }
 }
 
@@ -208,5 +256,95 @@ class _CountdownRowState extends State<_CountdownRow> {
     final display = '$minutes:${seconds.toString().padLeft(2, '0')}';
 
     return _InfoRow(label: widget.label, value: display);
+  }
+}
+
+/// V2 Checkpoint 7 (ADR-029): the customer-only service-start verification
+/// code — large, easy to read aloud, never something the customer types
+/// back into the app. Ticks locally (same pattern as [_CountdownRow]) purely
+/// to detect its own expiry and swap to a "get a new code" prompt; it never
+/// re-fetches on a timer, only on an explicit tap.
+class _VerificationCodeSection extends StatefulWidget {
+  const _VerificationCodeSection();
+
+  @override
+  State<_VerificationCodeSection> createState() => _VerificationCodeSectionState();
+}
+
+class _VerificationCodeSectionState extends State<_VerificationCodeSection> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tracking = context.watch<TokenTrackingProvider>();
+    final code = tracking.verificationCode;
+    final expiresAt = tracking.verificationCodeExpiresAt;
+    final isExpired = expiresAt != null && !expiresAt.isAfter(DateTime.now());
+
+    if (tracking.isLoadingVerificationCode && code == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (code == null || isExpired) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          children: [
+            const Text('Your verification code has expired.'),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: tracking.isLoadingVerificationCode
+                  ? null
+                  : () => tracking.reissueVerificationCode(),
+              child: const Text('Get a new code'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          Text('Verification Code', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 4),
+          Text(
+            code,
+            style: Theme.of(context)
+                .textTheme
+                .displaySmall
+                ?.copyWith(fontWeight: FontWeight.bold, letterSpacing: 4),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Tell this code to the staff member to start your service.',
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
   }
 }

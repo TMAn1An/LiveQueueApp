@@ -44,6 +44,44 @@ export const tokenIdOnlySchema = {
   params: tokenIdParams,
 };
 
+// V2 Checkpoint 7: matches the notification-preferences customer-write
+// pattern exactly (ADR-011/Phase 7 Step 7) — a self-asserted deviceIdentifier
+// resolved and ownership-checked in the service layer, never a client-
+// supplied organizationId or an assumption that knowing the token id alone
+// is enough.
+export const cancelTokenSchema = {
+  params: tokenIdParams,
+  body: z.object({
+    deviceIdentifier: z.string().trim().min(1, 'deviceIdentifier is required.').max(200),
+  }),
+};
+
+export const verificationCodeQuerySchema = {
+  params: tokenIdParams,
+  query: z.object({
+    deviceIdentifier: z.string().trim().min(1, 'deviceIdentifier is required.').max(200),
+  }),
+};
+
+export const reissueVerificationCodeSchema = {
+  params: tokenIdParams,
+  body: z.object({
+    deviceIdentifier: z.string().trim().min(1, 'deviceIdentifier is required.').max(200),
+  }),
+};
+
+// V2 Checkpoint 7: CALLED -> IN_PROGRESS now requires the customer-told
+// verification code — replaces the old bare tokenIdOnlySchema on /start.
+export const startTokenSchema = {
+  params: tokenIdParams,
+  body: z.object({
+    verificationCode: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, 'verificationCode must be a 6-digit code.'),
+  }),
+};
+
 export const callTokenSchema = {
   params: tokenIdParams,
   body: z.object({

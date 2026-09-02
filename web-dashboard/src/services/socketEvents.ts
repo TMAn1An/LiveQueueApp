@@ -14,6 +14,7 @@ export interface ServerEvents {
   'token.started': (envelope: SocketEventEnvelope) => void;
   'token.completed': (envelope: SocketEventEnvelope) => void;
   'token.skipped': (envelope: SocketEventEnvelope) => void;
+  'token.cancelled': (envelope: SocketEventEnvelope) => void;
   'token.position_changed': (envelope: SocketEventEnvelope) => void;
   'counter.created': (envelope: SocketEventEnvelope) => void;
   'counter.updated': (envelope: SocketEventEnvelope) => void;

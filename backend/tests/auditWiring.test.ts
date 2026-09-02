@@ -8,6 +8,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  startToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -214,10 +215,11 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
       const counter = await createCounter(ctx.accessToken, queue.id);
       await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
 
-      const tokenRes = await createTokenRequest({ queueId: queue.id, serviceId: service.id });
+      const deviceIdentifier = `audit-device-${Math.random().toString(36).slice(2, 10)}`;
+      const tokenRes = await createTokenRequest({ queueId: queue.id, serviceId: service.id, deviceIdentifier });
       expect(tokenRes.status).toBe(201);
 
-      return { ctx, counter, token: tokenRes.body.data };
+      return { ctx, counter, token: { ...tokenRes.body.data, deviceIdentifier } };
     }
 
     it('calling a token creates exactly one token_called audit event', async () => {
@@ -290,9 +292,7 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
         .post(`/api/tokens/${token.id}/call`)
         .set('Authorization', `Bearer ${ctx.accessToken}`)
         .send({ counterId: counter.id });
-      await api()
-        .post(`/api/tokens/${token.id}/start`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`);
+      await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
       const res = await api()
         .post(`/api/tokens/${token.id}/complete`)
         .set('Authorization', `Bearer ${ctx.accessToken}`);

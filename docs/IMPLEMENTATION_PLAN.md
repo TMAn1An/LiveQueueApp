@@ -341,13 +341,44 @@ See ADR-027 for full design/implementation detail, including the exact backward-
 
 See ADR-028 for full design/implementation detail, including the concurrency analysis and the honest device-identity limitation.
 
-## V2 Checkpoint 7: Customer cancellation
+## V2 Checkpoint 7: Customer cancellation + OTP-gated service start
 
-**Goal:** A customer can cancel their own token while WAITING; cannot once service has started (CALLED or later). Enforced backend-side regardless of what the mobile UI shows. Consistent with the repeat-visit rule from Checkpoint 6 — a skipped token remains eligible to rejoin per that rule, a cancelled one follows whatever this checkpoint's own state-machine addition specifies.
+**Goal (as actually delivered — supersedes this section's original, narrower goal below):** A customer can cancel their own token while `WAITING` **or `CALLED`** (broader than this section's original "WAITING only" goal — the actual Checkpoint 7 prompt explicitly required CALLED too, "before service actually begins"); cannot once IN_PROGRESS. Enforced backend-side regardless of what the mobile UI shows. Consistent with the repeat-visit rule from Checkpoint 6 — `CANCELLED`, like `SKIPPED`, never consumes the `allowRepeatVisits=false` allowance; only `COMPLETED` does. Additionally — and this is the part that turned out to overlap with Checkpoint 8 below — staff can no longer transition `CALLED → IN_PROGRESS` merely by clicking Start: a short-lived, customer-told verification code is now required and backend-verified, specifically to prevent staff from bypassing a customer's cancellation window by starting service early.
+
+*Original goal, as it read before this checkpoint (kept for the record):* "A customer can cancel their own token while WAITING; cannot once service has started (CALLED or later)."
+
+### Tasks
+
+- [x] `TokenStatus.CANCELLED` (additive enum value) + `Token.cancelledAt`, both purely additive
+- [x] `cancelToken`: WAITING/CALLED → CANCELLED only, device-ownership-checked (mirrors the notification-preferences customer-write pattern), compare-and-swap concurrency-safe
+- [x] `TokenStatus.CANCELLED → IN_PROGRESS` gate: `serviceStartOtpCipher`/`serviceStartOtpExpiresAt`/`serviceStartOtpFailedAttempts` added to `Token`; `callToken` mints a fresh code on every CALLED entry (call and Recall alike)
+- [x] `utils/otp.ts`: cryptographically secure generation, reversible keyed AES-256-GCM storage (not a one-way hash — see ADR-029 for why), timing-safe verification
+- [x] `startTokenWithOtp` replaces the old bare `startToken` as the only path to IN_PROGRESS — expiry, single-use, and a 5-failed-attempt limit that invalidates (not permanently locks) the current code
+- [x] Two new customer-only endpoints: `GET .../verification-code` (never mints on read) and `POST .../verification-code/reissue` (explicit renewal only)
+- [x] Centralized OTP-field stripping (`omitOtpFields`) applied to every raw-token-returning function, so no staff-facing response, socket payload, or audit entry can leak it
+- [x] Dashboard: Start reveals an inline code-input form instead of firing immediately
+- [x] Mobile: Leave Queue action (WAITING/CALLED), a verification-code display (CALLED only, self-clearing, reissue-capable)
+- [x] Full repository security review (every IN_PROGRESS/startedAt write site, every otp-named symbol) before considering this done
+- [x] Commit
+
+### Acceptance
+
+- WAITING or CALLED can be cancelled by the owning device; IN_PROGRESS/COMPLETED/SKIPPED/already-CANCELLED cannot
+- A device can never cancel another device's token
+- Cancelling frees the active-token slot and does not consume the repeat-visit allowance; a cancelled token can never be recalled
+- No code path other than a correctly-verified `startTokenWithOtp` call can produce an IN_PROGRESS token
+- The raw verification code never appears in any staff-facing response, Socket.io payload, FCM payload, log, or audit entry
+- A wrong code fails without revealing which digits were right; 5 wrong attempts invalidate the code; an expired code is rejected and can be reissued; a used code can never be replayed
+- A concurrent cancel and a valid start on the same token produce exactly one winner, never both, never neither
+- Full backend + mobile + dashboard test suites pass; one additive migration, verified locally only
+
+See ADR-029 for full design/implementation detail, including the reversible-encryption reasoning, the concurrency analysis, and the flagged overlap with Checkpoint 8 immediately below.
 
 ## V2 Checkpoint 8: Anti-bias OTP verification
 
 **Goal:** `CALLED → OTP → IN_PROGRESS`. A server-generated, short-lived, single-use OTP — visible only inside the customer's own app session, never a public API response, never client-generatable — must be correctly entered by staff before a CALLED token can transition to IN_PROGRESS, protecting against staff silently starting service without customer consent/presence. Reuses existing FCM delivery, rate limiting, and auth/tenant infrastructure. Its own checkpoint, separate from cancellation, since this is a distinct security feature.
+
+**Status note (added when Checkpoint 7 shipped, 2026-09-02): this goal appears to already be fully implemented by Checkpoint 7** — see ADR-029's closing note. Flagged for explicit confirmation before starting this checkpoint, not silently marked done or silently discarded.
 
 ## V2 Checkpoint 9: Mobile force-update system
 

@@ -1,4 +1,4 @@
-export type TokenStatus = 'WAITING' | 'CALLED' | 'IN_PROGRESS' | 'COMPLETED' | 'SKIPPED';
+export type TokenStatus = 'WAITING' | 'CALLED' | 'IN_PROGRESS' | 'COMPLETED' | 'SKIPPED' | 'CANCELLED';
 
 /** Staff-authorized view (token.service.ts toStaffView) — includes organizationId/deviceId. */
 export interface StaffToken {
@@ -27,4 +27,6 @@ export interface StaffToken {
   startedAt: string | null;
   completedAt: string | null;
   skippedAt: string | null;
+  /** V2 Checkpoint 7 (ADR-029) — set only on a customer-initiated CANCELLED transition. */
+  cancelledAt: string | null;
 }

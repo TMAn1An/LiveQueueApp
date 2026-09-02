@@ -6,6 +6,7 @@ const COLORS: Record<string, string> = {
   IN_PROGRESS: 'bg-indigo-100 text-indigo-800',
   COMPLETED: 'bg-slate-100 text-slate-600',
   SKIPPED: 'bg-red-100 text-red-700',
+  CANCELLED: 'bg-orange-100 text-orange-700',
   PAUSED: 'bg-amber-100 text-amber-800',
   INACTIVE: 'bg-slate-100 text-slate-600',
   ON_BREAK: 'bg-amber-100 text-amber-800',

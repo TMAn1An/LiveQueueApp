@@ -227,6 +227,13 @@ export interface TokenResponse {
   status: string;
   position: number | null;
   estimatedWaitMinutes: number | null;
+  /** Test-helper convenience only — never part of the real customer-view
+   * API contract (the backend deliberately never returns deviceId/
+   * deviceIdentifier in a customer-facing response). Surfaced here so
+   * callers that need to act as "this token's own device" later (cancel,
+   * fetch/verify a service-start code) don't have to separately track
+   * whatever identifier createToken generated when none was passed. */
+  deviceIdentifier: string;
   [key: string]: unknown;
 }
 
@@ -271,11 +278,38 @@ export async function createToken(overrides: {
   formData?: Record<string, unknown>;
   idempotencyKey?: string;
 }): Promise<TokenResponse> {
-  const res = await createTokenRequest(overrides);
+  const deviceIdentifier = overrides.deviceIdentifier ?? `device-${Math.random().toString(36).slice(2, 10)}`;
+  const res = await createTokenRequest({ ...overrides, deviceIdentifier });
   if (res.status !== 201) {
     throw new Error(`createToken failed: ${res.status} ${JSON.stringify(res.body)}`);
   }
-  return res.body.data;
+  return { ...res.body.data, deviceIdentifier };
+}
+
+/**
+ * V2 Checkpoint 7 (ADR-029): fetches the token's current service-start
+ * verification code as its owning device (mirrors the real customer flow —
+ * GET the code, then submit it via POST /start), then submits it. Callers
+ * must pass the SAME deviceIdentifier the token was created with (e.g.
+ * `token.deviceIdentifier` from createToken above) — a mismatch fails with
+ * the same 404 TOKEN_NOT_FOUND the real ownership check produces.
+ */
+export async function startToken(accessToken: string, tokenId: string, deviceIdentifier: string) {
+  const codeRes = await api()
+    .get(`/api/tokens/${tokenId}/verification-code`)
+    .query({ deviceIdentifier });
+  if (codeRes.status !== 200) {
+    throw new Error(`startToken: failed to fetch verification code: ${codeRes.status} ${JSON.stringify(codeRes.body)}`);
+  }
+  return api()
+    .post(`/api/tokens/${tokenId}/start`)
+    .set('Authorization', `Bearer ${accessToken}`)
+    .send({ verificationCode: codeRes.body.data.code });
+}
+
+/** V2 Checkpoint 7 (ADR-029) — the customer-side cancel request, raw response. */
+export function cancelTokenRequest(tokenId: string, deviceIdentifier: string) {
+  return api().post(`/api/tokens/${tokenId}/cancel`).send({ deviceIdentifier });
 }
 
 export interface FormFieldInput {

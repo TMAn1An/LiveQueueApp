@@ -8,6 +8,14 @@ import { requireOwnedQueue } from '../utils/tenantScope';
 import { registerDevice } from './device.service';
 import type { AuthContext } from '../utils/authContext';
 import {
+  decryptOtpCode,
+  encryptOtpCode,
+  generateOtpCode,
+  OTP_EXPIRY_MINUTES,
+  OTP_MAX_FAILED_ATTEMPTS,
+  verifyOtpCode,
+} from '../utils/otp';
+import {
   computeEffectiveDurationMinutes,
   computeEffectiveEndTime,
   minutesUntil,
@@ -57,6 +65,32 @@ async function findTokenScoped(organizationId: string, tokenId: string): Promise
     throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
   }
   return token;
+}
+
+const OTP_FIELD_NAMES = [
+  'serviceStartOtpCipher',
+  'serviceStartOtpExpiresAt',
+  'serviceStartOtpFailedAttempts',
+] as const;
+
+/**
+ * V2 Checkpoint 7: the verification-code cipher/expiry/attempt-count are
+ * customer-only-adjacent internal state — they must NEVER reach a staff or
+ * customer serialization (REST response, socket payload, FCM payload, audit
+ * metadata). Every function in this file that returns a raw Token object
+ * (as opposed to the explicit-whitelist toCustomerView) routes its final
+ * return through this, so no call site has to remember to strip them
+ * individually — centralizing this once here is what makes the "search
+ * every serialization path" security review in ADR-029 actually verifiable.
+ */
+function omitOtpFields<T extends Record<string, unknown>>(
+  token: T,
+): Omit<T, (typeof OTP_FIELD_NAMES)[number]> {
+  const safe = { ...token };
+  for (const field of OTP_FIELD_NAMES) {
+    delete safe[field];
+  }
+  return safe;
 }
 
 /**
@@ -570,7 +604,11 @@ function toStaffView(
   token: Token & { counter?: Counter | null } & TokenWithSelectedServices,
   computed: ComputedFields,
 ) {
-  return { ...token, services: toSelectedServices(token), ...computed };
+  // V2 Checkpoint 7: stripped even from the full staff shape — see
+  // omitOtpFields's doc comment. This is the shape realtime/emit.ts reuses
+  // directly for the organization-room socket payload, so this is also
+  // where a leak into Socket.io would happen if this were skipped.
+  return omitOtpFields({ ...token, services: toSelectedServices(token), ...computed });
 }
 
 /**
@@ -770,25 +808,58 @@ export async function callToken(
       throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is already serving another token.');
     }
 
+    // V2 Checkpoint 7 (ADR-029): every legitimate entry into CALLED — a
+    // plain /call and a Recall alike, since both paths converge here — gets
+    // a brand new service-start verification code. Recall never reuses a
+    // stale prior code (section 18 of the checkpoint spec); this is also
+    // what makes "customer cancels while staff is mid-Recall" behave
+    // correctly, since a fresh CALLED entry always starts a fresh OTP
+    // lifecycle rather than inheriting whatever a much-earlier CALLED period
+    // left behind.
+    const otpCode = generateOtpCode();
+    const otpCipher = encryptOtpCode(tokenId, otpCode);
+    const otpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60_000);
+
     const result = await tx.token.updateMany({
       where: { id: tokenId, status: token.status },
-      data: { status: 'CALLED', counterId, calledAt: new Date() },
+      data: {
+        status: 'CALLED',
+        counterId,
+        calledAt: new Date(),
+        serviceStartOtpCipher: otpCipher,
+        serviceStartOtpExpiresAt: otpExpiresAt,
+        serviceStartOtpFailedAttempts: 0,
+      },
     });
     if (result.count === 0) {
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
     }
 
-    return tx.token.findUniqueOrThrow({ where: { id: tokenId } });
+    // otpCode itself is deliberately discarded here, never returned — this
+    // function's caller is staff (the one clicking Call/Recall), who must
+    // never be able to read the code (checkpoint section 20). The customer
+    // retrieves it separately and directly via
+    // getServiceStartVerificationCode, ownership-checked against their own
+    // device.
+    const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
+    return omitOtpFields(updated);
   });
 }
 
-type TimestampField = 'startedAt' | 'completedAt' | 'skippedAt';
+type TimestampField = 'completedAt' | 'skippedAt';
 
 /**
- * Shared implementation for the three counter-independent transitions.
- * Loads current state, validates the transition centrally, then applies a
- * conditional (compare-and-swap) UPDATE as the concurrency-safety net —
- * two racing requests against the same token can only have one succeed.
+ * Shared implementation for the two remaining counter-independent,
+ * staff-triggered transitions (complete/skip). Loads current state,
+ * validates the transition centrally, then applies a conditional
+ * (compare-and-swap) UPDATE as the concurrency-safety net — two racing
+ * requests against the same token can only have one succeed.
+ *
+ * V2 Checkpoint 7: CALLED -> IN_PROGRESS moved out to startTokenWithOtp
+ * below (it now requires a verified code, not just a valid source status),
+ * so this helper no longer handles `startedAt` — it remains the shared
+ * implementation for exactly the two transitions that still need nothing
+ * beyond "is this transition legal, apply it atomically."
  *
  * Returns `previousStatus` alongside the updated token: the realtime layer
  * needs it to decide whether a WAITING->SKIPPED transition (which affects
@@ -801,7 +872,7 @@ async function transitionToken(
   tokenId: string,
   targetStatus: TokenStatus,
   timestampField: TimestampField,
-): Promise<{ token: Token; previousStatus: TokenStatus }> {
+): Promise<{ token: Omit<Token, 'serviceStartOtpCipher' | 'serviceStartOtpExpiresAt' | 'serviceStartOtpFailedAttempts'>; previousStatus: TokenStatus }> {
   const token = await findTokenScoped(organizationId, tokenId);
   assertValidTransition(token.status, targetStatus);
   const previousStatus = token.status;
@@ -815,17 +886,260 @@ async function transitionToken(
   }
 
   const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
-  return { token: updated, previousStatus };
+  return { token: omitOtpFields(updated), previousStatus };
 }
-
-export const startToken = (organizationId: string, tokenId: string) =>
-  transitionToken(organizationId, tokenId, 'IN_PROGRESS', 'startedAt');
 
 export const completeToken = (organizationId: string, tokenId: string) =>
   transitionToken(organizationId, tokenId, 'COMPLETED', 'completedAt');
 
 export const skipToken = (organizationId: string, tokenId: string) =>
   transitionToken(organizationId, tokenId, 'SKIPPED', 'skippedAt');
+
+/**
+ * V2 Checkpoint 7 (ADR-029): CALLED -> IN_PROGRESS, gated on a customer-
+ * supplied, backend-verified code — the entire point being that staff
+ * cannot start service merely by clicking a button (CLAUDE.md: never trust
+ * a frontend-only restriction; this is the backend enforcement that makes
+ * that restriction real). This is now the ONLY code path in the backend
+ * capable of producing an IN_PROGRESS token — see ADR-029's security review
+ * for the full repository search confirming no other route reaches it.
+ *
+ * Deliberately NOT built on transitionToken: every other transition there
+ * only needs "is this legal, apply it" — this one needs three additional,
+ * ordered checks (code issued? not expired? attempts remaining?) before the
+ * same compare-and-swap pattern applies, and a wrong-code attempt must
+ * itself durably record the failed attempt without transitioning anything.
+ */
+export async function startTokenWithOtp(
+  organizationId: string,
+  tokenId: string,
+  verificationCode: string,
+) {
+  const token = await findTokenScoped(organizationId, tokenId);
+  assertValidTransition(token.status, 'IN_PROGRESS');
+
+  if (!token.serviceStartOtpCipher || !token.serviceStartOtpExpiresAt) {
+    throw new AppError(
+      409,
+      'VERIFICATION_CODE_REQUIRED',
+      'No verification code has been issued for this token yet.',
+    );
+  }
+  if (token.serviceStartOtpExpiresAt.getTime() < Date.now()) {
+    throw new AppError(
+      410,
+      'VERIFICATION_CODE_EXPIRED',
+      'This verification code has expired. Ask the customer for a new one.',
+    );
+  }
+  if (token.serviceStartOtpFailedAttempts >= OTP_MAX_FAILED_ATTEMPTS) {
+    throw new AppError(
+      429,
+      'VERIFICATION_CODE_LOCKED',
+      'Too many incorrect attempts with this code. Ask the customer for a new one.',
+    );
+  }
+
+  const isValid = verifyOtpCode(tokenId, verificationCode, token.serviceStartOtpCipher);
+  if (!isValid) {
+    const attempts = token.serviceStartOtpFailedAttempts + 1;
+    const lockedOut = attempts >= OTP_MAX_FAILED_ATTEMPTS;
+    // Best-effort bookkeeping — if a concurrent cancellation/start already
+    // moved the token out of CALLED, this simply no-ops (0 rows), which is
+    // fine: the failed-attempt count no longer matters once the token has
+    // left CALLED by any path.
+    await prisma.token.updateMany({
+      where: { id: tokenId, status: 'CALLED' },
+      data: lockedOut
+        ? { serviceStartOtpFailedAttempts: attempts, serviceStartOtpCipher: null, serviceStartOtpExpiresAt: null }
+        : { serviceStartOtpFailedAttempts: attempts },
+    });
+    // Never reveals which digits were right (checkpoint section 26) — one
+    // generic code regardless of how close the guess was.
+    throw new AppError(422, 'INVALID_VERIFICATION_CODE', 'Incorrect verification code.');
+  }
+
+  // Single-use: the transition and the OTP invalidation happen in the same
+  // conditional UPDATE, so a replay of this same code can never succeed a
+  // second time — status is already IN_PROGRESS, cipher already null.
+  const result = await prisma.token.updateMany({
+    where: { id: tokenId, status: 'CALLED' },
+    data: {
+      status: 'IN_PROGRESS',
+      startedAt: new Date(),
+      serviceStartOtpCipher: null,
+      serviceStartOtpExpiresAt: null,
+      serviceStartOtpFailedAttempts: 0,
+    },
+  });
+  if (result.count === 0) {
+    // Concurrency (checkpoint section 28): a cancellation could have won the
+    // race between the checks above and this UPDATE — the WHERE clause's
+    // status='CALLED' guard is what makes exactly one of {cancel, start}
+    // ever succeed, mirroring transitionToken/cancelToken's identical
+    // compare-and-swap pattern. No new locking mechanism.
+    throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+  }
+
+  const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
+  return { token: omitOtpFields(updated), previousStatus: token.status };
+}
+
+/**
+ * V2 Checkpoint 7 (ADR-029): customer-initiated cancellation. Ownership is
+ * established the same way the pre-existing notification-preferences
+ * customer write does (ADR-011/Phase 7 Step 7) — there is no device
+ * authentication in this codebase, so a self-asserted deviceIdentifier is
+ * resolved to a Device, and the token must actually belong to that device.
+ * A mismatch is reported as the same 404 TOKEN_NOT_FOUND used for "doesn't
+ * exist," never a 403 — this codebase never confirms a resource's existence
+ * across an ownership boundary the caller isn't inside.
+ *
+ * Concurrency (checkpoint section 28): the same conditional
+ * (compare-and-swap) UPDATE pattern used everywhere else in this file — the
+ * WHERE clause's status match against the freshly-read status is what makes
+ * a concurrent cancel-vs-start race resolve to exactly one winner, without
+ * any new locking mechanism (see startTokenWithOtp's matching comment).
+ */
+export async function cancelToken(tokenId: string, deviceIdentifier: string) {
+  const device = await prisma.device.findUnique({ where: { deviceIdentifier } });
+  if (!device) {
+    throw new AppError(404, 'DEVICE_NOT_FOUND', 'Device not found.');
+  }
+
+  const token = await prisma.token.findUnique({ where: { id: tokenId } });
+  if (!token || token.deviceId !== device.id) {
+    throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
+  }
+
+  // WAITING/CALLED -> CANCELLED only; IN_PROGRESS/COMPLETED/SKIPPED/already-
+  // CANCELLED all fall through to the same generic INVALID_TOKEN_TRANSITION
+  // every other illegal transition in this file produces — reusing the
+  // existing error architecture rather than inventing a one-off code for
+  // this specific case (including the "cancel an already-cancelled token"
+  // case, which needs no special-cased semantics of its own).
+  assertValidTransition(token.status, 'CANCELLED');
+
+  const result = await prisma.token.updateMany({
+    where: { id: tokenId, status: token.status },
+    data: {
+      status: 'CANCELLED',
+      cancelledAt: new Date(),
+      // Checkpoint section 19: a cancelled token's verification material
+      // must never remain usable.
+      serviceStartOtpCipher: null,
+      serviceStartOtpExpiresAt: null,
+      serviceStartOtpFailedAttempts: 0,
+    },
+  });
+  if (result.count === 0) {
+    throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+  }
+
+  const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
+  return { token: omitOtpFields(updated), previousStatus: token.status };
+}
+
+/**
+ * V2 Checkpoint 7 (ADR-029): the customer's own read of the currently
+ * active verification code — the ONLY path anywhere in the backend that
+ * ever returns the raw (decrypted) code, and only after confirming this
+ * exact device owns this exact token. Deliberately not folded into
+ * getTokenCustomerView/toCustomerView: that function's result is also
+ * reused directly for the Socket.io token-room payload (realtime/emit.ts),
+ * which must never carry the OTP (checkpoint section 20/33) — keeping this
+ * as a fully separate function makes that leak structurally impossible
+ * rather than something a future edit could accidentally reintroduce.
+ *
+ * Never regenerates on a read (checkpoint section 23) — returns the same
+ * code every call until it's consumed, expires, or is explicitly reissued.
+ */
+export async function getServiceStartVerificationCode(tokenId: string, deviceIdentifier: string) {
+  const device = await prisma.device.findUnique({ where: { deviceIdentifier } });
+  if (!device) {
+    throw new AppError(404, 'DEVICE_NOT_FOUND', 'Device not found.');
+  }
+
+  const token = await prisma.token.findUnique({ where: { id: tokenId } });
+  if (!token || token.deviceId !== device.id) {
+    throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
+  }
+  if (token.status !== 'CALLED') {
+    throw new AppError(
+      409,
+      'TOKEN_NOT_CALLED',
+      'A verification code is only available while this token is CALLED.',
+    );
+  }
+  if (!token.serviceStartOtpCipher || !token.serviceStartOtpExpiresAt || token.serviceStartOtpExpiresAt.getTime() < Date.now()) {
+    throw new AppError(
+      410,
+      'VERIFICATION_CODE_EXPIRED',
+      'This verification code has expired. Request a new one.',
+    );
+  }
+
+  const code = decryptOtpCode(tokenId, token.serviceStartOtpCipher);
+  if (!code) {
+    // Practically unreachable (would mean a corrupted/tampered stored
+    // value) — treated the same as expired rather than a 500, since the
+    // customer-facing remedy is identical either way: request a new code.
+    throw new AppError(
+      410,
+      'VERIFICATION_CODE_EXPIRED',
+      'This verification code has expired. Request a new one.',
+    );
+  }
+
+  return { code, expiresAt: token.serviceStartOtpExpiresAt };
+}
+
+/**
+ * V2 Checkpoint 7 (ADR-029): the smallest safe renewal path (section 23) —
+ * a customer whose code expired, or who simply didn't catch it, is never
+ * permanently stuck in CALLED. Same ownership check as the getter above;
+ * unconditionally mints a fresh code and expiry, invalidating whatever was
+ * there before (overwritten, not merged) and resetting the failed-attempt
+ * counter. Rate-limited at the route level (publicRateLimiter), the same
+ * category the pre-existing notification-preferences customer write uses —
+ * this function itself never regenerates except when explicitly called.
+ */
+export async function reissueServiceStartVerificationCode(tokenId: string, deviceIdentifier: string) {
+  const device = await prisma.device.findUnique({ where: { deviceIdentifier } });
+  if (!device) {
+    throw new AppError(404, 'DEVICE_NOT_FOUND', 'Device not found.');
+  }
+
+  const token = await prisma.token.findUnique({ where: { id: tokenId } });
+  if (!token || token.deviceId !== device.id) {
+    throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
+  }
+  if (token.status !== 'CALLED') {
+    throw new AppError(
+      409,
+      'TOKEN_NOT_CALLED',
+      'A verification code can only be reissued while this token is CALLED.',
+    );
+  }
+
+  const code = generateOtpCode();
+  const cipher = encryptOtpCode(tokenId, code);
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60_000);
+
+  const result = await prisma.token.updateMany({
+    where: { id: tokenId, status: 'CALLED' },
+    data: {
+      serviceStartOtpCipher: cipher,
+      serviceStartOtpExpiresAt: expiresAt,
+      serviceStartOtpFailedAttempts: 0,
+    },
+  });
+  if (result.count === 0) {
+    throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+  }
+
+  return { code, expiresAt };
+}
 
 /**
  * Auto-selects the oldest eligible WAITING token for the given counter
@@ -895,7 +1209,7 @@ export async function setRequiredDuration(
   organizationId: string,
   tokenId: string,
   requiredDurationMinutes: number,
-): Promise<Token> {
+) {
   const token = await findTokenScoped(organizationId, tokenId);
 
   if (token.status !== 'CALLED' && token.status !== 'IN_PROGRESS') {
@@ -906,8 +1220,9 @@ export async function setRequiredDuration(
     );
   }
 
-  return prisma.token.update({
+  const updated = await prisma.token.update({
     where: { id: tokenId },
     data: { requiredDurationMinutes },
   });
+  return omitOtpFields(updated);
 }

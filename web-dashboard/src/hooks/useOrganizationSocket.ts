@@ -12,6 +12,7 @@ const EVENT_TYPES: SocketEventType[] = [
   'token.started',
   'token.completed',
   'token.skipped',
+  'token.cancelled',
   'token.position_changed',
   'counter.created',
   'counter.updated',

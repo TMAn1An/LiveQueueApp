@@ -17,6 +17,7 @@ void main() {
         'startedAt': null,
         'completedAt': null,
         'skippedAt': null,
+        'cancelledAt': null,
       };
 
   group('LiveQueueToken.fromJson', () {
@@ -50,6 +51,7 @@ void main() {
         'IN_PROGRESS': TokenStatus.inProgress,
         'COMPLETED': TokenStatus.completed,
         'SKIPPED': TokenStatus.skipped,
+        'CANCELLED': TokenStatus.cancelled,
       }.entries) {
         final token = LiveQueueToken.fromJson(baseJson()..['status'] = entry.key);
         expect(token.status, entry.value, reason: 'for backend status ${entry.key}');
@@ -80,8 +82,8 @@ void main() {
       }
     });
 
-    test('is false for completed/skipped', () {
-      for (final status in [TokenStatus.completed, TokenStatus.skipped]) {
+    test('is false for completed/skipped/cancelled', () {
+      for (final status in [TokenStatus.completed, TokenStatus.skipped, TokenStatus.cancelled]) {
         final token = LiveQueueToken.fromJson(baseJson()..['status'] = _wireStatus(status));
         expect(token.isActive, isFalse, reason: 'for $status');
       }
@@ -141,6 +143,8 @@ String _wireStatus(TokenStatus status) {
       return 'COMPLETED';
     case TokenStatus.skipped:
       return 'SKIPPED';
+    case TokenStatus.cancelled:
+      return 'CANCELLED';
     case TokenStatus.unknown:
       return 'UNKNOWN';
   }

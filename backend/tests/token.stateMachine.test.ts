@@ -7,6 +7,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  startToken as startTokenWithOtp,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 
@@ -31,8 +32,11 @@ function call(accessToken: string, tokenId: string, counterId: string) {
     .send({ counterId });
 }
 
-function start(accessToken: string, tokenId: string) {
-  return api().post(`/api/tokens/${tokenId}/start`).set('Authorization', `Bearer ${accessToken}`);
+// V2 Checkpoint 7 (ADR-029): /start now requires a verified customer code —
+// delegates to the shared helper, which fetches the code as the token's own
+// device first. Callers pass `token.deviceIdentifier` (from createToken).
+function start(accessToken: string, tokenId: string, deviceIdentifier: string) {
+  return startTokenWithOtp(accessToken, tokenId, deviceIdentifier);
 }
 
 function complete(accessToken: string, tokenId: string) {
@@ -59,7 +63,7 @@ describe('Token state machine — valid transitions', () => {
     expect(calledRes.body.data.status).toBe('CALLED');
     expect(calledRes.body.data.calledAt).not.toBeNull();
 
-    const startedRes = await start(ctx.accessToken, token.id);
+    const startedRes = await start(ctx.accessToken, token.id, token.deviceIdentifier);
     expect(startedRes.status).toBe(200);
     expect(startedRes.body.data.status).toBe('IN_PROGRESS');
     expect(startedRes.body.data.startedAt).not.toBeNull();
@@ -88,7 +92,7 @@ describe('Token state machine — valid transitions', () => {
   it('IN_PROGRESS -> SKIPPED', async () => {
     const { ctx, counter, token } = await setup();
     await call(ctx.accessToken, token.id, counter.id);
-    await start(ctx.accessToken, token.id);
+    await start(ctx.accessToken, token.id, token.deviceIdentifier);
     const res = await skip(ctx.accessToken, token.id);
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('SKIPPED');
@@ -98,7 +102,13 @@ describe('Token state machine — valid transitions', () => {
 describe('Token state machine — invalid transitions', () => {
   it('rejects WAITING -> IN_PROGRESS (must go through CALLED)', async () => {
     const { ctx, token } = await setup();
-    const res = await start(ctx.accessToken, token.id);
+    // Never CALLED, so no real verification code exists — the state-machine
+    // check runs before any OTP check, so this still 422s on the attempted
+    // transition itself regardless of the (placeholder) code supplied.
+    const res = await api()
+      .post(`/api/tokens/${token.id}/start`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ verificationCode: '000000' });
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
@@ -129,12 +139,18 @@ describe('Token state machine — invalid transitions', () => {
   it('terminal state COMPLETED accepts no further transitions', async () => {
     const { ctx, counter, token } = await setup();
     await call(ctx.accessToken, token.id, counter.id);
-    await start(ctx.accessToken, token.id);
+    await start(ctx.accessToken, token.id, token.deviceIdentifier);
     await complete(ctx.accessToken, token.id);
 
     const skipRes = await skip(ctx.accessToken, token.id);
     expect(skipRes.status).toBe(422);
-    const startRes = await start(ctx.accessToken, token.id);
+    // Already COMPLETED — no verification code exists any more (cleared on
+    // the earlier successful start), so this exercises the same
+    // state-machine-first check as the WAITING case above.
+    const startRes = await api()
+      .post(`/api/tokens/${token.id}/start`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ verificationCode: '000000' });
     expect(startRes.status).toBe(422);
   });
 
@@ -176,7 +192,7 @@ describe('Token recall — SKIPPED -> CALLED', () => {
   it('allows recalling a token skipped from IN_PROGRESS', async () => {
     const { ctx, counter, token } = await setup();
     await call(ctx.accessToken, token.id, counter.id);
-    await start(ctx.accessToken, token.id);
+    await start(ctx.accessToken, token.id, token.deviceIdentifier);
     await skip(ctx.accessToken, token.id);
 
     const res = await recall(ctx.accessToken, token.id, counter.id);
@@ -228,7 +244,7 @@ describe('Token recall — SKIPPED -> CALLED', () => {
   it('rejects recalling an IN_PROGRESS token', async () => {
     const { ctx, counter, token } = await setup();
     await call(ctx.accessToken, token.id, counter.id);
-    await start(ctx.accessToken, token.id);
+    await start(ctx.accessToken, token.id, token.deviceIdentifier);
     const res = await recall(ctx.accessToken, token.id, counter.id);
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
@@ -237,7 +253,7 @@ describe('Token recall — SKIPPED -> CALLED', () => {
   it('rejects recalling a COMPLETED token', async () => {
     const { ctx, counter, token } = await setup();
     await call(ctx.accessToken, token.id, counter.id);
-    await start(ctx.accessToken, token.id);
+    await start(ctx.accessToken, token.id, token.deviceIdentifier);
     await complete(ctx.accessToken, token.id);
     const res = await recall(ctx.accessToken, token.id, counter.id);
     expect(res.status).toBe(422);

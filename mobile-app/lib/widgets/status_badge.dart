@@ -15,6 +15,7 @@ class StatusBadge extends StatelessWidget {
       TokenStatus.inProgress => ('In Progress', Colors.blue),
       TokenStatus.completed => ('Completed', Colors.grey),
       TokenStatus.skipped => ('Skipped', Colors.red),
+      TokenStatus.cancelled => ('Cancelled', Colors.deepOrange),
       TokenStatus.unknown => ('Unknown', Colors.grey),
     };
 

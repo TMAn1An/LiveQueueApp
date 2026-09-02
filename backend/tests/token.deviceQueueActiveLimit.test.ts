@@ -7,6 +7,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  startToken as startTokenWithOtp,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -31,8 +32,9 @@ function callToken(accessToken: string, tokenId: string, counterId: string) {
     .send({ counterId });
 }
 
-function startToken(accessToken: string, tokenId: string) {
-  return api().post(`/api/tokens/${tokenId}/start`).set('Authorization', `Bearer ${accessToken}`);
+// V2 Checkpoint 7 (ADR-029): /start now requires a verified customer code.
+function startToken(accessToken: string, tokenId: string, deviceIdentifier: string) {
+  return startTokenWithOtp(accessToken, tokenId, deviceIdentifier);
 }
 
 function completeToken(accessToken: string, tokenId: string) {
@@ -78,7 +80,7 @@ describe('One active token per device per queue', () => {
     const deviceIdentifier = 'device-in-progress';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     await callToken(org.accessToken, first.body.data.id, org.counter.id);
-    const startRes = await startToken(org.accessToken, first.body.data.id);
+    const startRes = await startToken(org.accessToken, first.body.data.id, deviceIdentifier);
     expect(startRes.status).toBe(200);
 
     const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
@@ -91,7 +93,7 @@ describe('One active token per device per queue', () => {
     const deviceIdentifier = 'device-completed';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     await callToken(org.accessToken, first.body.data.id, org.counter.id);
-    await startToken(org.accessToken, first.body.data.id);
+    await startToken(org.accessToken, first.body.data.id, deviceIdentifier);
     const completeRes = await completeToken(org.accessToken, first.body.data.id);
     expect(completeRes.status).toBe(200);
 

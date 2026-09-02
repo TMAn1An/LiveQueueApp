@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createCounter, createQueue, createService, createToken, registerOwner, setCounterStatus } from './helpers/app';
+import { api, createCounter, createQueue, createService, createToken, registerOwner, setCounterStatus, startToken } from './helpers/app';
 import { resetDb } from './helpers/db';
 
 beforeEach(async () => {
@@ -43,7 +43,7 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
     await call(ctx.accessToken, token.id, counter.id);
-    await api().post(`/api/tokens/${token.id}/start`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
 
     const res = await setDuration(ctx.accessToken, token.id, 25);
     expect(res.status).toBe(200);
@@ -69,7 +69,7 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
     await call(ctx.accessToken, token.id, counter.id);
-    await api().post(`/api/tokens/${token.id}/start`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
     await api().post(`/api/tokens/${token.id}/complete`).set('Authorization', `Bearer ${ctx.accessToken}`);
 
     const res = await setDuration(ctx.accessToken, token.id, 15);

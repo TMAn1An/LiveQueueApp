@@ -7,6 +7,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  startToken as startTokenWithOtp,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -31,8 +32,9 @@ function callToken(accessToken: string, tokenId: string, counterId: string) {
     .send({ counterId });
 }
 
-function startToken(accessToken: string, tokenId: string) {
-  return api().post(`/api/tokens/${tokenId}/start`).set('Authorization', `Bearer ${accessToken}`);
+// V2 Checkpoint 7 (ADR-029): /start now requires a verified customer code.
+function startToken(accessToken: string, tokenId: string, deviceIdentifier: string) {
+  return startTokenWithOtp(accessToken, tokenId, deviceIdentifier);
 }
 
 function completeToken(accessToken: string, tokenId: string) {
@@ -57,7 +59,7 @@ async function completeAJourney(org: {
   });
   expect(first.status).toBe(201);
   await callToken(org.accessToken, first.body.data.id, org.counter.id);
-  await startToken(org.accessToken, first.body.data.id);
+  await startToken(org.accessToken, first.body.data.id, org.deviceIdentifier);
   const completeRes = await completeToken(org.accessToken, first.body.data.id);
   expect(completeRes.status).toBe(200);
   return first.body.data.id as string;

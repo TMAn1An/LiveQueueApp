@@ -123,6 +123,51 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
   });
 });
 
+describe('TokenActions — Start requires a verification code (V2 Checkpoint 7)', () => {
+  it('clicking Start reveals a code input instead of starting service immediately', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
+
+    await user.click(screen.getByText('Start'));
+
+    expect(startMutate).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('Verification code')).toBeInTheDocument();
+    expect(screen.getByText('Confirm')).toBeInTheDocument();
+  });
+
+  it('submitting the code calls startToken with {tokenId, verificationCode} — never shows the code anywhere else', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
+
+    await user.click(screen.getByText('Start'));
+    await user.type(screen.getByPlaceholderText('Verification code'), '482731');
+    await user.click(screen.getByText('Confirm'));
+
+    expect(startMutate).toHaveBeenCalledWith(
+      { tokenId: 't1', verificationCode: '482731' },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('shows the backend error and leaves the token CALLED when the code is wrong', async () => {
+    const user = userEvent.setup();
+    startMutate.mockImplementation((_vars, { onError }: { onError: (e: unknown) => void }) => {
+      onError(new ApiError(422, 'INVALID_VERIFICATION_CODE', 'Incorrect verification code.'));
+    });
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
+
+    await user.click(screen.getByText('Start'));
+    await user.type(screen.getByPlaceholderText('Verification code'), '000000');
+    await user.click(screen.getByText('Confirm'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Incorrect verification code.');
+    // The code input stays open (not reset back to the plain Start button)
+    // so staff can immediately ask the customer to retry.
+    expect(screen.getByPlaceholderText('Verification code')).toBeInTheDocument();
+    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
+  });
+});
+
 describe('TokenActions — Adjust Time (V2 Checkpoint 4)', () => {
   it('clicking Adjust Time reveals a minutes input, and submitting calls setRequiredDuration', async () => {
     const user = userEvent.setup();

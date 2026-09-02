@@ -3,10 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/models/counter_info.dart';
 import 'package:mobile_app/models/live_queue_token.dart';
 import 'package:mobile_app/providers/token_tracking_provider.dart';
+import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
 import 'package:mobile_app/screens/live_tracking_screen.dart';
 import 'package:mobile_app/services/api_client.dart';
+import 'package:mobile_app/services/device_api_service.dart';
+import 'package:mobile_app/services/device_identity_service.dart';
 import 'package:mobile_app/services/fcm_service.dart';
 import 'package:mobile_app/services/history_storage_service.dart';
 import 'package:mobile_app/services/notification_service.dart';
@@ -27,6 +30,10 @@ class _FakeTokenTrackingProvider extends TokenTrackingProvider {
             apiService: TokenApiService(ApiClient(baseUrl: 'http://localhost:4000')),
             socketService: SocketService(),
           ),
+          deviceRepository: DeviceRepository(
+            identityService: DeviceIdentityService(),
+            apiService: DeviceApiService(ApiClient(baseUrl: 'http://localhost:4000')),
+          ),
           historyRepository: HistoryRepository(storageService: HistoryStorageService()),
           notificationService: NotificationService(),
           fcmService: FcmService(notificationService: NotificationService()),
@@ -37,11 +44,15 @@ class _FakeTokenTrackingProvider extends TokenTrackingProvider {
     bool isConnected = true,
     bool isResyncing = false,
     bool queuePausedNotice = false,
+    String? verificationCode,
+    DateTime? verificationCodeExpiresAt,
   }) {
     this.token = token;
     this.isConnected = isConnected;
     this.isResyncing = isResyncing;
     this.queuePausedNotice = queuePausedNotice;
+    this.verificationCode = verificationCode;
+    this.verificationCodeExpiresAt = verificationCodeExpiresAt;
     notifyListeners();
   }
 }
@@ -153,5 +164,62 @@ void main() {
     await _pump(tester, provider);
 
     expect(find.text('Reconnecting…'), findsOneWidget);
+  });
+
+  group('V2 Checkpoint 7 — cancellation and service-start verification code', () {
+    testWidgets('WAITING and CALLED show a Leave Queue action; IN_PROGRESS and terminal states do not', (tester) async {
+      for (final status in [TokenStatus.waiting, TokenStatus.called]) {
+        final provider = _FakeTokenTrackingProvider();
+        provider.pushState(token: _token(status: status));
+        await _pump(tester, provider);
+        expect(find.text('Leave Queue'), findsOneWidget, reason: 'for $status');
+      }
+
+      for (final status in [TokenStatus.inProgress, TokenStatus.completed, TokenStatus.cancelled]) {
+        final provider = _FakeTokenTrackingProvider();
+        provider.pushState(token: _token(status: status));
+        await _pump(tester, provider);
+        expect(find.text('Leave Queue'), findsNothing, reason: 'for $status');
+      }
+    });
+
+    testWidgets('a CALLED token with a loaded code shows it prominently, with the tell-staff instruction', (tester) async {
+      final provider = _FakeTokenTrackingProvider();
+      provider.pushState(
+        token: _token(status: TokenStatus.called),
+        verificationCode: '482731',
+        verificationCodeExpiresAt: DateTime.now().add(const Duration(minutes: 5)),
+      );
+      await _pump(tester, provider);
+
+      expect(find.text('482731'), findsOneWidget);
+      expect(
+        find.text('Tell this code to the staff member to start your service.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('an expired code shows a renewal prompt instead of the stale code', (tester) async {
+      final provider = _FakeTokenTrackingProvider();
+      provider.pushState(
+        token: _token(status: TokenStatus.called),
+        verificationCode: '482731',
+        verificationCodeExpiresAt: DateTime.now().subtract(const Duration(minutes: 1)),
+      );
+      await _pump(tester, provider);
+
+      expect(find.text('482731'), findsNothing);
+      expect(find.text('Your verification code has expired.'), findsOneWidget);
+      expect(find.text('Get a new code'), findsOneWidget);
+    });
+
+    testWidgets('a CANCELLED token shows its own message, not the SKIPPED one', (tester) async {
+      final provider = _FakeTokenTrackingProvider();
+      provider.pushState(token: _token(status: TokenStatus.cancelled));
+      await _pump(tester, provider);
+
+      expect(find.text('You cancelled this token.'), findsOneWidget);
+      expect(find.text('This token was skipped.'), findsNothing);
+    });
   });
 }

@@ -1,7 +1,7 @@
 import 'counter_info.dart';
 
 /// Mirrors the backend's TokenStatus enum exactly (backend/prisma/schema.prisma).
-enum TokenStatus { waiting, called, inProgress, completed, skipped, unknown }
+enum TokenStatus { waiting, called, inProgress, completed, skipped, cancelled, unknown }
 
 /// Shared by LiveQueueToken.isActive and TokenHistoryScreen (which only has
 /// a bare TokenStatus, not a full LiveQueueToken, to check) — kept in one
@@ -21,6 +21,8 @@ TokenStatus parseTokenStatus(String raw) {
       return TokenStatus.completed;
     case 'SKIPPED':
       return TokenStatus.skipped;
+    case 'CANCELLED':
+      return TokenStatus.cancelled;
     default:
       return TokenStatus.unknown;
   }
@@ -47,6 +49,7 @@ class LiveQueueToken {
     this.startedAt,
     this.completedAt,
     this.skippedAt,
+    this.cancelledAt,
   });
 
   final String id;
@@ -69,6 +72,9 @@ class LiveQueueToken {
   final DateTime? startedAt;
   final DateTime? completedAt;
   final DateTime? skippedAt;
+  /// V2 Checkpoint 7 (ADR-029) — set only on a customer-initiated CANCELLED
+  /// transition, distinct from skippedAt.
+  final DateTime? cancelledAt;
 
   bool get isActive => isActiveTokenStatus(status);
 
@@ -93,6 +99,7 @@ class LiveQueueToken {
       startedAt: json['startedAt'] == null ? null : DateTime.parse(json['startedAt'] as String),
       completedAt: json['completedAt'] == null ? null : DateTime.parse(json['completedAt'] as String),
       skippedAt: json['skippedAt'] == null ? null : DateTime.parse(json['skippedAt'] as String),
+      cancelledAt: json['cancelledAt'] == null ? null : DateTime.parse(json['cancelledAt'] as String),
     );
   }
 
@@ -124,6 +131,7 @@ class LiveQueueToken {
       startedAt: startedAt,
       completedAt: completedAt,
       skippedAt: skippedAt,
+      cancelledAt: cancelledAt,
     );
   }
 }

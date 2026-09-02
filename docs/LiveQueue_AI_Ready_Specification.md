@@ -266,18 +266,40 @@ Staff chooses next eligible token
         ↓
 Backend atomically assigns token to counter
         ↓
-Token becomes CALLED
+Token becomes CALLED, backend generates a fresh
+service-start verification code (V2 Checkpoint 7, ADR-029)
         ↓
 Customer receives real-time update
         ↓
-Customer receives turn notification
+Customer receives turn notification, and reads
+their verification code from the app
         ↓
-Staff starts service
+Customer tells the code to staff
         ↓
-Token becomes IN_PROGRESS
+Staff enters the code; backend verifies it
+        ↓
+Token becomes IN_PROGRESS (only on a correct,
+unexpired code — see ADR-029)
         ↓
 Staff completes or skips token
 ```
+
+As of V2 Checkpoint 7, staff cannot transition a token from CALLED to IN_PROGRESS by action alone — the backend requires a short-lived (5-minute), single-use, server-verified code that only the token's owning device can read (`GET /api/tokens/:tokenId/verification-code`), told to staff verbally. This exists specifically so staff cannot silently start a customer's service merely to remove their ability to cancel (see 4.4a below). The raw code is never returned to staff, never appears in Socket.io/FCM payloads, and is never stored in the database in recoverable plaintext form — see ADR-029 for the full design, including why the storage is reversible authenticated encryption rather than a one-way hash.
+
+## 4.4a Customer cancels their own token
+
+```text
+Customer's token is WAITING or CALLED
+        ↓
+Customer taps "Leave Queue" in the app
+        ↓
+Backend verifies this device owns the token
+        ↓
+Token becomes CANCELLED (device+queue slot freed
+immediately; any occupied counter freed immediately)
+```
+
+As of V2 Checkpoint 7 (ADR-029), a customer may cancel their own token at any point before service actually begins — while `WAITING` or `CALLED`, never once `IN_PROGRESS`. `CANCELLED` is a distinct status from staff-initiated `SKIPPED` (a customer choosing to leave vs. staff moving past a no-show), with its own `cancelledAt` timestamp. A cancelled token is never recallable, and — unlike `COMPLETED` — never counts against a queue's `allowRepeatVisits=false` restriction (V2 Checkpoint 6, ADR-028): a customer who cancels may always rejoin.
 
 ---
 

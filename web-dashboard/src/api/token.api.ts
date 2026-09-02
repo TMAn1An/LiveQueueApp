@@ -5,8 +5,14 @@ export function callToken(tokenId: string, counterId: string) {
   return apiFetch<StaffToken>(`/api/tokens/${tokenId}/call`, { method: 'POST', body: { counterId } });
 }
 
-export function startToken(tokenId: string) {
-  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/start`, { method: 'POST' });
+// V2 Checkpoint 7 (ADR-029): CALLED -> IN_PROGRESS now requires the
+// customer-told verification code — staff can no longer start service with
+// a bare click.
+export function startToken(tokenId: string, verificationCode: string) {
+  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/start`, {
+    method: 'POST',
+    body: { verificationCode },
+  });
 }
 
 export function completeToken(tokenId: string) {

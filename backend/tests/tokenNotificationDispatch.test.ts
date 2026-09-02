@@ -9,6 +9,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  startToken as startTokenWithOtp,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -91,8 +92,9 @@ function callToken(setup: Setup) {
     .send({ counterId: setup.counterId });
 }
 
+// V2 Checkpoint 7 (ADR-029): /start now requires a verified customer code.
 function startToken(setup: Setup) {
-  return api().post(`/api/tokens/${setup.tokenId}/start`).set('Authorization', `Bearer ${setup.accessToken}`);
+  return startTokenWithOtp(setup.accessToken, setup.tokenId, setup.deviceIdentifier);
 }
 
 function completeToken(setup: Setup) {

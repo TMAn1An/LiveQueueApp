@@ -7,6 +7,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  startToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -90,7 +91,7 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     expect(a004TooEarly.status).toBe(409);
     expect(a004TooEarly.body.error.code).toBe('FCFS_VIOLATION');
 
-    await api().post(`/api/tokens/${a001.id}/start`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await startToken(ctx.accessToken, a001.id, a001.deviceIdentifier);
     const completed = await api()
       .post(`/api/tokens/${a001.id}/complete`)
       .set('Authorization', `Bearer ${ctx.accessToken}`);

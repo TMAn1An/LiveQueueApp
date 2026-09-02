@@ -93,16 +93,16 @@ class LiveQueueApp extends StatelessWidget {
           create: (context) =>
               QueueRepository(apiService: context.read<QueueApiService>()),
         ),
-        Provider<TokenRepository>(
-          create: (context) => TokenRepository(
-            apiService: context.read<TokenApiService>(),
-            socketService: context.read<SocketService>(),
-          ),
-        ),
         Provider<DeviceRepository>(
           create: (context) => DeviceRepository(
             identityService: context.read<DeviceIdentityService>(),
             apiService: context.read<DeviceApiService>(),
+          ),
+        ),
+        Provider<TokenRepository>(
+          create: (context) => TokenRepository(
+            apiService: context.read<TokenApiService>(),
+            socketService: context.read<SocketService>(),
           ),
         ),
         Provider<HistoryRepository>(
@@ -130,6 +130,7 @@ class LiveQueueApp extends StatelessWidget {
         ChangeNotifierProvider<TokenTrackingProvider>(
           create: (context) => TokenTrackingProvider(
             tokenRepository: context.read<TokenRepository>(),
+            deviceRepository: context.read<DeviceRepository>(),
             historyRepository: context.read<HistoryRepository>(),
             notificationService: context.read<NotificationService>(),
             fcmService: context.read<FcmService>(),

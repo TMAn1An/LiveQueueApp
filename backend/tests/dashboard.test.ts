@@ -8,6 +8,7 @@ import {
   registerOwner,
   setCounterStatus,
   setFormFields,
+  startToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 
@@ -103,7 +104,7 @@ describe('GET /api/dashboard/tokens (live queue table)', () => {
       .post(`/api/tokens/${token.id}/call`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
       .send({ counterId: counter.id });
-    await api().post(`/api/tokens/${token.id}/start`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
     await api().post(`/api/tokens/${token.id}/complete`).set('Authorization', `Bearer ${ctx.accessToken}`);
 
     const res = await api().get('/api/dashboard/tokens').set('Authorization', `Bearer ${ctx.accessToken}`);

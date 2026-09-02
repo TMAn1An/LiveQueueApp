@@ -56,8 +56,14 @@ export async function call(req: Request, res: Response) {
 
 export async function start(req: Request, res: Response) {
   // No approved audit action exists for WAITING/CALLED -> IN_PROGRESS — not
-  // audited here; see the Phase 7 Step 5 report for this gap.
-  const { token } = await tokenService.startToken(req.auth!.organizationId, req.params.tokenId as string);
+  // audited here; see the Phase 7 Step 5 report for this gap. V2 Checkpoint
+  // 7 (ADR-029): now gated on a verified customer code (startTokenWithOtp)
+  // — the transition itself is unaudited exactly as before, unchanged.
+  const { token } = await tokenService.startTokenWithOtp(
+    req.auth!.organizationId,
+    req.params.tokenId as string,
+    req.body.verificationCode,
+  );
   res.status(200).json({ success: true, data: token });
   await realtime.emitTokenStarted(token.id);
   // The ETA simulation anchors an in-service token from startedAt once it
@@ -66,6 +72,58 @@ export async function start(req: Request, res: Response) {
   // change even though nothing left/entered the waiting set itself.
   await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
+}
+
+/**
+ * V2 Checkpoint 7 (ADR-029): customer-initiated cancellation — public, no
+ * staff auth (there is no staff actor to audit; see cancelToken's doc
+ * comment and ADR-029's audit-behavior section). Allowed only while WAITING
+ * or CALLED; freeing the device+queue active-token slot and, if a counter
+ * was occupied, that counter's capacity, are both automatic consequences of
+ * the status change itself — no separate bookkeeping needed (the same
+ * active-status-derived model every other transition in this file relies
+ * on).
+ */
+export async function cancel(req: Request, res: Response) {
+  const { token } = await tokenService.cancelToken(
+    req.params.tokenId as string,
+    req.body.deviceIdentifier,
+  );
+  res.status(200).json({ success: true, data: token });
+  await realtime.emitTokenCancelled(token.id);
+  // Mirrors skip's broadcast rule exactly: a WAITING->CANCELLED transition
+  // removes a token from the waiting set (shifting everyone behind it), and
+  // a CALLED->CANCELLED transition frees a counter — either way every
+  // WAITING token's simulated ETA in this queue can shift.
+  await realtime.broadcastQueueEtaUpdate(token.queueId);
+  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
+}
+
+/**
+ * V2 Checkpoint 7 (ADR-029): the customer's own read of the currently
+ * active service-start verification code — public, ownership-checked via
+ * deviceIdentifier (query param, since this is a GET). The ONLY response
+ * anywhere in this API that ever carries the raw code.
+ */
+export async function getVerificationCode(req: Request, res: Response) {
+  const result = await tokenService.getServiceStartVerificationCode(
+    req.params.tokenId as string,
+    req.query.deviceIdentifier as string,
+  );
+  res.status(200).json({ success: true, data: result });
+}
+
+/**
+ * V2 Checkpoint 7 (ADR-029): smallest safe renewal path for a customer whose
+ * code expired (or who didn't catch it) — never automatic, only ever
+ * triggered by an explicit, rate-limited, ownership-checked request.
+ */
+export async function reissueVerificationCode(req: Request, res: Response) {
+  const result = await tokenService.reissueServiceStartVerificationCode(
+    req.params.tokenId as string,
+    req.body.deviceIdentifier,
+  );
+  res.status(200).json({ success: true, data: result });
 }
 
 export async function complete(req: Request, res: Response) {

@@ -25,7 +25,8 @@ export function useCallToken() {
 export function useStartToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (tokenId: string) => tokenApi.startToken(tokenId),
+    mutationFn: ({ tokenId, verificationCode }: { tokenId: string; verificationCode: string }) =>
+      tokenApi.startToken(tokenId, verificationCode),
     onSuccess: () => invalidateLiveData(queryClient),
   });
 }

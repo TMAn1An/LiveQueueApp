@@ -151,6 +151,11 @@ export const emitTokenCompleted = (tokenId: string) =>
   emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_COMPLETED, tokenId);
 export const emitTokenSkipped = (tokenId: string) =>
   emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_SKIPPED, tokenId);
+/** V2 Checkpoint 7 (ADR-029) — mirrors every other lifecycle emitter exactly
+ * (staff-full to the org room, customer-safe to the token room), both of
+ * which are already guaranteed OTP-free by toStaffView/toCustomerView. */
+export const emitTokenCancelled = (tokenId: string) =>
+  emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_CANCELLED, tokenId);
 
 /**
  * Recomputes and emits position_changed for every currently-WAITING token

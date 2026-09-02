@@ -1,4 +1,5 @@
 import '../models/live_queue_token.dart';
+import '../models/service_start_verification_code.dart';
 import '../services/socket_service.dart';
 import '../services/token_api_service.dart';
 
@@ -58,6 +59,23 @@ class TokenRepository {
   }
 
   Future<LiveQueueToken> getToken(String tokenId) => _apiService.getToken(tokenId);
+
+  /// V2 Checkpoint 7 (ADR-029). Callers (TokenTrackingProvider) resolve
+  /// deviceIdentifier via DeviceRepository themselves — mirrors
+  /// QueueJoinProvider/createToken's existing division of responsibility
+  /// (device resolution stays a provider-level concern, not duplicated into
+  /// every repository).
+  Future<LiveQueueToken> cancelToken(String tokenId, String deviceIdentifier) {
+    return _apiService.cancelToken(tokenId, deviceIdentifier);
+  }
+
+  Future<ServiceStartVerificationCode> getVerificationCode(String tokenId, String deviceIdentifier) {
+    return _apiService.getVerificationCode(tokenId, deviceIdentifier);
+  }
+
+  Future<ServiceStartVerificationCode> reissueVerificationCode(String tokenId, String deviceIdentifier) {
+    return _apiService.reissueVerificationCode(tokenId, deviceIdentifier);
+  }
 
   Stream<bool> get connectionStatus => _socketService.connectionStatus;
 

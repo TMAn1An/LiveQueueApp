@@ -12,6 +12,12 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('15m'),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default('30d'),
 
+  // V2 Checkpoint 7: keys the service-start verification-code cipher
+  // (utils/otp.ts). Deliberately a separate secret from JWT_SECRET — a
+  // leaked/rotated JWT signing key must never also compromise every
+  // in-flight OTP, and vice versa.
+  OTP_SECRET: z.string().min(32, 'OTP_SECRET must be at least 32 characters'),
+
   CORS_ORIGINS: z.string().default(''),
 
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),

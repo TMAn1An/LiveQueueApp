@@ -11,6 +11,7 @@ import {
   registerOwner,
   setCounterStatus,
   setFormFields,
+  startToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -438,7 +439,7 @@ describe('Issue #4: GET /api/devices customerContext', () => {
       .post(`/api/tokens/${token.id}/call`)
       .set('Authorization', `Bearer ${org.accessToken}`)
       .send({ counterId: counter.id });
-    await api().post(`/api/tokens/${token.id}/start`).set('Authorization', `Bearer ${org.accessToken}`);
+    await startToken(org.accessToken, token.id, deviceIdentifier);
 
     const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
     const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);

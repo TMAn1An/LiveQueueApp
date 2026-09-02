@@ -8,6 +8,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  startToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import {
@@ -226,7 +227,7 @@ describe('All 12 specification events are emitted to the organization room', () 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
     const eventPromise = waitForEvent<Envelope>(socket, 'token.started');
 
-    await api().post(`/api/tokens/${token.id}/start`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
 
     const envelope = await eventPromise;
     expect(envelope.data.status).toBe('IN_PROGRESS');
@@ -243,7 +244,7 @@ describe('All 12 specification events are emitted to the organization room', () 
       .post(`/api/tokens/${token.id}/call`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
       .send({ counterId: counter.id });
-    await api().post(`/api/tokens/${token.id}/start`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
     const eventPromise = waitForEvent<Envelope>(socket, 'token.completed');
@@ -267,6 +268,23 @@ describe('All 12 specification events are emitted to the organization room', () 
 
     const envelope = await eventPromise;
     expect(envelope.data.status).toBe('SKIPPED');
+  });
+
+  // V2 Checkpoint 7 (ADR-029): a new lifecycle state gets the same minimal
+  // matching event every other transition already has.
+  it('token.cancelled', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    const token = await createToken({ queueId: queue.id, serviceId: service.id });
+
+    const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
+    const eventPromise = waitForEvent<Envelope>(socket, 'token.cancelled');
+
+    await api().post(`/api/tokens/${token.id}/cancel`).send({ deviceIdentifier: token.deviceIdentifier });
+
+    const envelope = await eventPromise;
+    expect(envelope.data.status).toBe('CANCELLED');
   });
 });
 

@@ -53,6 +53,11 @@ export function TokenActions({
   const [adjustingDuration, setAdjustingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('');
   const [durationError, setDurationError] = useState<string | null>(null);
+  // V2 Checkpoint 7 (ADR-029): Start no longer immediately starts service —
+  // staff must ask the customer for their verification code first.
+  const [startingService, setStartingService] = useState(false);
+  const [verificationCodeInput, setVerificationCodeInput] = useState('');
+  const [startError, setStartError] = useState<string | null>(null);
   const { data: counters } = useCounters(pickingCounter || pickingRecallCounter ? queueId : undefined);
   const callToken = useCallToken();
   const startToken = useStartToken();
@@ -78,6 +83,22 @@ export function TokenActions({
         },
         onError: (err) =>
           setDurationError(err instanceof ApiError ? err.message : 'Failed to update required time.'),
+      },
+    );
+  }
+
+  function handleStartSubmit(e: FormEvent) {
+    e.preventDefault();
+    setStartError(null);
+    startToken.mutate(
+      { tokenId, verificationCode: verificationCodeInput.trim() },
+      {
+        onSuccess: () => {
+          setStartingService(false);
+          setVerificationCodeInput('');
+        },
+        onError: (err) =>
+          setStartError(err instanceof ApiError ? err.message : 'Failed to start service.'),
       },
     );
   }
@@ -120,10 +141,43 @@ export function TokenActions({
             ))}
           </select>
         )}
-        {status === 'CALLED' && (
-          <Button variant="primary" onClick={() => startToken.mutate(tokenId)}>
+        {status === 'CALLED' && !startingService && (
+          <Button
+            variant="primary"
+            onClick={() => {
+              setStartError(null);
+              setStartingService(true);
+            }}
+          >
             Start
           </Button>
+        )}
+        {status === 'CALLED' && startingService && (
+          <form onSubmit={handleStartSubmit} className="flex items-center gap-1">
+            <input
+              autoFocus
+              type="text"
+              inputMode="numeric"
+              placeholder="Verification code"
+              value={verificationCodeInput}
+              onChange={(e) => setVerificationCodeInput(e.target.value)}
+              className="w-36 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            />
+            <Button type="submit" variant="primary" disabled={startToken.isPending}>
+              Confirm
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setStartingService(false);
+                setStartError(null);
+                setVerificationCodeInput('');
+              }}
+            >
+              Cancel
+            </Button>
+          </form>
         )}
         {status === 'IN_PROGRESS' && (
           <Button variant="primary" onClick={() => completeToken.mutate(tokenId)}>
@@ -212,6 +266,11 @@ export function TokenActions({
       {recallError && (
         <div className="mt-1 max-w-xs">
           <ErrorBanner message={recallError} />
+        </div>
+      )}
+      {startError && (
+        <div className="mt-1 max-w-xs">
+          <ErrorBanner message={startError} />
         </div>
       )}
       {durationError && (

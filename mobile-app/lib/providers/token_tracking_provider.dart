@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/live_queue_token.dart';
 import '../models/notification_preferences.dart';
+import '../repositories/device_repository.dart';
 import '../repositories/history_repository.dart';
 import '../repositories/token_repository.dart';
 import '../services/fcm_service.dart';
@@ -27,15 +28,18 @@ import '../services/notification_service.dart';
 class TokenTrackingProvider extends ChangeNotifier {
   TokenTrackingProvider({
     required TokenRepository tokenRepository,
+    required DeviceRepository deviceRepository,
     required HistoryRepository historyRepository,
     required NotificationService notificationService,
     required FcmService fcmService,
   })  : _tokenRepository = tokenRepository,
+        _deviceRepository = deviceRepository,
         _historyRepository = historyRepository,
         _notificationService = notificationService,
         _fcmService = fcmService;
 
   final TokenRepository _tokenRepository;
+  final DeviceRepository _deviceRepository;
   final HistoryRepository _historyRepository;
   final NotificationService _notificationService;
   final FcmService _fcmService;
@@ -45,6 +49,15 @@ class TokenTrackingProvider extends ChangeNotifier {
   bool isResyncing = false;
   String? errorMessage;
   bool queuePausedNotice = false;
+
+  /// V2 Checkpoint 7 (ADR-029) — the customer's own service-start
+  /// verification code, fetched only while the tracked token is CALLED.
+  /// Never sourced from Socket.io/FCM (the backend never puts it there);
+  /// always a direct, ownership-checked REST read/reissue.
+  String? verificationCode;
+  DateTime? verificationCodeExpiresAt;
+  bool isLoadingVerificationCode = false;
+  bool isCancelling = false;
 
   NotificationPreferences _preferences = const NotificationPreferences();
   bool _reminderShown = false;
@@ -77,6 +90,10 @@ class TokenTrackingProvider extends ChangeNotifier {
     // shape, so it's handled identically: resync if it's about the token
     // we're already tracking.
     _fcmTapSub = _fcmService.onNotificationTapped.listen((message) => _onFcmDataMessage(message.data));
+
+    if (initialToken.status == TokenStatus.called) {
+      unawaited(_refreshVerificationCode());
+    }
   }
 
   /// Never trusts `data['status']` as authoritative — always resyncs via
@@ -153,10 +170,93 @@ class TokenTrackingProvider extends ChangeNotifier {
     final previousStatus = token?.status;
     token = updated;
 
+    if (previousStatus != updated.status) {
+      // V2 Checkpoint 7 (ADR-029): a fresh code exists only while CALLED —
+      // entering CALLED (a first call, or Recall) always fetches the
+      // current one; leaving it (started/skipped/cancelled/expired-away)
+      // always clears the local copy, matching the backend's own lifecycle.
+      if (updated.status == TokenStatus.called) {
+        unawaited(_refreshVerificationCode());
+      } else {
+        verificationCode = null;
+        verificationCodeExpiresAt = null;
+      }
+    }
+
     if (previousStatus != null && previousStatus != updated.status) {
       _onStatusTransition(updated);
     }
     notifyListeners();
+  }
+
+  /// Fetches the currently active code for the tracked token — never mints
+  /// a new one (that's reissueVerificationCode, an explicit user action).
+  Future<void> _refreshVerificationCode() async {
+    final current = token;
+    if (current == null) return;
+
+    isLoadingVerificationCode = true;
+    notifyListeners();
+    try {
+      final result = await _deviceRepository
+          .ensureRegisteredDevice()
+          .then((deviceIdentifier) => _tokenRepository.getVerificationCode(current.id, deviceIdentifier));
+      verificationCode = result.code;
+      verificationCodeExpiresAt = result.expiresAt;
+    } catch (_) {
+      // No code available yet (or it expired before this fetch landed) —
+      // the UI reads null as "not shown," not as an error to surface.
+      verificationCode = null;
+      verificationCodeExpiresAt = null;
+    } finally {
+      isLoadingVerificationCode = false;
+      notifyListeners();
+    }
+  }
+
+  /// Explicit customer action — the smallest safe renewal path (backend
+  /// section 23). Never called automatically/on a timer.
+  Future<void> reissueVerificationCode() async {
+    final current = token;
+    if (current == null) return;
+
+    isLoadingVerificationCode = true;
+    notifyListeners();
+    try {
+      final deviceIdentifier = await _deviceRepository.ensureRegisteredDevice();
+      final result = await _tokenRepository.reissueVerificationCode(current.id, deviceIdentifier);
+      verificationCode = result.code;
+      verificationCodeExpiresAt = result.expiresAt;
+    } catch (_) {
+      // Leave whatever was there — the UI's own expiry countdown already
+      // communicates staleness; a failed reissue attempt shouldn't erase a
+      // still-technically-valid prior code.
+    } finally {
+      isLoadingVerificationCode = false;
+      notifyListeners();
+    }
+  }
+
+  /// V2 Checkpoint 7 (ADR-029): customer-initiated cancellation, allowed
+  /// only while WAITING or CALLED — the backend is the actual authority;
+  /// this just surfaces its response. Returns true on success.
+  Future<bool> cancelToken() async {
+    final current = token;
+    if (current == null) return false;
+
+    isCancelling = true;
+    notifyListeners();
+    try {
+      final deviceIdentifier = await _deviceRepository.ensureRegisteredDevice();
+      final updated = await _tokenRepository.cancelToken(current.id, deviceIdentifier);
+      _applyToken(updated);
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      isCancelling = false;
+      notifyListeners();
+    }
   }
 
   void _onStatusTransition(LiveQueueToken updated) {
@@ -216,6 +316,8 @@ class TokenTrackingProvider extends ChangeNotifier {
     token = null;
     isConnected = false;
     queuePausedNotice = false;
+    verificationCode = null;
+    verificationCodeExpiresAt = null;
   }
 
   @override

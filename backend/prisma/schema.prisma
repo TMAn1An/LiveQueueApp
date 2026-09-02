@@ -60,6 +60,12 @@ enum TokenStatus {
   IN_PROGRESS
   COMPLETED
   SKIPPED
+  /// V2 Checkpoint 7: customer-initiated abandonment, distinct from SKIPPED
+  /// (staff-initiated). Only reachable from WAITING/CALLED — once
+  /// IN_PROGRESS begins, cancellation is forbidden (see tokenStateMachine.ts).
+  /// Does not consume the allowRepeatVisits allowance (only COMPLETED does)
+  /// and is never recallable (see callToken's requireSourceStatus).
+  CANCELLED
 }
 
 /// Device identity is deliberately global (no organizationId) per spec 7.19 /
@@ -344,6 +350,28 @@ model Token {
   startedAt   DateTime? @map("started_at")
   completedAt DateTime? @map("completed_at")
   skippedAt   DateTime? @map("skipped_at")
+  /// V2 Checkpoint 7 — set only on a customer-initiated CANCELLED transition,
+  /// never overloaded onto skippedAt (SKIPPED and CANCELLED are distinct
+  /// business events with different historical meaning).
+  cancelledAt DateTime? @map("cancelled_at")
+
+  /// V2 Checkpoint 7: the CALLED -> IN_PROGRESS gate. Generated fresh every
+  /// time a token enters CALLED (both /call and Recall — see callToken),
+  /// cleared on successful start or on cancellation. Reversible AES-256-GCM
+  /// ciphertext (utils/otp.ts), NOT a one-way hash — deliberately, so the
+  /// owning customer can re-fetch the same still-valid code on a later poll
+  /// without the backend ever minting a fresh one just to satisfy a read
+  /// (see GET .../verification-code). Never the raw code — see utils/otp.ts's
+  /// doc comment for why a one-way hash alone doesn't fit this requirement.
+  /// NEVER include this column (or the two below) in any staff-facing or
+  /// customer-facing serialization — see token.service.ts's omitOtpFields.
+  serviceStartOtpCipher String? @map("service_start_otp_cipher")
+  /// 5-minute default lifetime (OTP_EXPIRY_MINUTES) from generation/reissue.
+  serviceStartOtpExpiresAt DateTime? @map("service_start_otp_expires_at")
+  /// Resets to 0 on every fresh generation (call/recall/reissue). At
+  /// OTP_MAX_FAILED_ATTEMPTS, the current code is invalidated (cipher/expiry
+  /// cleared) forcing a reissue — never a permanent token/device lock.
+  serviceStartOtpFailedAttempts Int @default(0) @map("service_start_otp_failed_attempts")
 
   /// V2 Checkpoint 4 (ADR-026): staff-set override of how long this specific
   /// customer's service is expected to take, in minutes. Null means "use
