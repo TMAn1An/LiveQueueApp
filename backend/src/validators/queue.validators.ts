@@ -16,6 +16,8 @@ export const createQueueSchema = {
     baseTimeMinutes: z.number().int().positive().default(5),
     defaultNotificationMinutes: z.number().int().positive().default(10),
     status: queueStatus.default('ACTIVE'),
+    allowRepeatVisits: z.boolean().default(true),
+    allowMultipleServices: z.boolean().default(true),
   }),
 };
 
@@ -29,6 +31,8 @@ export const updateQueueSchema = {
     startingNumber: z.number().int().positive().optional(),
     baseTimeMinutes: z.number().int().positive().optional(),
     defaultNotificationMinutes: z.number().int().positive().optional(),
+    allowRepeatVisits: z.boolean().optional(),
+    allowMultipleServices: z.boolean().optional(),
   }),
 };
 

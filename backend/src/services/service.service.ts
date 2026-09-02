@@ -72,5 +72,26 @@ export async function setServiceStatus(
 export async function deleteService(organizationId: string, serviceId: string) {
   const service = await findServiceScoped(organizationId, serviceId);
   assertQueueMutable(service.queue);
+
+  // Checkpoint 5 follow-up fix: a service referenced by historical
+  // Token.serviceId or TokenService rows is protected at the database level
+  // via `onDelete: Restrict` (deliberately not weakened here) — but
+  // Postgres's native RESTRICT action raises SQLSTATE 23001, which Prisma
+  // does not translate into a known P-code; it would otherwise surface as
+  // an opaque PrismaClientUnknownRequestError and fall through to a generic
+  // 500. Checking usage up front avoids depending on that error shape and
+  // gives a clean, specific 409 instead.
+  const [tokenCount, tokenServiceCount] = await Promise.all([
+    prisma.token.count({ where: { serviceId } }),
+    prisma.tokenService.count({ where: { serviceId } }),
+  ]);
+  if (tokenCount > 0 || tokenServiceCount > 0) {
+    throw new AppError(
+      409,
+      'SERVICE_IN_USE',
+      'This service cannot be deleted because it has been used by one or more tokens.',
+    );
+  }
+
   await prisma.queueService.delete({ where: { id: serviceId } });
 }

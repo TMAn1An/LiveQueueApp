@@ -19,6 +19,7 @@ class QueueConfig {
     required this.formFields,
     this.description,
     this.clientTerminology,
+    this.allowMultipleServices = true,
   });
 
   final String id;
@@ -28,6 +29,11 @@ class QueueConfig {
   final String? clientTerminology;
   final List<ServiceOption> services;
   final List<DynamicFormField> formFields;
+  /// V2 Checkpoint 6: when false, the join flow must present a single-select
+  /// (radio-style) service picker instead of the default checkbox
+  /// multi-select. The backend remains authoritative regardless of what the
+  /// UI shows — this only drives which widget renders.
+  final bool allowMultipleServices;
 
   bool get isAcceptingCustomers => status == 'ACTIVE';
 
@@ -38,6 +44,7 @@ class QueueConfig {
       description: json['description'] as String?,
       status: json['status'] as String,
       clientTerminology: json['clientTerminology'] as String?,
+      allowMultipleServices: json['allowMultipleServices'] as bool? ?? true,
       services: (json['services'] as List<dynamic>? ?? const [])
           .map((e) => ServiceOption.fromJson(e as Map<String, dynamic>))
           .toList(),

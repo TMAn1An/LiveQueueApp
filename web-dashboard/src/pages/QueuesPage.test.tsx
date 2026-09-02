@@ -23,6 +23,8 @@ function mockQueue(overrides: Partial<Queue> = {}): Queue {
     nextTokenNumber: 1,
     baseTimeMinutes: 5,
     defaultNotificationMinutes: 10,
+    allowRepeatVisits: true,
+    allowMultipleServices: true,
     formVersion: 1,
     qrCodeUri: 'livequeue://queue/q1',
     deletedAt: null,

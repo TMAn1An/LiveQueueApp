@@ -19,12 +19,16 @@ export function QueueDetailsPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [allowRepeatVisits, setAllowRepeatVisits] = useState(true);
+  const [allowMultipleServices, setAllowMultipleServices] = useState(true);
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
 
   function startEditing() {
     setName(queue!.name);
     setDescription(queue!.description ?? '');
+    setAllowRepeatVisits(queue!.allowRepeatVisits);
+    setAllowMultipleServices(queue!.allowMultipleServices);
     setEditing(true);
   }
 
@@ -70,10 +74,40 @@ export function QueueDetailsPage() {
                 className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
               />
             </div>
+            <div className="space-y-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={allowRepeatVisits}
+                  onChange={(e) => setAllowRepeatVisits(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block font-medium text-slate-700">Allow repeat visits</span>
+                  <span className="block text-xs text-slate-500">
+                    Customers can join this queue again after completing service.
+                  </span>
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={allowMultipleServices}
+                  onChange={(e) => setAllowMultipleServices(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block font-medium text-slate-700">Allow multiple services</span>
+                  <span className="block text-xs text-slate-500">
+                    Customers can select more than one service when joining.
+                  </span>
+                </span>
+              </label>
+            </div>
             <div className="flex gap-2">
               <Button
                 onClick={() => {
-                  updateQueue.mutate({ name, description });
+                  updateQueue.mutate({ name, description, allowRepeatVisits, allowMultipleServices });
                   setEditing(false);
                 }}
               >

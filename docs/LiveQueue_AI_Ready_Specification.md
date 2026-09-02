@@ -235,7 +235,11 @@ App requests public queue configuration
         ↓
 Customer sees queue details
         ↓
-Customer selects one or more services (checkbox — V2 Checkpoint 5, ADR-027)
+Customer selects one or more services (checkbox, or single-select when the
+queue disallows multiple services — V2 Checkpoint 5/6, ADR-027/ADR-028)
+        ↓
+Backend rejects the join if the queue disallows repeat visits and this
+device already completed a token here (V2 Checkpoint 6, ADR-028)
         ↓
 Customer fills dynamic form
         ↓
@@ -250,6 +254,8 @@ Live tracking starts
 ```
 
 As of V2 Checkpoint 5, a customer may select multiple services in one join — the token's required duration is the sum of every selected service's own `durationMinutes`, computed and validated server-side. See ADR-027 for the full design, including the production-safe migration and the backward-compatible request contract (`serviceId` singular is still accepted from an older client; `serviceIds` array is the current shape).
+
+As of V2 Checkpoint 6, each queue carries two independent settings, both defaulting to `true` for every existing queue: `allowRepeatVisits` (when `false`, a device that already holds a `COMPLETED` token in this queue cannot create another — a `SKIPPED` token never counts, and this is checked separately from the pre-existing "one active token per device per queue" rule) and `allowMultipleServices` (when `false`, exactly one service must be selected). The repeat-visit rule is keyed on the existing device identifier only — there is no customer account, phone/email verification, or fingerprinting in this system, so a customer using two devices is not caught by it; this is a documented, accepted limitation, not a gap to silently work around. See ADR-028 for the full design, including the concurrency analysis and why this is deliberately not a stronger identity system.
 
 ## 4.4 Staff calls a token
 

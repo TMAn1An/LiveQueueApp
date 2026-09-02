@@ -41,6 +41,9 @@ interface QueueLockRow {
   deletedAt: Date | null;
   tokenPrefix: string;
   organizationId: string;
+  /** V2 Checkpoint 6 — read under the same row lock as the active-token
+   * check below, so both checks are race-free against the same lock. */
+  allowRepeatVisits: boolean;
 }
 
 /**
@@ -203,6 +206,17 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   if (services.some((s) => !s.isActive)) {
     throw new AppError(409, 'SERVICE_NOT_ACTIVE', 'One or more selected services are not currently available.');
   }
+  // V2 Checkpoint 6: a static queue-configuration gate, not a resource
+  // allocation — needs no transactional lock (unlike the checks below).
+  // The legacy singular `serviceId` shape already normalizes to a
+  // 1-element serviceIds array, so it always satisfies this unchanged.
+  if (!queue.allowMultipleServices && input.serviceIds.length !== 1) {
+    throw new AppError(
+      409,
+      'MULTIPLE_SERVICES_NOT_ALLOWED',
+      'This queue only allows selecting a single service.',
+    );
+  }
 
   const device = await registerDevice(input.deviceIdentifier);
   // OrganizationDeviceBlock, not device.status, is authoritative — a device
@@ -237,7 +251,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     const rows = await tx.$queryRaw<QueueLockRow[]>`
       SELECT id, next_token_number AS "nextTokenNumber", form_version AS "formVersion",
              status, deleted_at AS "deletedAt", token_prefix AS "tokenPrefix",
-             organization_id AS "organizationId"
+             organization_id AS "organizationId", allow_repeat_visits AS "allowRepeatVisits"
       FROM queues WHERE id = ${input.queueId} FOR UPDATE
     `;
     const lockedQueue = rows[0];
@@ -291,6 +305,36 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         'DEVICE_ALREADY_IN_QUEUE',
         'This device already has an active token in this queue.',
       );
+    }
+
+    // V2 Checkpoint 6: a separate, independent rule from the active-token
+    // check above — one device may complete a queue's service at most once
+    // when allowRepeatVisits is false. SKIPPED deliberately does NOT count
+    // (only COMPLETED does): a device with just a SKIPPED token has never
+    // actually been served and must still be allowed to (re)join. Recall
+    // (SKIPPED -> CALLED) reuses the same token row rather than creating a
+    // new one, so it is entirely unaffected by this check — only a later
+    // createToken call is. Scoped by (deviceId, queueId) only, exactly like
+    // the active-token check — queueId already determines organizationId,
+    // so there is no client-supplied tenant boundary to trust here. Checked
+    // under the same queue-row lock acquired above (reusing the existing
+    // mechanism, not a new one) — sufficient because this only ever reads
+    // already-committed COMPLETED rows from an earlier, already-finished
+    // transaction; it never races against another createToken call writing
+    // that COMPLETED status concurrently, since a CALLED/IN_PROGRESS token
+    // for this device would already have been caught by existingActive
+    // above.
+    if (!lockedQueue.allowRepeatVisits) {
+      const existingCompleted = await tx.token.findFirst({
+        where: { deviceId: device.id, queueId: input.queueId, status: 'COMPLETED' },
+      });
+      if (existingCompleted) {
+        throw new AppError(
+          409,
+          'REPEAT_VISIT_NOT_ALLOWED',
+          'This device has already completed a visit to this queue and repeat visits are not allowed.',
+        );
+      }
     }
 
     const sequenceNumber = lockedQueue.nextTokenNumber;

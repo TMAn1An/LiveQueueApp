@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createQueue, createRestrictedStaff, registerOwner } from './helpers/app';
+import { api, createQueue, createRestrictedStaff, createTokenRequest, registerOwner } from './helpers/app';
 import { resetDb } from './helpers/db';
+import { prisma } from '../src/config/prisma';
 
 beforeEach(async () => {
   await resetDb();
@@ -79,6 +80,25 @@ describe('Service CRUD', () => {
       .get(`/api/queues/${queue.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`);
     expect(getQueue.body.data.services).toHaveLength(0);
+  });
+
+  it('Test 12 (Checkpoint 5 follow-up): deleting a service referenced by token history returns a clean 409 and preserves the history', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    const token = await createTokenRequest({ queueId: queue.id, serviceId: service.id });
+    expect(token.status).toBe(201);
+
+    const res = await api()
+      .delete(`/api/services/${service.id}`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('SERVICE_IN_USE');
+
+    const stillExists = await prisma.queueService.findUnique({ where: { id: service.id } });
+    expect(stillExists).not.toBeNull();
+    const tokenRow = await prisma.token.findUnique({ where: { id: token.body.data.id } });
+    expect(tokenRow).not.toBeNull();
   });
 
   it('surfaces services nested in the queue response, with no dedicated list endpoint', async () => {

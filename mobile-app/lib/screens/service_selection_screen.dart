@@ -15,6 +15,35 @@ class ServiceSelectionScreen extends StatelessWidget {
     final provider = context.watch<QueueJoinProvider>();
     final services = provider.queueConfig?.services ?? const [];
     final selectedIds = provider.selectedServiceIds;
+    final allowMultiple = provider.queueConfig?.allowMultipleServices ?? true;
+
+    Widget serviceList() {
+      return ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: services.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          final service = services[index];
+          final selected = selectedIds.contains(service.id);
+          return Card(
+            child: allowMultiple
+                ? CheckboxListTile(
+                    value: selected,
+                    onChanged: (_) => context.read<QueueJoinProvider>().toggleService(service.id),
+                    title: Text(service.serviceName),
+                    subtitle: service.description != null ? Text(service.description!) : null,
+                    secondary: Text('${service.durationMinutes} min'),
+                  )
+                : RadioListTile<String>(
+                    value: service.id,
+                    title: Text(service.serviceName),
+                    subtitle: service.description != null ? Text(service.description!) : null,
+                    secondary: Text('${service.durationMinutes} min'),
+                  ),
+          );
+        },
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Select Services')),
@@ -23,24 +52,22 @@ class ServiceSelectionScreen extends StatelessWidget {
           : Column(
               children: [
                 Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: services.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 8),
-                    itemBuilder: (context, index) {
-                      final service = services[index];
-                      final selected = selectedIds.contains(service.id);
-                      return Card(
-                        child: CheckboxListTile(
-                          value: selected,
-                          onChanged: (_) => context.read<QueueJoinProvider>().toggleService(service.id),
-                          title: Text(service.serviceName),
-                          subtitle: service.description != null ? Text(service.description!) : null,
-                          secondary: Text('${service.durationMinutes} min'),
+                  // V2 Checkpoint 6: single-select queues wrap the same list in
+                  // a RadioGroup — selecting one service replaces the whole
+                  // selection (toggleService already implements that swap for
+                  // this queue's mode); multi-select queues render unwrapped,
+                  // unchanged checkbox behavior.
+                  child: allowMultiple
+                      ? serviceList()
+                      : RadioGroup<String>(
+                          groupValue: selectedIds.isEmpty ? null : selectedIds.first,
+                          onChanged: (value) {
+                            if (value != null) {
+                              context.read<QueueJoinProvider>().toggleService(value);
+                            }
+                          },
+                          child: serviceList(),
                         ),
-                      );
-                    },
-                  ),
                 ),
                 SafeArea(
                   top: false,

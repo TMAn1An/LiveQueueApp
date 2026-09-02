@@ -71,6 +71,8 @@ export async function createQueue(organizationId: string, input: CreateQueueInpu
       baseTimeMinutes: input.baseTimeMinutes,
       defaultNotificationMinutes: input.defaultNotificationMinutes,
       status: input.status,
+      allowRepeatVisits: input.allowRepeatVisits,
+      allowMultipleServices: input.allowMultipleServices,
     },
     include: { services: true },
   });

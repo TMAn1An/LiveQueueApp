@@ -168,6 +168,16 @@ model Queue {
   baseTimeMinutes            Int         @default(5) @map("base_time_minutes")
   defaultNotificationMinutes Int         @default(10) @map("default_notification_minutes")
   formVersion                Int         @default(1) @map("form_version")
+  /// V2 Checkpoint 6: when false, a device with a COMPLETED token in this
+  /// queue may not create another (see token.service.ts::createToken).
+  /// SKIPPED never counts — only COMPLETED. Defaults true so every existing
+  /// production queue keeps today's behavior unchanged.
+  allowRepeatVisits          Boolean     @default(true) @map("allow_repeat_visits")
+  /// V2 Checkpoint 6: when false, a token in this queue may select exactly
+  /// one service (validated backend-side in createToken, never trusting the
+  /// UI). Defaults true, preserving V2 Checkpoint 5's multi-service
+  /// selection unchanged for every existing queue.
+  allowMultipleServices      Boolean     @default(true) @map("allow_multiple_services")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")

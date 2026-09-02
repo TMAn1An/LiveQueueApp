@@ -103,10 +103,21 @@ class QueueJoinProvider extends ChangeNotifier {
   /// the previous single-select behavior exactly: the dynamic form is
   /// queue-level, not service-level, but a changed selection means the
   /// customer hasn't seen/confirmed the form for it yet.
+  ///
+  /// V2 Checkpoint 6: when the loaded queue disallows multiple services,
+  /// selecting one replaces the whole set instead of adding to it (radio
+  /// behavior) — the backend independently re-validates and is the actual
+  /// enforcement point regardless of this client-side shortcut.
   void toggleService(String serviceId) {
-    final updated = Set<String>.from(selectedServiceIds);
-    if (!updated.remove(serviceId)) {
-      updated.add(serviceId);
+    final allowMultiple = queueConfig?.allowMultipleServices ?? true;
+    Set<String> updated;
+    if (allowMultiple) {
+      updated = Set<String>.from(selectedServiceIds);
+      if (!updated.remove(serviceId)) {
+        updated.add(serviceId);
+      }
+    } else {
+      updated = selectedServiceIds.contains(serviceId) ? {} : {serviceId};
     }
     selectedServiceIds = updated;
     formData = {};
@@ -199,6 +210,10 @@ class QueueJoinProvider extends ChangeNotifier {
         return 'This device is not able to join queues. Please contact staff.';
       case 'IDEMPOTENCY_KEY_CONFLICT':
         return 'This request could not be completed. Please try again.';
+      case 'REPEAT_VISIT_NOT_ALLOWED':
+        return 'You have already completed a visit to this queue. Repeat visits are not allowed.';
+      case 'MULTIPLE_SERVICES_NOT_ALLOWED':
+        return 'This queue only allows selecting a single service.';
       default:
         return e.message;
     }

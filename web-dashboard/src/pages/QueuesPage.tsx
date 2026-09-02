@@ -15,12 +15,14 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
   const createQueue = useCreateQueue();
   const [name, setName] = useState('');
   const [tokenPrefix, setTokenPrefix] = useState('A');
+  const [allowRepeatVisits, setAllowRepeatVisits] = useState(true);
+  const [allowMultipleServices, setAllowMultipleServices] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit() {
     setError(null);
     try {
-      await createQueue.mutateAsync({ name, tokenPrefix });
+      await createQueue.mutateAsync({ name, tokenPrefix, allowRepeatVisits, allowMultipleServices });
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create queue.');
@@ -46,6 +48,36 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
           maxLength={10}
           className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
         />
+      </div>
+      <div className="mb-4 space-y-2">
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={allowRepeatVisits}
+            onChange={(e) => setAllowRepeatVisits(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block font-medium text-slate-700">Allow repeat visits</span>
+            <span className="block text-xs text-slate-500">
+              Customers can join this queue again after completing service.
+            </span>
+          </span>
+        </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={allowMultipleServices}
+            onChange={(e) => setAllowMultipleServices(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="block font-medium text-slate-700">Allow multiple services</span>
+            <span className="block text-xs text-slate-500">
+              Customers can select more than one service when joining.
+            </span>
+          </span>
+        </label>
       </div>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>

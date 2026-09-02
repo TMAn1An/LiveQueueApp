@@ -30,6 +30,14 @@ export async function getPublicQueueConfig(queueId: string) {
     description: queue.description,
     status: queue.status,
     clientTerminology: queue.clientTerminology,
+    // V2 Checkpoint 6: mobile needs this to render checkbox (multi) vs.
+    // single-select UX for this queue. allowRepeatVisits is deliberately
+    // NOT exposed here — a queue-wide setting can't tell this particular
+    // device whether it personally has a COMPLETED token in this queue, so
+    // there is no actionable pre-join UX for it; the rejection at token
+    // creation (REPEAT_VISIT_NOT_ALLOWED) is the only point that actually
+    // knows.
+    allowMultipleServices: queue.allowMultipleServices,
     services: services.map((service) => ({
       id: service.id,
       serviceName: service.serviceName,

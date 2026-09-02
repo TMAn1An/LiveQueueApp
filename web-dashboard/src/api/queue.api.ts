@@ -17,6 +17,8 @@ export interface CreateQueueInput {
   startingNumber?: number;
   baseTimeMinutes?: number;
   defaultNotificationMinutes?: number;
+  allowRepeatVisits?: boolean;
+  allowMultipleServices?: boolean;
   status?: QueueStatus;
 }
 

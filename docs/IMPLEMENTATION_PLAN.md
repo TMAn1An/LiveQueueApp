@@ -316,6 +316,31 @@ See ADR-027 for full design/implementation detail, including the exact backward-
 
 **Goal:** A queue-level setting for whether a device/person may take only one token ever (until a documented reset condition) or may rejoin after completing. A SKIPPED token never consumes the single-visit allowance. Enforced backend-side; idempotent retries never miscounted as a second visit. `serviceIds` has no upper bound enforced anywhere yet (Checkpoint 5), so a `multiServiceAllowed` restriction here needs no further Token schema change.
 
+### Tasks
+
+- [x] `Queue.allowRepeatVisits` / `Queue.allowMultipleServices` (additive migration, both `DEFAULT true`), verified against a simulated pre-migration row before committing
+- [x] `createToken`: repeat-visit check (`COMPLETED`-only, scoped by `deviceId`+`queueId`) added as a second, independent rule alongside the pre-existing active-token guard, inside the same queue-row-locked transaction — no new locking system
+- [x] `createToken`: `allowMultipleServices=false` restriction validated before the transaction (`serviceIds.length !== 1` → `409`)
+- [x] `createQueueSchema`/`updateQueueSchema`: both fields added, additive, defaults matching the DB defaults
+- [x] Public queue-config endpoint exposes `allowMultipleServices` only (`allowRepeatVisits` has no actionable pre-join mobile UX and is not exposed)
+- [x] Dashboard: two toggles (create + edit forms), both defaulting on, with the specified helper text
+- [x] Mobile: `QueueConfig.allowMultipleServices`; `QueueJoinProvider.toggleService` branches to radio-replace behavior when `false`; `ServiceSelectionScreen` renders `RadioGroup` instead of independent checkboxes when `false`
+- [x] Checkpoint 5 follow-up: `deleteService` now returns `409 SERVICE_IN_USE` (pre-check, not error-string parsing) instead of a generic `500` when the service has token history
+- [x] Commit
+
+### Acceptance
+
+- Default/existing queues permit another token after `COMPLETED` (unchanged behavior)
+- `allowRepeatVisits=false` blocks a device from rejoining after `COMPLETED`, but never after only `SKIPPED`
+- The pre-existing active-token rule still independently blocks a duplicate active token, unaffected by this checkpoint
+- Concurrent join attempts against an already-`COMPLETED` device cannot bypass the policy
+- `allowMultipleServices=false` rejects more than one service id and accepts exactly one (both request shapes); `allowMultipleServices=true` preserves Checkpoint 5 behavior exactly
+- Every existing queue row reads `allowRepeatVisits=true`/`allowMultipleServices=true` after migration
+- Deleting a service referenced by token history returns `409 SERVICE_IN_USE` and preserves the history
+- Full backend + mobile + dashboard test suites pass; one additive migration, verified locally only
+
+See ADR-028 for full design/implementation detail, including the concurrency analysis and the honest device-identity limitation.
+
 ## V2 Checkpoint 7: Customer cancellation
 
 **Goal:** A customer can cancel their own token while WAITING; cannot once service has started (CALLED or later). Enforced backend-side regardless of what the mobile UI shows. Consistent with the repeat-visit rule from Checkpoint 6 — a skipped token remains eligible to rejoin per that rule, a cancelled one follows whatever this checkpoint's own state-machine addition specifies.

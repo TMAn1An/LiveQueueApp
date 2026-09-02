@@ -33,6 +33,8 @@ export interface Queue {
   nextTokenNumber: number;
   baseTimeMinutes: number;
   defaultNotificationMinutes: number;
+  allowRepeatVisits: boolean;
+  allowMultipleServices: boolean;
   formVersion: number;
   qrCodeUri: string;
   deletedAt: string | null;
