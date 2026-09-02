@@ -8,6 +8,8 @@ import { Modal } from '../components/Modal';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { Pagination } from '../components/Pagination';
+import { SearchInput } from '../components/SearchInput';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { ApiError } from '../api/client';
 import type { Staff, StaffRole } from '../types/auth';
 
@@ -147,8 +149,19 @@ function StaffRow({ staff }: { staff: Staff }) {
 
 export function StaffPage() {
   const [page, setPage] = useState(1);
-  const { data: result, isLoading } = useStaffList(page);
+  const [search, setSearch] = useState('');
+  // Server-side search: this list is paginated, so filtering only the loaded
+  // page would hide matches sitting on other pages.
+  const debouncedSearch = useDebouncedValue(search.trim());
+  const { data: result, isLoading } = useStaffList(page, 20, debouncedSearch);
   const [showCreate, setShowCreate] = useState(false);
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    // A new search re-queries from the start; staying on page 3 of the old
+    // result set would usually land past the end of the new one.
+    setPage(1);
+  }
 
   return (
     <div>
@@ -159,11 +172,22 @@ export function StaffPage() {
         </PermissionGate>
       </div>
 
+      <div className="mb-4 flex gap-2">
+        <SearchInput
+          value={search}
+          onChange={handleSearchChange}
+          label="Search staff"
+          placeholder="Search by name, email, or role…"
+        />
+      </div>
+
       <Card>
         {isLoading ? (
           <Spinner />
         ) : !result?.data.length ? (
-          <EmptyState message="No staff found." />
+          <EmptyState
+            message={debouncedSearch ? 'No staff match your search.' : 'No staff found.'}
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>

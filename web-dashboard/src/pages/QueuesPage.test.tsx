@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueuesPage } from './QueuesPage';
 import { useDeleteQueue, useQueues, useUpdateQueueStatus } from '../hooks/useQueues';
@@ -88,5 +88,67 @@ describe('QueuesPage — Counters column (Issue 1: discoverability)', () => {
 
     const link = screen.getByText('5').closest('a');
     expect(link).toHaveAttribute('href', '/queues/queue-42/counters');
+  });
+});
+
+describe('QueuesPage — search', () => {
+  // Client-side filtering is correct here: useQueues returns every queue, so
+  // no match can be hiding on an unloaded page.
+  function renderWithQueues(queues: Queue[]) {
+    vi.mocked(useQueues).mockReturnValue({ data: queues, isLoading: false } as unknown as ReturnType<
+      typeof useQueues
+    >);
+    renderPage();
+    return screen.getByLabelText('Search queues');
+  }
+
+  it('filters by queue name and hides non-matching queues', () => {
+    const input = renderWithQueues([
+      mockQueue({ id: 'q1', name: 'Front Desk' }),
+      mockQueue({ id: 'q2', name: 'Back Office' }),
+    ]);
+
+    fireEvent.change(input, { target: { value: 'front' } });
+
+    expect(screen.getByText('Front Desk')).toBeInTheDocument();
+    expect(screen.queryByText('Back Office')).not.toBeInTheDocument();
+  });
+
+  it('matches a service name, not just the queue name', () => {
+    const input = renderWithQueues([
+      mockQueue({
+        id: 'q1',
+        name: 'Front Desk',
+        services: [
+          {
+            id: 's1',
+            queueId: 'q1',
+            serviceName: 'Passport Renewal',
+            description: null,
+            durationMinutes: 5,
+            isActive: true,
+            createdAt: '2026-08-24T00:00:00.000Z',
+            updatedAt: '2026-08-24T00:00:00.000Z',
+          },
+        ],
+      }),
+      mockQueue({ id: 'q2', name: 'Back Office' }),
+    ]);
+
+    fireEvent.change(input, { target: { value: 'passport' } });
+
+    expect(screen.getByText('Front Desk')).toBeInTheDocument();
+    expect(screen.queryByText('Back Office')).not.toBeInTheDocument();
+  });
+
+  it('shows a search-specific empty state, and restores the list when cleared', () => {
+    const input = renderWithQueues([mockQueue({ id: 'q1', name: 'Front Desk' })]);
+
+    fireEvent.change(input, { target: { value: 'nothing-matches-this' } });
+    expect(screen.getByText('No queues match your search.')).toBeInTheDocument();
+    expect(screen.queryByText('No queues found.')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Clear search'));
+    expect(screen.getByText('Front Desk')).toBeInTheDocument();
   });
 });

@@ -178,14 +178,48 @@ export async function listDevices(
   page: number,
   pageSize: number,
   status?: 'ACTIVE' | 'BLOCKED',
+  search?: string,
 ) {
-  const where = {
+  const where: Prisma.DeviceWhereInput = {
+    // Tenant scope: a top-level (AND-ed) condition that every other clause
+    // below is combined *with*, never OR-ed against — so no search term can
+    // surface a device that never interacted with this organization.
     tokens: { some: { organizationId } },
     ...(status
       ? {
           organizationBlocks: {
             [status === 'BLOCKED' ? 'some' : 'none']: { organizationId },
           },
+        }
+      : {}),
+    // Searchable fields are limited to what this page already displays: the
+    // device identifier, the token serial number, and the queue name. The
+    // customer-context form fields are deliberately NOT searched — they live
+    // in Token.formData as arbitrary operator-defined JSON, and turning that
+    // into a query surface would mean searching customer PII that this page
+    // only ever renders for an already-selected device.
+    //
+    // Each relation clause repeats `organizationId` so a match can only ever
+    // come from this organization's own tokens/queues, even though the
+    // top-level scope above already guarantees the device itself is in range.
+    ...(search
+      ? {
+          OR: [
+            { deviceIdentifier: { contains: search, mode: 'insensitive' as const } },
+            {
+              tokens: {
+                some: { organizationId, serialNumber: { contains: search, mode: 'insensitive' as const } },
+              },
+            },
+            {
+              tokens: {
+                some: {
+                  organizationId,
+                  queue: { name: { contains: search, mode: 'insensitive' as const } },
+                },
+              },
+            },
+          ],
         }
       : {}),
   };

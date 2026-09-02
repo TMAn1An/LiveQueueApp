@@ -1,8 +1,10 @@
 import { apiFetch } from './client';
 import type { Device, DeviceStatus } from '../types/device';
 
-export function listDevices(page = 1, pageSize = 20, status?: DeviceStatus) {
-  return apiFetch<Device[]>('/api/devices', { query: { page, pageSize, status } });
+export function listDevices(page = 1, pageSize = 20, status?: DeviceStatus, search?: string) {
+  return apiFetch<Device[]>('/api/devices', {
+    query: { page, pageSize, status, search: search || undefined },
+  });
 }
 
 export function blockDevice(deviceId: string) {

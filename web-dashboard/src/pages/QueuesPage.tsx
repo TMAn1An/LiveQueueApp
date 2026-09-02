@@ -8,6 +8,7 @@ import { Spinner, EmptyState } from '../components/Spinner';
 import { Modal } from '../components/Modal';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
+import { SearchInput } from '../components/SearchInput';
 import { ApiError } from '../api/client';
 import type { Queue, QueueStatus } from '../types/queue';
 
@@ -154,13 +155,23 @@ export function QueuesPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<QueueStatus | 'ALL'>('ALL');
 
+  // Client-side search is correct here: unlike staff/devices/audit logs, the
+  // queue list is not paginated — `useQueues` already holds every queue in the
+  // organization, so filtering locally can never hide a match.
+  const normalizedSearch = search.trim().toLowerCase();
+
   const filtered = useMemo(() => {
     return (queues ?? []).filter((q) => {
-      const matchesSearch = q.name.toLowerCase().includes(search.toLowerCase());
+      const matchesSearch =
+        !normalizedSearch ||
+        q.name.toLowerCase().includes(normalizedSearch) ||
+        (q.description?.toLowerCase().includes(normalizedSearch) ?? false) ||
+        q.tokenPrefix.toLowerCase().includes(normalizedSearch) ||
+        q.services.some((s) => s.serviceName.toLowerCase().includes(normalizedSearch));
       const matchesStatus = statusFilter === 'ALL' || q.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
-  }, [queues, search, statusFilter]);
+  }, [queues, normalizedSearch, statusFilter]);
 
   return (
     <div>
@@ -172,11 +183,11 @@ export function QueuesPage() {
       </div>
 
       <div className="mb-4 flex gap-2">
-        <input
-          placeholder="Search queues…"
+        <SearchInput
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          onChange={setSearch}
+          label="Search queues"
+          placeholder="Search by name, prefix, or service…"
         />
         <select
           value={statusFilter}
@@ -194,7 +205,13 @@ export function QueuesPage() {
         {isLoading ? (
           <Spinner />
         ) : filtered.length === 0 ? (
-          <EmptyState message="No queues found." />
+          <EmptyState
+            message={
+              normalizedSearch || statusFilter !== 'ALL'
+                ? 'No queues match your search.'
+                : 'No queues found.'
+            }
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>

@@ -2,10 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as deviceApi from '../api/device.api';
 import type { DeviceStatus } from '../types/device';
 
-export function useDevices(page: number, pageSize: number, status?: DeviceStatus) {
+export function useDevices(page: number, pageSize: number, status?: DeviceStatus, search = '') {
   return useQuery({
-    queryKey: ['devices', page, pageSize, status],
-    queryFn: async () => deviceApi.listDevices(page, pageSize, status),
+    queryKey: ['devices', page, pageSize, status, search],
+    queryFn: async () => deviceApi.listDevices(page, pageSize, status, search),
   });
 }
 

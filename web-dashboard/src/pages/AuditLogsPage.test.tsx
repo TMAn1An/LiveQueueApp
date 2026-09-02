@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { AuditLogsPage } from './AuditLogsPage';
 import { useAuditLogs } from '../hooks/useAuditLogs';
 import type { AuditLogEntry } from '../types/auditLog';
@@ -91,5 +91,58 @@ describe('AuditLogsPage', () => {
     render(<AuditLogsPage />);
 
     expect(screen.getByText('Page 1 of 2 (40 total)')).toBeInTheDocument();
+  });
+});
+
+describe('AuditLogsPage — search', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Search is server-side here: the page must hand the term to the hook (which
+   * puts it in the query string), not filter the already-loaded page — matches
+   * on other pages would otherwise be invisible.
+   */
+  it('sends the debounced term to the hook and resets to page 1', () => {
+    vi.useFakeTimers();
+    vi.mocked(useAuditLogs).mockReturnValue({
+      data: {
+        data: [mockEntry()],
+        pagination: { page: 1, pageSize: 20, total: 60, totalPages: 3 },
+      },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useAuditLogs>);
+
+    render(<AuditLogsPage />);
+    fireEvent.click(screen.getByText('Next'));
+    expect(useAuditLogs).toHaveBeenLastCalledWith(2, 20, '');
+
+    fireEvent.change(screen.getByLabelText('Search audit logs'), {
+      target: { value: 'staff_created' },
+    });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(useAuditLogs).toHaveBeenLastCalledWith(1, 20, 'staff_created');
+  });
+
+  it('distinguishes "no events yet" from "nothing matched the search"', () => {
+    vi.useFakeTimers();
+    vi.mocked(useAuditLogs).mockReturnValue({
+      data: { data: [], pagination: { page: 1, pageSize: 20, total: 0, totalPages: 0 } },
+      isLoading: false,
+    } as unknown as ReturnType<typeof useAuditLogs>);
+
+    render(<AuditLogsPage />);
+    expect(screen.getByText('No audit events yet.')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Search audit logs'), { target: { value: 'nobody' } });
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    expect(screen.getByText('No audit events match your search.')).toBeInTheDocument();
   });
 });

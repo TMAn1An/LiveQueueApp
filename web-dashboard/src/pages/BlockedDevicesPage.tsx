@@ -5,6 +5,8 @@ import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
+import { SearchInput } from '../components/SearchInput';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime } from '../utils/format';
 import type { CustomerContext, Device, DeviceStatus } from '../types/device';
 
@@ -94,19 +96,35 @@ function DeviceRow({
 export function BlockedDevicesPage() {
   const [page, setPage] = useState(1);
   const [statusFilter, setStatusFilter] = useState<DeviceStatus | undefined>(undefined);
-  const { data: result, isLoading } = useDevices(page, 20, statusFilter);
+  const [search, setSearch] = useState('');
+  // Server-side search: this list is paginated and the status filter already
+  // narrows it server-side, so search has to work the same way to stay
+  // consistent across pages.
+  const debouncedSearch = useDebouncedValue(search.trim());
+  const { data: result, isLoading } = useDevices(page, 20, statusFilter, debouncedSearch);
   const blockDevice = useBlockDevice();
   const unblockDevice = useUnblockDevice();
 
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
+
   return (
     <div>
-      <h1 className="mb-2 text-xl font-semibold text-slate-900">Blocked Devices</h1>
+      <h1 className="mb-2 text-xl font-semibold text-slate-900">Device Blocking</h1>
       <p className="mb-4 max-w-2xl text-sm text-slate-500">
         Devices that have joined one of your queues. Blocking a device only affects your organization
         — it can still be used to join queues at other businesses.
       </p>
 
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-wrap gap-2">
+        <SearchInput
+          value={search}
+          onChange={handleSearchChange}
+          label="Search devices"
+          placeholder="Search by device, token, or queue…"
+        />
         <select
           value={statusFilter ?? ''}
           onChange={(e) => {
@@ -125,7 +143,9 @@ export function BlockedDevicesPage() {
         {isLoading ? (
           <Spinner />
         ) : !result?.data.length ? (
-          <EmptyState message="No devices found." />
+          <EmptyState
+            message={debouncedSearch ? 'No devices match your search.' : 'No devices found.'}
+          />
         ) : (
           <div>
             {result.data.map((device) => (

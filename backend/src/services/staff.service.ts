@@ -1,4 +1,4 @@
-import type { Staff } from '@prisma/client';
+import type { Prisma, Staff, StaffRole } from '@prisma/client';
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
@@ -8,6 +8,9 @@ import type { createStaffSchema, updateStaffSchema } from '../validators/staff.v
 
 type CreateStaffInput = z.infer<typeof createStaffSchema.body>;
 type UpdateStaffInput = z.infer<typeof updateStaffSchema.body>;
+
+/** Every role name, used to translate a free-text search into an enum filter. */
+const STAFF_ROLES: StaffRole[] = ['OWNER', 'ADMIN', 'STAFF'];
 
 /**
  * Spec 7.3's "Owner cannot be deleted by normal staff" establishes the
@@ -56,15 +59,52 @@ async function findStaffScoped(organizationId: string, staffId: string): Promise
   return staff;
 }
 
-export async function listStaff(organizationId: string, page: number, pageSize: number) {
+/**
+ * Server-side search over the whole organization's staff, not just the
+ * currently-loaded page — the list is paginated, so filtering client-side
+ * would silently hide matches sitting on other pages.
+ *
+ * `organizationId` stays a top-level (AND-ed) condition with the search
+ * `OR` nested strictly inside it, so no search term can ever widen the
+ * tenant scope (CLAUDE.md Rule 4).
+ *
+ * `role` is a Postgres enum, so `contains` doesn't apply to it — the search
+ * term is instead matched against the role *names* and turned into an
+ * `in` filter, which is what makes "admin"/"staff" work case-insensitively
+ * from the user's point of view.
+ */
+function buildStaffWhere(organizationId: string, search?: string): Prisma.StaffWhereInput {
+  if (!search) {
+    return { organizationId };
+  }
+
+  const matchingRoles = STAFF_ROLES.filter((role) => role.includes(search.toUpperCase()));
+
+  return {
+    organizationId,
+    OR: [
+      { name: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } },
+      ...(matchingRoles.length > 0 ? [{ role: { in: matchingRoles } }] : []),
+    ],
+  };
+}
+
+export async function listStaff(
+  organizationId: string,
+  page: number,
+  pageSize: number,
+  search?: string,
+) {
+  const where = buildStaffWhere(organizationId, search);
   const [staff, total] = await Promise.all([
     prisma.staff.findMany({
-      where: { organizationId },
+      where,
       orderBy: { createdAt: 'asc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),
-    prisma.staff.count({ where: { organizationId } }),
+    prisma.staff.count({ where }),
   ]);
 
   return {

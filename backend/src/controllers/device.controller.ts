@@ -19,12 +19,19 @@ export async function registerFcmToken(req: Request, res: Response) {
 }
 
 export async function list(req: Request, res: Response) {
-  const { page, pageSize, status } = req.query as unknown as {
+  const { page, pageSize, status, search } = req.query as unknown as {
     page: number;
     pageSize: number;
     status?: 'ACTIVE' | 'BLOCKED';
+    search?: string;
   };
-  const result = await deviceService.listDevices(req.auth!.organizationId, page, pageSize, status);
+  const result = await deviceService.listDevices(
+    req.auth!.organizationId,
+    page,
+    pageSize,
+    status,
+    search,
+  );
   res.status(200).json({ success: true, data: result.data, pagination: result.pagination });
 }
 

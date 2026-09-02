@@ -1,8 +1,12 @@
 import { apiFetch } from './client';
 import type { StaffRole, StaffStatus, Staff } from '../types/auth';
 
-export function listStaff(page = 1, pageSize = 20) {
-  return apiFetch<Staff[]>('/api/staff', { query: { page, pageSize } });
+/** `search` is omitted from the query string entirely when empty (apiFetch
+ * skips undefined), so no-search behaves exactly as before. */
+export function listStaff(page = 1, pageSize = 20, search?: string) {
+  return apiFetch<Staff[]>('/api/staff', {
+    query: { page, pageSize, search: search || undefined },
+  });
 }
 
 export interface CreateStaffInput {

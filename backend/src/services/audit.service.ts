@@ -107,9 +107,45 @@ export async function recordAuditEventSafely(input: RecordAuditEventInput): Prom
   }
 }
 
-/** Tenant-scoped, paginated, newest-first — matches the existing device/staff list pattern. */
-export async function listAuditLogs(organizationId: string, page: number, pageSize: number) {
-  const where = { organizationId };
+/**
+ * Tenant-scoped, paginated, newest-first — matches the existing device/staff
+ * list pattern.
+ *
+ * Search is server-side (the table is paginated and grows without bound, so
+ * client-side filtering would hide matches on other pages) and covers only
+ * the four plain text columns already rendered in the dashboard table:
+ * staff email, action, entity type, and entity id. `metadata` is
+ * deliberately NOT searched — it is arbitrary per-action JSON, and
+ * stringifying it into a search surface is exactly how sanitized-but-
+ * sensitive detail leaks back out (see this file's own
+ * FORBIDDEN_METADATA_KEY_PATTERN).
+ *
+ * `organizationId` stays a top-level (AND-ed) condition with the search
+ * `OR` nested inside it, so no search term can widen the tenant scope.
+ */
+function buildAuditLogWhere(organizationId: string, search?: string): Prisma.AuditLogWhereInput {
+  if (!search) {
+    return { organizationId };
+  }
+
+  return {
+    organizationId,
+    OR: [
+      { staffEmail: { contains: search, mode: 'insensitive' } },
+      { action: { contains: search, mode: 'insensitive' } },
+      { entityType: { contains: search, mode: 'insensitive' } },
+      { entityId: { contains: search, mode: 'insensitive' } },
+    ],
+  };
+}
+
+export async function listAuditLogs(
+  organizationId: string,
+  page: number,
+  pageSize: number,
+  search?: string,
+) {
+  const where = buildAuditLogWhere(organizationId, search);
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({
       where,

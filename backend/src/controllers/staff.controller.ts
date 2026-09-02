@@ -3,8 +3,12 @@ import * as staffService from '../services/staff.service';
 import * as auditService from '../services/audit.service';
 
 export async function list(req: Request, res: Response) {
-  const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
-  const result = await staffService.listStaff(req.auth!.organizationId, page, pageSize);
+  const { page, pageSize, search } = req.query as unknown as {
+    page: number;
+    pageSize: number;
+    search?: string;
+  };
+  const result = await staffService.listStaff(req.auth!.organizationId, page, pageSize, search);
   res.status(200).json({ success: true, data: result.data, pagination: result.pagination });
 }
 

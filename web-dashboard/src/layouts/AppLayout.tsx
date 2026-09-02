@@ -33,7 +33,7 @@ export function AppLayout() {
           )}
           {hasPermission('manage_blocked_devices') && (
             <NavLink to="/devices" className={navLinkClass}>
-              Blocked Devices
+              Device Blocking
             </NavLink>
           )}
           {hasPermission('view_reports') && (

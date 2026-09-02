@@ -3,6 +3,8 @@ import { useAuditLogs } from '../hooks/useAuditLogs';
 import { Card } from '../components/Card';
 import { Spinner, EmptyState } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
+import { SearchInput } from '../components/SearchInput';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatActionLabel, formatDateTime } from '../utils/format';
 
 /**
@@ -14,7 +16,16 @@ import { formatActionLabel, formatDateTime } from '../utils/format';
  */
 export function AuditLogsPage() {
   const [page, setPage] = useState(1);
-  const { data: result, isLoading } = useAuditLogs(page, 20);
+  const [search, setSearch] = useState('');
+  // Server-side search: this table grows without bound, so filtering only
+  // the loaded page would hide most matches.
+  const debouncedSearch = useDebouncedValue(search.trim());
+  const { data: result, isLoading } = useAuditLogs(page, 20, debouncedSearch);
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    setPage(1);
+  }
 
   return (
     <div>
@@ -23,11 +34,22 @@ export function AuditLogsPage() {
         A record of staff actions in this organization — newest first.
       </p>
 
+      <div className="mb-4 flex gap-2">
+        <SearchInput
+          value={search}
+          onChange={handleSearchChange}
+          label="Search audit logs"
+          placeholder="Search by staff, action, or entity…"
+        />
+      </div>
+
       <Card>
         {isLoading ? (
           <Spinner />
         ) : !result?.data.length ? (
-          <EmptyState message="No audit events yet." />
+          <EmptyState
+            message={debouncedSearch ? 'No audit events match your search.' : 'No audit events yet.'}
+          />
         ) : (
           <table className="w-full text-sm">
             <thead>

@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as staffApi from '../api/staff.api';
 import type { CreateStaffInput, UpdateStaffInput } from '../api/staff.api';
 
-export function useStaffList(page = 1, pageSize = 20) {
+export function useStaffList(page = 1, pageSize = 20, search = '') {
   return useQuery({
-    queryKey: ['staff', page, pageSize],
-    queryFn: async () => staffApi.listStaff(page, pageSize),
+    // `search` is part of the key so each term caches independently and
+    // clearing it returns to the already-cached unfiltered page.
+    queryKey: ['staff', page, pageSize, search],
+    queryFn: async () => staffApi.listStaff(page, pageSize, search),
   });
 }
 
