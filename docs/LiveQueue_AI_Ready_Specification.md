@@ -176,6 +176,28 @@ A customer does not need a traditional email/password account.
 
 # 4. Core User Flows
 
+## 4.0 Mobile app startup
+
+As of V2 Checkpoint 9 (ADR-031), every mobile app launch begins with a server-authoritative compatibility check, before any other startup work:
+
+```text
+Mobile app launches
+        ↓
+Requests version policy (GET /api/public/version-policy?platform=android)
+        ↓
+Compares installed version against policy.minimumVersion
+(numeric major.minor.patch — never a raw string compare)
+        ↓
+Below minimum, or policy.forceUpdate is set?
+        ├── Yes → Update Required screen (blocking, no dismiss,
+        │         no back-navigation escape) — nothing else in this
+        │         list runs
+        └── No  → continue: Firebase/notifications setup, device
+                  registration, normal navigation to Home
+```
+
+The policy itself is server-controlled (five environment variables, no mobile rebuild needed to change it) and Android-only for now — no iOS build has ever been shipped. If the policy fetch fails, the app falls back to its last successfully cached policy; if none exists, it fails open rather than becoming unusable during a policy-service outage. See ADR-031 for the full design, including why the comparison happens on the mobile side and the future breaking-release procedure for actually raising the minimum version.
+
 ## 4.1 Organization registration
 
 As of V2 Checkpoint 2 (ADR-024), registration no longer creates an immediately-usable organization — the owner must first prove ownership of the supplied email address:

@@ -380,11 +380,36 @@ See ADR-029 for full design/implementation detail, including the reversible-encr
 
 **Reconciliation (V2 Checkpoint 7A, 2026-09-03):** confirmed, on a focused re-inspection of the actual current code, that this goal is fully and exactly satisfied by Checkpoint 7's part B (`startTokenWithOtp`, `utils/otp.ts`, the two customer-only verification-code endpoints — see ADR-029). Every specific requirement in the goal above is met: server-generated, short-lived (5 min), single-use (invalidated atomically on success), readable only by the owning customer's own device (never a public response, never client-generatable — the code is minted server-side via `crypto.randomInt`), required before `CALLED → IN_PROGRESS`, reusing existing rate-limiting (`publicRateLimiter`/`sensitiveRateLimiter`) and tenant/auth infrastructure unchanged. Cancellation and this OTP gate were, in hindsight, never two independent features — they're one security boundary ("staff cannot end a customer's cancellation window by starting service unilaterally"), which is exactly why the actual Checkpoint 7 work order combined them. This checkpoint is retired as a separate line item — no future checkpoint should re-implement it. See ADR-029 and ADR-030 for the full account, including the Checkpoint 7A security re-inspection that confirmed the implementation is sound (plus two hardening fixes: an atomic failed-attempt counter and a logging redaction).
 
-## V2 Checkpoint 9: Mobile force-update system — NEXT
+## V2 Checkpoint 9: Mobile force-update system — DONE
 
 **Goal:** A backend-controlled minimum supported app version (e.g. `minimumSupportedAndroidVersion`/`minimumSupportedIosVersion`, likely a simple app-config endpoint or existing public-config response addition) that the mobile app checks at startup — a version below the minimum shows a Force Update screen instead of continuing normally. Lets an old app be forced to update without a new backend release for every version bump. A proper platform feature recorded now rather than left as something to remember manually later.
 
-This is the next unimplemented V2 checkpoint as of 2026-09-03 (V2 Checkpoint 7A) — Checkpoints 1-7 are done, Checkpoint 8 is retired as covered by Checkpoint 7 (above), so force-update is next. Not started in this checkpoint.
+### Tasks
+
+- [x] Investigated current shipped version directly (`pubspec.yaml` `1.0.0+1`) rather than guessing; confirmed no Play Store listing and no verified iOS build exist yet
+- [x] `GET /api/public/version-policy?platform=android` — new, additive, public, rate-limited, Android-only for now
+- [x] `MOBILE_ANDROID_MIN_VERSION`/`MOBILE_ANDROID_LATEST_VERSION`/`MOBILE_ANDROID_FORCE_UPDATE`/`MOBILE_ANDROID_STORE_URL`/`MOBILE_ANDROID_UPDATE_MESSAGE` env vars, Zod-validated, production-safe defaults, documented in `.env.example` — no config table, no migration
+- [x] `compareSemanticVersions` — one centralized, tested mobile helper (numeric major.minor.patch, never lexicographic)
+- [x] `AppVersionRepository` — fetch, cache (shared_preferences), fail-open on fetch failure with no cache, cached-policy-still-blocks on fetch failure with a cache, malformed-cache-safety
+- [x] `SplashScreen` gate — version check runs first, before any other bootstrap work; blocked installs never reach Home through any normal navigation path
+- [x] `UpdateRequiredScreen` — no dismiss action, `PopScope(canPop: false)`, store URL opened via `url_launcher` with a retry-on-failure state
+- [x] Initial policy set to the actual current shipped version with `forceUpdate=false` — verified no currently-installed user is blocked
+- [x] Commit
+
+### Acceptance
+
+- Version comparison is numeric (`1.9.0 < 1.10.0`), never lexicographic
+- Installed version below `minimumVersion` blocks; at or above it does not
+- A higher `latestVersion` alone (minimum still satisfied) never blocks
+- `forceUpdate` can only widen blocking, never contradicts `minimumVersion`
+- A version-policy fetch failure with no cached policy fails open (never a global lockout)
+- A cached policy that already says "blocked" keeps blocking through a subsequent network outage
+- A malformed cache is ignored safely, never crashes startup
+- The endpoint is public, Android-only for now, and exposes no organization/token/device data
+- No existing token/queue/device API contract changed
+- Full backend + mobile test suites pass; no migration; no production deployment performed
+
+See ADR-031 for full design/implementation detail, including the environment-vs-config-table decision and the future breaking-release procedure.
 
 ## V2 Checkpoint 10: V2 production verification
 

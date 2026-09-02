@@ -11,6 +11,7 @@ import 'providers/history_provider.dart';
 import 'providers/notification_preferences_provider.dart';
 import 'providers/queue_join_provider.dart';
 import 'providers/token_tracking_provider.dart';
+import 'repositories/app_version_repository.dart';
 import 'repositories/device_repository.dart';
 import 'repositories/history_repository.dart';
 import 'repositories/notification_preferences_repository.dart';
@@ -18,6 +19,7 @@ import 'repositories/queue_repository.dart';
 import 'repositories/token_repository.dart';
 import 'screens/splash_screen.dart';
 import 'services/api_client.dart';
+import 'services/app_version_api_service.dart';
 import 'services/device_api_service.dart';
 import 'services/device_identity_service.dart';
 import 'services/history_storage_service.dart';
@@ -87,6 +89,9 @@ class LiveQueueApp extends StatelessWidget {
         Provider<TokenApiService>(
           create: (context) => TokenApiService(context.read<ApiClient>()),
         ),
+        Provider<AppVersionApiService>(
+          create: (context) => AppVersionApiService(context.read<ApiClient>()),
+        ),
 
         // Repositories
         Provider<QueueRepository>(
@@ -113,6 +118,11 @@ class LiveQueueApp extends StatelessWidget {
         Provider<NotificationPreferencesRepository>(
           create: (context) => NotificationPreferencesRepository(
             storageService: context.read<PreferencesStorageService>(),
+          ),
+        ),
+        Provider<AppVersionRepository>(
+          create: (context) => AppVersionRepository(
+            apiService: context.read<AppVersionApiService>(),
           ),
         ),
 

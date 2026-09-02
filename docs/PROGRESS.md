@@ -21,7 +21,7 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 6. Queue repeat-visit policy (plus a queue-level multi-service restriction and a Checkpoint 5 follow-up fix, see ADR-028) — **done**
 7. Customer cancellation + OTP-gated service start (see ADR-029) — **done**
 8. ~~Anti-bias OTP verification for CALLED → IN_PROGRESS~~ — **retired: completed as part of Checkpoint 7, confirmed by the Checkpoint 7A re-inspection (see ADR-029/ADR-030) — not a separate remaining checkpoint**
-9. Mobile force-update system (backend-controlled minimum supported app version) — **next**
+9. Mobile force-update system (backend-controlled minimum supported app version, see ADR-031) — **done**
 10. V2 production verification (final regression pass)
 
 ### V2 Checkpoint 1 — Password change + role rename (2026-08-26)
@@ -119,6 +119,22 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Cancel-vs-start concurrency, OTP encryption-at-rest, the start-bypass search, and reissue/cancellation security all re-confirmed correct** from the current code with no changes needed — the pre-existing "Test 19" already durably proves the cancel-vs-start race, so no new test was needed there.
 - **Checkpoint 8 ("Anti-bias OTP verification") is now formally retired** — confirmed, line-by-line against its original goal text, to be fully satisfied by Checkpoint 7. `IMPLEMENTATION_PLAN.md`/`PROGRESS.md` updated accordingly (original goal text preserved, not deleted). **Checkpoint 9 (mobile force-update) is now the next unimplemented checkpoint** — not started here.
 - **Verification:** backend `typecheck`/`lint` clean, `npm test` — 56 files / 526 tests passing (1 new focused regression test proving the failed-attempt fix, which was confirmed to fail against the pre-fix code before being trusted). Dashboard/mobile untouched — no code changed in either app, so their suites were not re-run. No migration. See ADR-030 for the complete review.
+
+### V2 Checkpoint 9 — Mobile force-update / minimum supported version (2026-09-03)
+
+**Status: implemented, tested, committed. No migration. No production deployment.**
+
+- **Current shipped version investigated, not guessed:** `pubspec.yaml` reads `1.0.0+1` (versionName `1.0.0`, build `1`) — the same value Android's `build.gradle` derives its own `versionCode`/`versionName` from. No Play Store listing and no verified iOS build exist yet (confirmed against this file's own Phase 5 notes), which is why this checkpoint targets Android only and why no store URL was fabricated as a default.
+- **New public endpoint:** `GET /api/public/version-policy?platform=android` (additive, under the existing `/api/public/*` namespace, same `publicRateLimiter`, no auth) returns `{platform, minimumVersion, latestVersion, forceUpdate, storeUrl, message}` — the raw policy only. The actual `installed < minimum` comparison happens on the mobile side, in one centralized, tested helper (`compareSemanticVersions`), not duplicated between a backend resolver and a client-submitted version string.
+- **Policy lives in five new environment variables** (`MOBILE_ANDROID_MIN_VERSION`/`LATEST_VERSION`/`FORCE_UPDATE`/`STORE_URL`/`UPDATE_MESSAGE`), not a database table — this project has no existing runtime-config pattern to extend, and the requirement ("changeable without a mobile rebuild") is already fully met by an env var + backend redeploy, exactly like every other operationally-adjustable value already in this codebase.
+- **Numeric, not lexicographic, version comparison:** `1.10.0` correctly reads as newer than `1.9.0`. A trailing build number or pre-release suffix is stripped before comparing (this project's version strings don't attach meaning to either); malformed input degrades to a safe value rather than throwing.
+- **Initial policy is inactive-but-ready:** `minimumVersion=latestVersion=1.0.0`, `forceUpdate=false` — matches the actual current shipped version exactly, so no already-installed user is blocked by this checkpoint shipping. `storeUrl` defaults to empty (no real listing exists yet) rather than a guessed, possibly-wrong URL.
+- **`forceUpdate` is an additive OR, never a contradiction** with `minimumVersion` — it can only widen blocking (an emergency kill switch), never narrow it.
+- **Startup gate:** `SplashScreen` checks compatibility before any other bootstrap work (Firebase, device registration, FCM token registration all skipped entirely for a blocked install) and replaces the whole navigation stack with `UpdateRequiredScreen` — no dismiss button, `PopScope(canPop: false)`, and nothing left beneath it in the stack for a back-gesture to reveal.
+- **Fail-open, cache-aware:** a failed fetch falls back to a locally cached policy if one exists (so a real outage can't silently un-block an already-known-incompatible install); with no cache at all, it fails open rather than becoming a global lockout. A corrupted cache is treated the same as no cache — never crashes startup.
+- **Verification:** backend `typecheck`/`lint`/`npm test` clean — 57 files / 531 tests passing (5 new). Mobile `flutter analyze` clean (same pre-existing info-level hints), `flutter test` — 127/127 passing (15 new), `flutter build apk --debug` succeeds. No migration — five new env vars only, all with production-safe defaults.
+- **Deployment:** no Render environment change, no deploy, no Play Store action performed by this checkpoint — see ADR-031 for the exact variable list and the future breaking-release procedure (deploy backend → publish app → confirm rollout → raise the minimum version → later remove old compatibility).
+- **Intentionally unchanged:** iOS policy (no iOS build exists yet to protect), any runtime/admin config UI, background re-checks, any later checkpoint — per this checkpoint's own explicit instruction to stop here.
 
 ## Status
 

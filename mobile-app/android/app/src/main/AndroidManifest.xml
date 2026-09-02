@@ -51,5 +51,13 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- V2 Checkpoint 9 (ADR-031): required for url_launcher's
+             canLaunchUrl/launchUrl to reliably see a browser on Android 11+
+             (API 30+) package-visibility restrictions — the Update Required
+             screen's "Update App" button opens the server-provided store URL. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

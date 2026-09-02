@@ -80,6 +80,30 @@ const envSchema = z.object({
   // more granular than the 1-hour deadline it's checking needs — matches
   // REMINDER_DISPATCH_CRON's existing convention, not a new scheduling idea.
   PENDING_REGISTRATION_CLEANUP_CRON: z.string().default('*/5 * * * *'),
+
+  // V2 Checkpoint 9 (ADR-031): server-authoritative mobile version policy.
+  // Android only — the app has never actually been built/shipped for iOS
+  // (see docs/PROGRESS.md), so there is no production iOS version to
+  // protect yet; add the equivalent MOBILE_IOS_* vars when that changes.
+  // Defaults intentionally mirror the current shipped version (pubspec.yaml
+  // 1.0.0+1) with forceUpdate off, so the mechanism is inactive-but-ready
+  // immediately after deploy — it must never lock out already-installed
+  // users on its own. Changing the policy requires an environment
+  // variable update and a backend redeploy; there is no runtime/admin UI.
+  MOBILE_ANDROID_MIN_VERSION: z.string().default('1.0.0'),
+  MOBILE_ANDROID_LATEST_VERSION: z.string().default('1.0.0'),
+  MOBILE_ANDROID_FORCE_UPDATE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
+  // Deliberately no fabricated default — the app has no real Play Store
+  // listing yet (see docs/PROGRESS.md). An empty value means "not
+  // configured"; the mobile Update Required screen handles that safely
+  // rather than ever guessing a store URL.
+  MOBILE_ANDROID_STORE_URL: z.string().default(''),
+  MOBILE_ANDROID_UPDATE_MESSAGE: z
+    .string()
+    .default('A new version of LiveQueue is available.'),
 });
 
 function loadEnv() {

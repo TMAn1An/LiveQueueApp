@@ -7,12 +7,14 @@ import 'package:provider/provider.dart';
 import '../models/notification_preferences.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/token_tracking_provider.dart';
+import '../repositories/app_version_repository.dart';
 import '../repositories/device_repository.dart';
 import '../repositories/token_repository.dart';
 import '../services/fcm_service.dart';
 import '../services/notification_service.dart';
 import 'home_screen.dart';
 import 'live_tracking_screen.dart';
+import 'update_required_screen.dart';
 
 /// Performs one-time startup work (local notification setup, best-effort
 /// FCM init, device registration) before showing Home. None of this is
@@ -44,6 +46,22 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _bootstrap() async {
+    // V2 Checkpoint 9 (ADR-031): the version-compatibility gate runs first,
+    // before any other startup work — a blocked install has no reason to
+    // register FCM tokens, request notification permissions, or register a
+    // device, and the rest of the app must not be reachable through normal
+    // navigation if it's incompatible (pushReplacement below leaves nothing
+    // to back-navigate into).
+    final appVersionRepository = context.read<AppVersionRepository>();
+    final compatibility = await appVersionRepository.checkCompatibility();
+    if (!mounted) return;
+    if (compatibility.updateRequired) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => UpdateRequiredScreen(compatibility: compatibility)),
+      );
+      return;
+    }
+
     final notificationService = context.read<NotificationService>();
     final fcmService = context.read<FcmService>();
     final deviceRepository = context.read<DeviceRepository>();
