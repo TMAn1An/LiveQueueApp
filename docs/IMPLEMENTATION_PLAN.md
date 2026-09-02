@@ -374,15 +374,17 @@ See ADR-028 for full design/implementation detail, including the concurrency ana
 
 See ADR-029 for full design/implementation detail, including the reversible-encryption reasoning, the concurrency analysis, and the flagged overlap with Checkpoint 8 immediately below.
 
-## V2 Checkpoint 8: Anti-bias OTP verification
+## V2 Checkpoint 8: Anti-bias OTP verification — COMPLETED AS PART OF V2 CHECKPOINT 7
 
-**Goal:** `CALLED → OTP → IN_PROGRESS`. A server-generated, short-lived, single-use OTP — visible only inside the customer's own app session, never a public API response, never client-generatable — must be correctly entered by staff before a CALLED token can transition to IN_PROGRESS, protecting against staff silently starting service without customer consent/presence. Reuses existing FCM delivery, rate limiting, and auth/tenant infrastructure. Its own checkpoint, separate from cancellation, since this is a distinct security feature.
+**Original goal (kept for the record):** `CALLED → OTP → IN_PROGRESS`. A server-generated, short-lived, single-use OTP — visible only inside the customer's own app session, never a public API response, never client-generatable — must be correctly entered by staff before a CALLED token can transition to IN_PROGRESS, protecting against staff silently starting service without customer consent/presence. Reuses existing FCM delivery, rate limiting, and auth/tenant infrastructure. Originally planned as its own checkpoint, separate from cancellation.
 
-**Status note (added when Checkpoint 7 shipped, 2026-09-02): this goal appears to already be fully implemented by Checkpoint 7** — see ADR-029's closing note. Flagged for explicit confirmation before starting this checkpoint, not silently marked done or silently discarded.
+**Reconciliation (V2 Checkpoint 7A, 2026-09-03):** confirmed, on a focused re-inspection of the actual current code, that this goal is fully and exactly satisfied by Checkpoint 7's part B (`startTokenWithOtp`, `utils/otp.ts`, the two customer-only verification-code endpoints — see ADR-029). Every specific requirement in the goal above is met: server-generated, short-lived (5 min), single-use (invalidated atomically on success), readable only by the owning customer's own device (never a public response, never client-generatable — the code is minted server-side via `crypto.randomInt`), required before `CALLED → IN_PROGRESS`, reusing existing rate-limiting (`publicRateLimiter`/`sensitiveRateLimiter`) and tenant/auth infrastructure unchanged. Cancellation and this OTP gate were, in hindsight, never two independent features — they're one security boundary ("staff cannot end a customer's cancellation window by starting service unilaterally"), which is exactly why the actual Checkpoint 7 work order combined them. This checkpoint is retired as a separate line item — no future checkpoint should re-implement it. See ADR-029 and ADR-030 for the full account, including the Checkpoint 7A security re-inspection that confirmed the implementation is sound (plus two hardening fixes: an atomic failed-attempt counter and a logging redaction).
 
-## V2 Checkpoint 9: Mobile force-update system
+## V2 Checkpoint 9: Mobile force-update system — NEXT
 
 **Goal:** A backend-controlled minimum supported app version (e.g. `minimumSupportedAndroidVersion`/`minimumSupportedIosVersion`, likely a simple app-config endpoint or existing public-config response addition) that the mobile app checks at startup — a version below the minimum shows a Force Update screen instead of continuing normally. Lets an old app be forced to update without a new backend release for every version bump. A proper platform feature recorded now rather than left as something to remember manually later.
+
+This is the next unimplemented V2 checkpoint as of 2026-09-03 (V2 Checkpoint 7A) — Checkpoints 1-7 are done, Checkpoint 8 is retired as covered by Checkpoint 7 (above), so force-update is next. Not started in this checkpoint.
 
 ## V2 Checkpoint 10: V2 production verification
 

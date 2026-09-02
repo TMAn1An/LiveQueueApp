@@ -259,6 +259,42 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
     expect(row.serviceStartOtpCipher).toBeNull();
   });
 
+  // V2 Checkpoint 7A: regression test for a lost-update race the security
+  // re-inspection found and fixed — the failed-attempt counter used to be
+  // read once, incremented in JS, then written back as a literal, so N
+  // truly concurrent wrong guesses could collapse into far fewer than N
+  // recorded attempts (every request reads the same stale count, so every
+  // request writes the same "+1" value, clobbering each other). Fixed with
+  // an atomic DB-side `increment`. This proves five concurrent wrong
+  // guesses (fired via Promise.all, not sequentially like Test 16 above)
+  // are counted accurately enough to reach lockout — a lossy counter would
+  // leave the code still guessable after this many parallel attempts.
+  it('Test 21 (Checkpoint 7A): concurrent wrong-code submissions cannot lose failed-attempt increments', async () => {
+    const org = await setupOrgQueue();
+    const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
+    await callToken(org.accessToken, token.id, org.counter.id);
+    const codeRes = await getVerificationCode(token.id, token.deviceIdentifier);
+
+    const attempts = await Promise.all(
+      Array.from({ length: 5 }, () => submitStart(org.accessToken, token.id, '000000')),
+    );
+    for (const res of attempts) {
+      expect(res.status).toBe(422);
+    }
+
+    const row = await prisma.token.findUniqueOrThrow({ where: { id: token.id } });
+    // A lossy read-modify-write could leave this well below 5 even though 5
+    // genuinely wrong attempts were made; the atomic increment must not.
+    expect(row.serviceStartOtpFailedAttempts).toBeGreaterThanOrEqual(5);
+    expect(row.serviceStartOtpCipher).toBeNull();
+
+    // The lockout must actually be in effect — even the real code no longer
+    // works, matching Test 16's sequential-attempts assertion.
+    const afterLockout = await submitStart(org.accessToken, token.id, codeRes.body.data.code);
+    expect(afterLockout.status).toBe(409);
+    expect(afterLockout.body.error.code).toBe('VERIFICATION_CODE_REQUIRED');
+  });
+
   it('Test 17: reissuing mints a fresh code and invalidates the old one', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });

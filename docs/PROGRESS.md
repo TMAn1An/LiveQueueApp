@@ -20,8 +20,8 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 5. Multi-service selection (backward-compatible with the already-installed V1 mobile app, see ADR-027) — **done**
 6. Queue repeat-visit policy (plus a queue-level multi-service restriction and a Checkpoint 5 follow-up fix, see ADR-028) — **done**
 7. Customer cancellation + OTP-gated service start (see ADR-029) — **done**
-8. Anti-bias OTP verification for CALLED → IN_PROGRESS — **likely superseded by Checkpoint 7's OTP work (flagged for confirmation, not silently removed — see ADR-029's closing note)**
-9. Mobile force-update system (backend-controlled minimum supported app version)
+8. ~~Anti-bias OTP verification for CALLED → IN_PROGRESS~~ — **retired: completed as part of Checkpoint 7, confirmed by the Checkpoint 7A re-inspection (see ADR-029/ADR-030) — not a separate remaining checkpoint**
+9. Mobile force-update system (backend-controlled minimum supported app version) — **next**
 10. V2 production verification (final regression pass)
 
 ### V2 Checkpoint 1 — Password change + role rename (2026-08-26)
@@ -105,6 +105,20 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 - **Dashboard:** Start now reveals a small inline verification-code input instead of firing immediately (mirrors the existing Adjust-Time/Recall inline-form pattern). **Mobile:** a `Leave Queue` action on `WAITING`/`CALLED`, and a prominent verification-code display while `CALLED` that clears itself on any other transition and offers a "Get a new code" action once expired.
 - **Verification:** backend `typecheck`/`lint`/`npm test` clean — 56 files / 525 tests passing (16 new, zero regressions; ~10 pre-existing test files mechanically updated for `/start`'s new required body). Dashboard `tsc -b`/`oxlint`/`npm run build` clean, `npx vitest run` — 15 files / 78 tests passing (3 new). Mobile `flutter analyze` clean (same 19 pre-existing info-level hints), `flutter test` — 112/112 passing (14 new). One additive migration, applied to the local dev database only. A repository-wide security review (every `IN_PROGRESS`/`startedAt` write site, every `otp`-named symbol) found no bypass and no leak. See ADR-029 for full design/implementation detail, including a flagged overlap with the still-pending Checkpoint 8 roadmap item.
 - **Intentionally unchanged:** force-update, and any later checkpoint — per this checkpoint's own explicit instruction to stop here.
+
+### V2 Checkpoint 7A — Security re-inspection + roadmap reconciliation (2026-09-03)
+
+**Status: PASS, with two hardening fixes. No schema change, no new feature.**
+
+A focused re-read of Checkpoint 7's actual committed code (not the prior checkpoint's own final report) to re-verify customer authorization, the OTP-at-rest design, and the cancel-vs-start concurrency guarantee, plus overdue roadmap reconciliation.
+
+- **Customer authorization confirmed as Case B** (no stronger device credential exists anywhere in this repository — verified by search, not assumption): `deviceIdentifier` is a `Random.secure()`-generated UUID v4, on-device, non-guessable, checked per-token, never client-trusted for org scope, non-enumerating on mismatch. Documented honestly as a bearer credential, not cryptographic authentication, with its residual limitation (a copied/leaked identifier can impersonate that installation, with no revocation mechanism today) recorded explicitly rather than hidden — see ADR-030. One legitimate pre-existing exposure noted: staff of an organization a device has visited can already see that device's identifier via the Blocked-Devices page (unrelated to this checkpoint), which means those staff could in principle use it against that same organization's tokens.
+- **Two genuine defects found and fixed**, both minimal:
+  1. **A lost-update race in the OTP failed-attempt counter** — concurrent wrong-code guesses were read-modified-written as a JS-computed literal, so truly concurrent guesses could silently collapse into far fewer recorded attempts than actually made (empirically verified: 5 concurrent wrong guesses recorded as just 1 before the fix), weakening the intended 5-attempt brute-force cap. Fixed with Prisma's atomic `{ increment: 1 }` instead of a client-computed value — no new locking mechanism, no Redis.
+  2. **`deviceIdentifier` — the new customer bearer credential — was appearing in plain production request logs** via `req.query` on the verification-code GET endpoint (pino-http logs query params by default; there was no redact path for this one). Fixed by adding it to the existing `config/logger.ts` redaction list, the same mechanism already protecting passwords and tokens.
+- **Cancel-vs-start concurrency, OTP encryption-at-rest, the start-bypass search, and reissue/cancellation security all re-confirmed correct** from the current code with no changes needed — the pre-existing "Test 19" already durably proves the cancel-vs-start race, so no new test was needed there.
+- **Checkpoint 8 ("Anti-bias OTP verification") is now formally retired** — confirmed, line-by-line against its original goal text, to be fully satisfied by Checkpoint 7. `IMPLEMENTATION_PLAN.md`/`PROGRESS.md` updated accordingly (original goal text preserved, not deleted). **Checkpoint 9 (mobile force-update) is now the next unimplemented checkpoint** — not started here.
+- **Verification:** backend `typecheck`/`lint` clean, `npm test` — 56 files / 526 tests passing (1 new focused regression test proving the failed-attempt fix, which was confirmed to fail against the pre-fix code before being trusted). Dashboard/mobile untouched — no code changed in either app, so their suites were not re-run. No migration. See ADR-030 for the complete review.
 
 ## Status
 

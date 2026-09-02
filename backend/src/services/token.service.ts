@@ -942,18 +942,37 @@ export async function startTokenWithOtp(
 
   const isValid = verifyOtpCode(tokenId, verificationCode, token.serviceStartOtpCipher);
   if (!isValid) {
-    const attempts = token.serviceStartOtpFailedAttempts + 1;
-    const lockedOut = attempts >= OTP_MAX_FAILED_ATTEMPTS;
-    // Best-effort bookkeeping — if a concurrent cancellation/start already
-    // moved the token out of CALLED, this simply no-ops (0 rows), which is
-    // fine: the failed-attempt count no longer matters once the token has
-    // left CALLED by any path.
-    await prisma.token.updateMany({
+    // V2 Checkpoint 7A: an atomic DB-side increment, not `token.serviceStartOtpFailedAttempts + 1`
+    // written back as a literal — two concurrent wrong guesses reading the
+    // same stale count would otherwise both write the same incremented
+    // value, silently losing an attempt (a real lost-update race: unlike
+    // the compare-and-swap transitions elsewhere in this file, the WHERE
+    // clause here — status='CALLED' — doesn't itself change as attempts
+    // accumulate, so Postgres has nothing to reject a stale write against).
+    // `increment` pushes the read-modify-write into a single server-side
+    // SQL statement instead, so N concurrent wrong attempts always produce
+    // exactly N increments, never fewer.
+    const incremented = await prisma.token.updateMany({
       where: { id: tokenId, status: 'CALLED' },
-      data: lockedOut
-        ? { serviceStartOtpFailedAttempts: attempts, serviceStartOtpCipher: null, serviceStartOtpExpiresAt: null }
-        : { serviceStartOtpFailedAttempts: attempts },
+      data: { serviceStartOtpFailedAttempts: { increment: 1 } },
     });
+    // Best-effort — if a concurrent cancellation/start already moved the
+    // token out of CALLED, the increment above simply no-ops (0 rows),
+    // which is fine: the failed-attempt count no longer matters once the
+    // token has left CALLED by any path, and there is nothing left to
+    // invalidate below either.
+    if (incremented.count > 0) {
+      const fresh = await prisma.token.findUnique({
+        where: { id: tokenId },
+        select: { serviceStartOtpFailedAttempts: true },
+      });
+      if (fresh && fresh.serviceStartOtpFailedAttempts >= OTP_MAX_FAILED_ATTEMPTS) {
+        await prisma.token.updateMany({
+          where: { id: tokenId, status: 'CALLED' },
+          data: { serviceStartOtpCipher: null, serviceStartOtpExpiresAt: null },
+        });
+      }
+    }
     // Never reveals which digits were right (checkpoint section 26) — one
     // generic code regardless of how close the guess was.
     throw new AppError(422, 'INVALID_VERIFICATION_CODE', 'Incorrect verification code.');
