@@ -780,3 +780,40 @@ Confirmed against the current `IMPLEMENTATION_PLAN.md`/`PROGRESS.md` text and th
 5. Only later, once confident the old client population is gone, remove any backend compatibility shims that existed solely for the old contract.
 
 **Explicitly out of scope, unchanged:** iOS policy/infrastructure (no iOS build exists yet to protect), any admin/CMS UI for editing the policy at runtime, background/resume re-checks, any later checkpoint — per this checkpoint's own explicit instruction to stop here.
+
+---
+
+## ADR-032: V2 final release-readiness audit (2026-09-03)
+
+**Status:** Audit complete. Two defects found and fixed; V2 assessed as releasable subject to the manual production-configuration checks below.
+
+**Scope:** A fresh, code-first re-inspection of the whole V2 surface (Checkpoints 1-7, 7A, 9) — authentication/sessions, email verification, tenant isolation, RBAC, FCFS/multi-counter, the token state machine, the ETA engine, multi-service, repeat-visit policy, cancellation, OTP-gated start, device identity, Socket.io, FCM, logging, audit logs, force-update, migrations, deployment configuration, dependencies, and test quality. Prior checkpoint reports were deliberately not treated as evidence; every conclusion below came from reading the current source or running it.
+
+### Defect 1 (fixed) — secrets leaked into request logs
+
+`config/logger.ts`'s redaction list was **proven incomplete by running it**, not by reading it. A probe reproducing pino-http's exact request-log shape showed:
+
+- **`req.query.token` was logged in full.** The raw, single-use email-verification bearer token from `GET /api/auth/email-verification/verify?token=...` (ADR-024) reached production logs verbatim. The existing `*.token` wildcard does **not** cover it — pino's `*` matches exactly one path segment, so `*.token` matches `req.token`, never `req.query.token`.
+- **`req.url` leaked every query-string secret a second time.** pino-http serializes the *original* url including its query string, so redacting the parsed `query` field alone was never sufficient. This also meant **the Checkpoint 7A `deviceIdentifier` fix (ADR-030) was itself incomplete** — that credential was still being logged via `url` on every `GET .../verification-code` call.
+
+**Fix:** `req.query.token` added to the redact paths, and `req.url` censored with a path-aware function that keeps the request path and drops only the query string. Nothing operationally useful is lost — the parsed `query` object is still logged as structured data with sensitive keys redacted by name — and any *future* sensitive query parameter is now covered by default rather than depending on someone remembering to add it here.
+
+**Severity:** P1, not P0. The exposed value is single-use, expires in 15 minutes, grants only "mark this account's own email verified," and requires access to production logs — but it is a bearer credential in plaintext, in the same class as the leak Checkpoint 7A already accepted as worth fixing.
+
+**Regression test:** `tests/loggerRedaction.test.ts` asserts against the **real exported `redactOptions`** (now exported for exactly this reason) rather than a copy, so the guarantee cannot drift from what production runs. Confirmed to fail against the pre-fix config (leaking `SECRET_VERIFY_TOKEN`) before being trusted.
+
+### Defect 2 (fixed) — deployment runbook omitted a startup-fatal secret
+
+`docs/DEPLOYMENT.md` §3's environment table had not been updated since Phase 7 and was missing **every** V2-added variable — including **`OTP_SECRET`, which is startup-fatal** (`env.ts` calls `process.exit(1)` without it). This is the documented cause of a real production boot failure. §6 additionally instructed operators to supply the Firebase credential as a *filesystem path*, which cannot work on Render (a stateless host), while `FIREBASE_CREDENTIALS` — added precisely for that reason — was undocumented. §5 described only one of the two schedulers that actually start.
+
+**Fix:** §3 restructured into three explicit tiers — **3a startup-fatal** (`DATABASE_URL`, `JWT_SECRET`, `OTP_SECRET`, with a callout that `OTP_SECRET` is the one that has already broken a deploy), **3b optional-to-start but feature-fatal** (the silent-failure class: `CORS_ORIGINS`, `RESEND_API_KEY`, `APP_BASE_URL`, `NODE_ENV`, Firebase, store URL), and **3c safe defaults**. §6 now documents `FIREBASE_CREDENTIALS` as the Render-appropriate option. §5 covers both schedulers. Two new sections were added: **§11** (the ordered procedure for raising the mobile minimum version) and **§12** (the single-instance Socket.io constraint).
+
+### Findings accepted without code change
+
+- **Socket.io is single-instance by construction** (module singleton, no adapter — approved Phase 4 decision). Both `node-cron` schedulers, by contrast, *are* multi-instance safe (a conditional-`UPDATE` claim and an idempotent `deleteMany`). So instance count is constrained by Socket.io alone; now documented in DEPLOYMENT.md §12 rather than left implicit.
+- **`npm audit`: 7 moderate, all transitive, all one advisory** (`uuid <11.1.1`, bounds check in `v3/v5/v6` when a `buf` argument is supplied) reached only through `firebase-admin → @google-cloud/storage → gaxios`. This app uses `firebase-admin` for messaging only (verified), never Cloud Storage, and never calls `uuid` with a `buf`. The only offered "fix" is a breaking downgrade to `firebase-admin@10`. Not exploitable here; deliberately not forced.
+- **`engines: ">=22.0.0"` is a floor, not a pin** — local development runs Node 25, Render selected Node 26, and nothing is tested against one agreed major. Recommended (not applied, since it needs a verified test run on the target major and a matching host setting) rather than changed blind.
+- **Audit-log gaps remain, unchanged and now re-classified.** `token.start` and `counter.remove` write no audit row. The `start` gap matters more after Checkpoint 7 than it did when first accepted — it is now the OTP-gated transition that ends the customer's cancellation window — but extending the approved audit vocabulary is a product decision, and this audit's mandate is explicitly not to add audit behavior silently. Recorded as follow-up. `token.cancel` writing no audit row remains correct by design (a customer action has no staff actor; ADR-029).
+- **Reports do not break out `CANCELLED`.** No metric is wrong — `tokensCompleted`/`tokensSkipped` are status-exact and cancelled tokens are never miscounted as either — but `tokensCreated` now spans a third terminal outcome that no metric surfaces. Adding one would be a new feature, out of scope here.
+
+**Verification:** backend `typecheck`/`lint`/`build` clean, `npm test` — 58 files / 534 tests passing (3 new, zero regressions). Dashboard `tsc`/`oxlint`/`vitest`/`build` clean — 78/78. Mobile `flutter analyze` clean (same pre-existing info hints), `flutter test` — 127/127. `prisma validate` clean; `prisma migrate status` up to date against the local dev database only. All thirteen V2 migrations re-read individually: every one additive (new columns/tables/indexes, two `ALTER TYPE ... ADD VALUE`, one in-place `RENAME VALUE`), no destructive rebuild, no unsafe `NOT NULL` without a default, `ON DELETE RESTRICT` preserving service history intact.

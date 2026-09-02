@@ -12,7 +12,14 @@ it's explicitly labeled as an example, not presented as existing tooling.
 
 ## 1. Production prerequisites
 
-- **Node.js ≥ 22.0.0** — pinned in `backend/package.json`'s `engines` field.
+- **Node.js ≥ 22.0.0** — `backend/package.json`'s `engines` field. Note this
+  is an **open-ended floor, not a pin**: a host that resolves "latest
+  satisfying" will pick whatever major is newest at build time (Render has
+  already selected Node 26 this way, while local development runs Node 25).
+  Nothing is currently tested against a single agreed major. Pinning an
+  exact major (`"22.x"` / `"24.x"`) and setting the host's Node version
+  explicitly is recommended — do it together with a full backend
+  test/build run on that major, not as a blind edit.
 - **PostgreSQL** — the only supported datasource (`backend/prisma/schema.prisma`'s
   `provider = "postgresql"`, `backend/prisma/migrations/migration_lock.toml`).
   No specific version is pinned in this repository; use a currently-supported
@@ -74,23 +81,58 @@ Every variable currently defined in `backend/.env.example` /
 `backend/src/config/env.ts`. **Required** = no default, startup fails
 without it. **Optional** = has a default or is genuinely optional.
 
-| Variable | Required? | Default | Purpose |
-|---|---|---|---|
-| `NODE_ENV` | optional | `development` | Must be `production` for a real deployment — see §1. |
-| `PORT` | optional | `4000` | HTTP port the server listens on. |
-| `DATABASE_URL` | **required** | — | `postgresql://user:pass@host:port/db`. |
-| `TEST_DATABASE_URL` | optional | falls back to `DATABASE_URL` | Test-suite only; irrelevant in production. |
-| `JWT_SECRET` | **required** | — | ≥32 chars. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` (already documented in `.env.example`). |
-| `JWT_EXPIRES_IN` | optional | `15m` | Access-token lifetime. |
-| `REFRESH_TOKEN_EXPIRES_IN` | optional | `30d` | Refresh-session lifetime (ADR-013). |
-| `CORS_ORIGINS` | optional (but see §1) | `''` (blocks all cross-origin) | Comma-separated allowed dashboard origin(s). |
-| `BCRYPT_SALT_ROUNDS` | optional | `12` | Password hashing cost, bounded 10–15. |
-| `RATE_LIMIT_PUBLIC_WINDOW_MS` / `RATE_LIMIT_PUBLIC_MAX` | optional | `60000` / `60` | Public endpoint rate limiter (Phase 7 Step 2). |
-| `RATE_LIMIT_TOKEN_CREATE_WINDOW_MS` / `RATE_LIMIT_TOKEN_CREATE_MAX` | optional | `60000` / `10` | `POST /api/tokens`'s own stricter limiter. |
-| `RATE_LIMIT_SENSITIVE_WINDOW_MS` / `RATE_LIMIT_SENSITIVE_MAX` | optional | `900000` / `30` | Sensitive authenticated mutations. |
-| `RATE_LIMIT_REPORT_WINDOW_MS` / `RATE_LIMIT_REPORT_MAX` | optional | `900000` / `10` | Reports/export. |
-| `FIREBASE_SERVICE_ACCOUNT_PATH` | optional | unset (push disabled) | See §6 — **never** a literal credential, always a filesystem path. |
-| `REMINDER_DISPATCH_CRON` | optional | `*/1 * * * *` | See §5. |
+### 3a. Startup-fatal — the process exits immediately without these
+
+There are exactly **three**. `env.ts` validates them with Zod and calls
+`process.exit(1)` if any is missing or malformed.
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | `postgresql://user:pass@host:port/db`. |
+| `JWT_SECRET` | ≥32 chars. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. |
+| `OTP_SECRET` | ≥32 chars, generated the same way. Keys the service-start verification-code cipher (V2 Checkpoint 7, ADR-029/ADR-031). **A separate secret from `JWT_SECRET` — never reuse the same value.** |
+
+> **`OTP_SECRET` was added in V2 Checkpoint 7 and is startup-fatal.** A
+> deployment that carries forward a pre-V2 environment without it will
+> **fail to boot** — this has already happened once in production. Set it
+> before deploying any build at or after commit `4c3c20b`.
+
+### 3b. Optional to *start*, but required for a feature to actually work
+
+These never block startup, so a misconfiguration here is silent — the
+process comes up healthy and the feature is simply dead. Verify each one
+deliberately rather than trusting `/health`.
+
+| Variable | Default | What breaks if unset/wrong |
+|---|---|---|
+| `NODE_ENV` | `development` | Must be `production` — see §1. Also note the dev default selects Pino's `pino-pretty` transport, which is a **devDependency**: a production install that omits dev dependencies *and* leaves `NODE_ENV` unset can fail at logger construction. |
+| `CORS_ORIGINS` | `''` → blocks **all** cross-origin | The dashboard cannot call the API at all. Comma-separated origin list. |
+| `RESEND_API_KEY` | unset → emails not sent | **Registration is effectively broken**: the account is created `PENDING_EMAIL_VERIFICATION`, the verification email is never delivered, the user can never verify, and the pending organization is auto-deleted one hour later by the cleanup scheduler (§5). |
+| `APP_BASE_URL` | `http://localhost:5173` | Verification emails link to `localhost` — every verification link is unusable. Set to the real dashboard origin. |
+| `EMAIL_FROM` | `LiveQueue <onboarding@resend.dev>` | Works, but sends from Resend's shared sandbox sender. Use a verified sending domain. |
+| `FIREBASE_CREDENTIALS` *or* `FIREBASE_SERVICE_ACCOUNT_PATH` | unset → push disabled | No push notifications (reminders, lifecycle). See §6 — **on Render, use `FIREBASE_CREDENTIALS`**. |
+| `MOBILE_ANDROID_STORE_URL` | `''` | Only matters once you raise the minimum app version — the Update Required screen then has no store to send users to. See §11. |
+
+### 3c. Safe defaults — set only to override
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `4000` | HTTP port. |
+| `TEST_DATABASE_URL` | falls back to `DATABASE_URL` | Test-suite only; irrelevant in production. |
+| `JWT_EXPIRES_IN` | `15m` | Access-token lifetime. |
+| `REFRESH_TOKEN_EXPIRES_IN` | `30d` | Refresh-session lifetime (ADR-013). |
+| `BCRYPT_SALT_ROUNDS` | `12` | Password hashing cost, bounded 10–15. |
+| `RATE_LIMIT_PUBLIC_WINDOW_MS` / `RATE_LIMIT_PUBLIC_MAX` | `60000` / `60` | Public endpoints. |
+| `RATE_LIMIT_TOKEN_CREATE_WINDOW_MS` / `RATE_LIMIT_TOKEN_CREATE_MAX` | `60000` / `10` | `POST /api/tokens`'s stricter limiter. |
+| `RATE_LIMIT_SENSITIVE_WINDOW_MS` / `RATE_LIMIT_SENSITIVE_MAX` | `900000` / `30` | Sensitive authenticated mutations (incl. OTP-gated `/start`). |
+| `RATE_LIMIT_REPORT_WINDOW_MS` / `RATE_LIMIT_REPORT_MAX` | `900000` / `10` | Reports/export. |
+| `RATE_LIMIT_EMAIL_WINDOW_MS` / `RATE_LIMIT_EMAIL_MAX` | `900000` / `3` | Verification-email resend (deliberately tighter — a real email is sent). |
+| `REMINDER_DISPATCH_CRON` | `*/1 * * * *` | See §5. |
+| `PENDING_REGISTRATION_CLEANUP_CRON` | `*/5 * * * *` | See §5. |
+| `MOBILE_ANDROID_MIN_VERSION` | `1.0.0` | Below this, the mobile app hard-blocks itself. See §11. |
+| `MOBILE_ANDROID_LATEST_VERSION` | `1.0.0` | Advisory "update available" only — never blocks. |
+| `MOBILE_ANDROID_FORCE_UPDATE` | `false` | Emergency kill switch; ORs with the version check, never narrows it. |
+| `MOBILE_ANDROID_UPDATE_MESSAGE` | `A new version of LiveQueue is available.` | Shown on the Update Required screen. |
 
 `RATE_LIMIT_TEST_ENFORCE` also exists in `env.ts` but is deliberately **not**
 in `.env.example` and must never be set in a real environment — it exists
@@ -148,28 +190,45 @@ setting, so evaluate that against your actual proxy before relying on
 
 ---
 
-## 5. Scheduler
+## 5. Schedulers
 
-`REMINDER_DISPATCH_CRON` (default `*/1 * * * *`, every minute) drives
-`node-cron`, started automatically from `server.ts` once the HTTP server is
-listening — no separate process or command is needed to run it.
+**Two** `node-cron` jobs are started automatically from `server.ts` once the
+HTTP server is listening — no separate process or command is needed for
+either:
+
+1. **Reminder dispatch** — `REMINDER_DISPATCH_CRON` (default `*/1 * * * *`).
+   Sends "it's almost your turn" pushes.
+2. **Pending-registration cleanup** — `PENDING_REGISTRATION_CLEANUP_CRON`
+   (default `*/5 * * * *`, V2 Checkpoint 2). Deletes organizations whose
+   owner never verified their email within the 1-hour registration window.
+   Verified accounts are never matched (their `registrationExpiresAt` is
+   cleared on verification).
+
+**Both are safe to run on more than one backend instance.** Reminder
+dispatch claims each token with a conditional `UPDATE ... WHERE
+reminderSentAt IS NULL` before sending, and cleanup is an idempotent
+`deleteMany` — neither depends on there being exactly one process. (Note
+that **Socket.io does**: see §12.)
+
+The notes below apply to both.
 
 ```ts
 server.listen(env.PORT, () => {
   logger.info(...);
   startReminderScheduler();
+  startPendingRegistrationCleanupScheduler();
 });
 ```
 
-- **Never starts under `NODE_ENV=test`** (`startReminderScheduler()`
-  returns immediately) — the automated test suite drives the dispatch logic
+- **Never starts under `NODE_ENV=test`** (both `start*Scheduler()` functions
+  return immediately) — the automated test suite drives the dispatch logic
   directly instead.
 - **No overlapping runs**: `node-cron`'s own `noOverlap: true` option
   guards against a slow run still executing when the next tick fires.
-- **Graceful shutdown**: `SIGTERM`/`SIGINT` call `stopReminderScheduler()`
-  (awaited) before the HTTP server and Prisma connection close — a
+- **Graceful shutdown**: `SIGTERM`/`SIGINT` stop both schedulers (awaited)
+  before the HTTP server and Prisma connection close — a
   deployment that sends `SIGTERM` on redeploy (most container schedulers,
-  systemd, PM2) stops the scheduler cleanly first.
+  systemd, PM2) stops the schedulers cleanly first.
 - Every tick's failures are caught and logged (`reminderScheduler.ts`) —
   a bad run is visible in structured logs but never crashes the process or
   blocks the next tick.
@@ -182,16 +241,30 @@ Full detail, including manual dispatch/verification steps, lives in
 [`docs/FIREBASE_SETUP.md`](./FIREBASE_SETUP.md) — this section is the
 production-deployment summary of it.
 
+There are **two** supported ways to supply the credential; exactly one is
+needed. `FIREBASE_CREDENTIALS` takes priority if both are set.
+
+- **`FIREBASE_CREDENTIALS`** — the entire service-account JSON *content* as
+  the variable's value. **This is the one to use on Render** (or any other
+  stateless host): such platforms have no mechanism to mount a plain
+  environment variable as a file on disk, so the path-based option below
+  simply cannot work there.
+- **`FIREBASE_SERVICE_ACCOUNT_PATH`** — an absolute filesystem path to the
+  downloaded JSON file. Local development and traditional servers only.
+
 1. **Firebase Console** → the `livequeue-99529` project → **Project
    Settings → Service Accounts → Generate new private key**. This downloads
    a JSON file — that download is the only place the credential should ever
-   exist outside the running server's own filesystem.
-2. **Place it on the server outside the deployed application directory if
-   possible**, or at minimum outside anything a build/deploy step might
-   package or serve — never inside a path git tracks. Restrict its file
-   permissions to the user the Node process runs as (e.g. `chmod 600`).
-3. Set `FIREBASE_SERVICE_ACCOUNT_PATH` to that file's absolute path in the
-   server's real environment (not `.env.example`, never a committed file).
+   exist outside the running server's own environment.
+2. **On Render (or similar):** paste the file's full contents as the value
+   of `FIREBASE_CREDENTIALS` in the service's environment settings. Do not
+   commit it anywhere.
+   **On a traditional server:** place the file outside the deployed
+   application directory if possible — at minimum outside anything a
+   build/deploy step might package or serve, never inside a path git tracks
+   — restrict its permissions to the user the Node process runs as (e.g.
+   `chmod 600`), and set `FIREBASE_SERVICE_ACCOUNT_PATH` to its absolute
+   path.
 4. **Verify initialization**: watch the logs after the first reminder-dispatch
    tick or FCM send attempt (initialization is lazy, not at boot) for either
    `"Firebase Admin initialized — FCM dispatch is enabled."` or a warning
@@ -239,7 +312,16 @@ that's already run in any environment will make Prisma report drift.
 Run through this after every production deploy:
 
 - [ ] Process starts and stays up (check the process manager / container status).
+      A boot loop with `Invalid environment configuration` in the logs means a
+      **§3a** variable is missing — most commonly `OTP_SECRET` on an
+      environment carried forward from before V2 Checkpoint 7.
 - [ ] `curl -f http://localhost:$PORT/health` returns `200` with `{"success":true,...}`.
+- [ ] `curl -f "http://localhost:$PORT/api/public/version-policy?platform=android"`
+      returns the expected policy — confirm `minimumVersion` is **not** above
+      the version currently on the store (§11), or every installed app blocks itself.
+- [ ] Register a disposable organization and confirm the verification email
+      actually arrives (§3b: without `RESEND_API_KEY` the account is created
+      but can never be verified, and is auto-deleted an hour later).
 - [ ] `npx prisma migrate status` (run from `backend/`, against the production `DATABASE_URL`) reports **no pending migrations**.
 - [ ] A real database write succeeds — e.g. `POST /api/auth/register` against a disposable test org, then remove it, or simply confirm existing staff can log in.
 - [ ] Logs show the reminder scheduler started (`"Reminder dispatch scheduler started"`).
@@ -296,6 +378,64 @@ no built-in rollback command. Concretely:
   enabled in any environment) — do not change this for production
   debugging; use `NODE_ENV=development` locally against a copy of the data
   instead.
+
+---
+
+## 11. Mobile version policy / force-update
+
+The mobile app asks the backend at every launch whether its installed
+version is still supported (`GET /api/public/version-policy?platform=android`,
+V2 Checkpoint 9 / ADR-031). The policy is entirely environment-driven, so
+it changes with a backend environment update + redeploy — no mobile rebuild
+and no database change.
+
+**The shipped defaults are deliberately inert**: `MOBILE_ANDROID_MIN_VERSION`
+and `MOBILE_ANDROID_LATEST_VERSION` both default to `1.0.0`, matching the
+currently shipped app, with `MOBILE_ANDROID_FORCE_UPDATE=false`. Deploying
+this backend does **not** block any existing install.
+
+**Before ever raising `MOBILE_ANDROID_MIN_VERSION`**, in this order:
+
+1. Deploy the backward-compatible backend first (old and new app builds both work).
+2. Publish the new mobile build and confirm store rollout has actually reached users.
+3. Set `MOBILE_ANDROID_STORE_URL` to the real store listing — an empty value
+   leaves blocked users with an Update button that has nowhere to send them.
+4. Only then raise `MOBILE_ANDROID_MIN_VERSION`. This is the step that starts
+   hard-blocking old installs.
+5. Later, once the old client population is gone, retire any backend
+   compatibility shims that existed only for it.
+
+Client behavior on failure is fail-open: if the policy request fails and the
+app has no cached policy, it continues normally rather than locking users
+out of a working app because the API was briefly unreachable. A previously
+cached *blocking* policy still blocks.
+
+---
+
+## 12. Instance count / horizontal scaling
+
+**Run a single backend instance unless Socket.io is reworked first.**
+
+The Socket.io server holds its state in a module-level singleton with no
+cross-instance adapter (`src/realtime/socketServer.ts`; approved Phase 4
+decision — no Redis, per CLAUDE.md's infra-minimalism). With more than one
+instance behind a load balancer, an event emitted by the instance that
+handled a REST request only reaches the clients connected to *that*
+instance; clients on other instances silently miss it.
+
+This degrades gracefully rather than corrupting anything — PostgreSQL
+remains the single source of truth, and both clients already treat realtime
+as a notification layer only (the mobile app re-syncs authoritative state
+over REST on every reconnect and after every FCM wake; the dashboard
+invalidates and refetches). But live updates become unreliable, so:
+
+- Keep the service at **one instance** (on Render: no autoscaling, instance
+  count 1) for now, **or**
+- add a Socket.io adapter (e.g. Redis) before scaling out — a deliberate
+  architectural change, not a configuration toggle.
+
+Both `node-cron` schedulers are multi-instance safe already (§5); Socket.io
+is the only component that constrains instance count.
 
 ---
 

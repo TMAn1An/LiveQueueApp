@@ -136,6 +136,17 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Deployment:** no Render environment change, no deploy, no Play Store action performed by this checkpoint — see ADR-031 for the exact variable list and the future breaking-release procedure (deploy backend → publish app → confirm rollout → raise the minimum version → later remove old compatibility).
 - **Intentionally unchanged:** iOS policy (no iOS build exists yet to protect), any runtime/admin config UI, background re-checks, any later checkpoint — per this checkpoint's own explicit instruction to stop here.
 
+### V2 Final Audit — release-readiness review (2026-09-03)
+
+**Status: PASS with two fixes. No P0 findings. See ADR-032 for the full review.**
+
+A fresh, code-first audit of the entire V2 surface — prior checkpoint reports were deliberately not treated as evidence. Two genuine defects were found and fixed; everything else verified correct as built.
+
+- **Fixed — secrets were reaching production request logs.** Proven by *running* the logger config rather than reading it: the raw single-use email-verification token (`?token=...`) was logged in full, because pino's `*.token` wildcard matches only one path segment and never covered `req.query.token`. Worse, `req.url` re-logged every query-string secret regardless — which also meant Checkpoint 7A's `deviceIdentifier` fix had never been complete. Both closed; `req.url` now keeps its path and drops the query string, so future sensitive params are covered by default. Regression test asserts against the real exported config, and was confirmed to fail against the pre-fix code first.
+- **Fixed — the deployment runbook omitted a startup-fatal secret.** `docs/DEPLOYMENT.md` still listed only Phase 7 variables: `OTP_SECRET` (which halts boot when missing, and already broke one real deploy) was undocumented, as were the email-verification, cleanup-scheduler, and mobile-version variables. It also told operators to supply the Firebase credential as a filesystem path — which cannot work on Render. The env section is now split into startup-fatal / feature-fatal-but-silent / safe-default tiers, Firebase documents the Render-appropriate `FIREBASE_CREDENTIALS`, and two new sections cover the ordered force-update rollout and the single-instance Socket.io constraint.
+- **Accepted without change, now documented:** Socket.io is single-instance by design (both schedulers, by contrast, are multi-instance safe); the 7 moderate `npm audit` findings are one transitive `uuid` advisory unreachable in this app (only a breaking `firebase-admin` downgrade would "fix" it); `engines: ">=22.0.0"` is an unpinned floor while dev runs Node 25 and Render picked 26; `token.start` and `counter.remove` still write no audit row.
+- **Verification:** backend 534/534 tests (58 files), typecheck/lint/build clean; dashboard 78/78, tsc/lint/build clean; mobile 127/127, analyze clean; `prisma validate` clean and migrations up to date. All thirteen V2 migrations re-read individually — every one additive, none destructive.
+
 ## Status
 
 | Phase | Status |
