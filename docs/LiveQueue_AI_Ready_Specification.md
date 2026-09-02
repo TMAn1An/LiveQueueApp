@@ -235,18 +235,21 @@ App requests public queue configuration
         ↓
 Customer sees queue details
         ↓
-Customer selects service
+Customer selects one or more services (checkbox — V2 Checkpoint 5, ADR-027)
         ↓
 Customer fills dynamic form
         ↓
 Customer confirms
         ↓
-Backend creates token
+Backend creates token, computing the total duration
+from the selected services (never a client-supplied number)
         ↓
 App displays token number + position
         ↓
 Live tracking starts
 ```
+
+As of V2 Checkpoint 5, a customer may select multiple services in one join — the token's required duration is the sum of every selected service's own `durationMinutes`, computed and validated server-side. See ADR-027 for the full design, including the production-safe migration and the backward-compatible request contract (`serviceId` singular is still accepted from an older client; `serviceIds` array is the current shape).
 
 ## 4.4 Staff calls a token
 

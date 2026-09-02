@@ -43,7 +43,7 @@ function CustomerContextPanel({ context }: { context: CustomerContext | null }) 
       </div>
       <div>
         <dt className="text-slate-400">Service</dt>
-        <dd className="text-slate-700">{context.service.name}</dd>
+        <dd className="text-slate-700">{context.services.map((s) => s.name).join(', ') || '—'}</dd>
       </div>
       <div>
         <dt className="text-slate-400">Status</dt>

@@ -21,10 +21,17 @@ const QUEUE_NOT_ACTIVE_MSG = 'This queue is currently not accepting new customer
 
 export interface CreateTokenInput {
   queueId: string;
-  serviceId: string;
+  /// V2 Checkpoint 5 (ADR-027): the validator canonicalizes both the legacy
+  /// `serviceId` and the new `serviceIds` request shapes into this one array
+  /// (already deduplicated, length >= 1) before this ever runs.
+  serviceIds: string[];
   deviceIdentifier: string;
   formData: Record<string, unknown>;
 }
+
+/** The shape every idempotency comparison needs — the existing token's full
+ * selected-service set, not just its legacy primary Token.serviceId. */
+type TokenWithServices = Token & { tokenServices: { serviceId: string }[] };
 
 interface QueueLockRow {
   id: string;
@@ -47,6 +54,17 @@ async function findTokenScoped(organizationId: string, tokenId: string): Promise
     throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
   }
   return token;
+}
+
+/**
+ * V2 Checkpoint 5 (ADR-027): a token's base required duration is the sum of
+ * every selected service's own durationMinutes — the backend-authoritative
+ * replacement for the single-service duration the ETA engine previously
+ * received directly. Never trusts a client-supplied total; always derived
+ * fresh from the DB rows.
+ */
+function sumServiceDurations(tokenServices: { service: { durationMinutes: number } }[]): number {
+  return tokenServices.reduce((sum, ts) => sum + ts.service.durationMinutes, 0);
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -124,15 +142,25 @@ function validateFormData(
   return result.data as Record<string, unknown>;
 }
 
+/**
+ * V2 Checkpoint 5 (ADR-027): the same idempotency key must resolve to the
+ * existing token only when it represents the same *set* of services —
+ * order must never matter ([A,B] === [B,A]), but the actual set must
+ * ([A,B] !== [A,C]). Canonicalized by sorting both sides rather than
+ * trusting array order from either the stored rows or the new request.
+ */
 function assertIdempotentPayloadMatches(
-  existing: Token,
+  existing: TokenWithServices,
   input: CreateTokenInput,
   validatedFormData: Record<string, unknown>,
 ): void {
-  const same =
-    existing.queueId === input.queueId &&
-    existing.serviceId === input.serviceId &&
-    deepEqual(existing.formData, validatedFormData);
+  const existingServiceIds = existing.tokenServices.map((ts) => ts.serviceId).sort();
+  const inputServiceIds = [...input.serviceIds].sort();
+  const sameServices =
+    existingServiceIds.length === inputServiceIds.length &&
+    existingServiceIds.every((id, i) => id === inputServiceIds[i]);
+
+  const same = existing.queueId === input.queueId && sameServices && deepEqual(existing.formData, validatedFormData);
 
   if (!same) {
     throw new AppError(
@@ -161,14 +189,19 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     throw new AppError(409, 'QUEUE_NOT_ACTIVE', QUEUE_NOT_ACTIVE_MSG);
   }
 
-  const service = await prisma.queueService.findFirst({
-    where: { id: input.serviceId, queueId: input.queueId },
+  // V2 Checkpoint 5 (ADR-027): every selected service must belong to this
+  // exact queue and be active — checked as a set, never trusting a
+  // client-supplied duration or count. `services.length !== serviceIds.length`
+  // catches both "doesn't exist at all" and "belongs to a different queue"
+  // in one comparison, matching the existing single-service 404 semantics.
+  const services = await prisma.queueService.findMany({
+    where: { id: { in: input.serviceIds }, queueId: input.queueId },
   });
-  if (!service) {
-    throw new AppError(404, 'SERVICE_NOT_FOUND', 'Service not found.');
+  if (services.length !== input.serviceIds.length) {
+    throw new AppError(404, 'SERVICE_NOT_FOUND', 'One or more selected services could not be found.');
   }
-  if (!service.isActive) {
-    throw new AppError(409, 'SERVICE_NOT_ACTIVE', 'This service is not currently available.');
+  if (services.some((s) => !s.isActive)) {
+    throw new AppError(409, 'SERVICE_NOT_ACTIVE', 'One or more selected services are not currently available.');
   }
 
   const device = await registerDevice(input.deviceIdentifier);
@@ -193,6 +226,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   // authoritative check happens again below, inside the transaction.
   const preCheck = await prisma.token.findUnique({
     where: { deviceId_idempotencyKey: { deviceId: device.id, idempotencyKey } },
+    include: { tokenServices: { select: { serviceId: true } } },
   });
   if (preCheck) {
     assertIdempotentPayloadMatches(preCheck, input, formData);
@@ -226,6 +260,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     // that no token ends up using (no gaps under a duplicate-key race).
     const existing = await tx.token.findUnique({
       where: { deviceId_idempotencyKey: { deviceId: device.id, idempotencyKey } },
+      include: { tokenServices: { select: { serviceId: true } } },
     });
     if (existing) {
       assertIdempotentPayloadMatches(existing, input, formData);
@@ -264,11 +299,17 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
       data: { nextTokenNumber: sequenceNumber + 1 },
     });
 
+    // V2 Checkpoint 5 (ADR-027): the legacy Token.serviceId column is kept
+    // populated — the first service in the customer's selection — so any
+    // code path still reading it directly (including an old, not-yet-
+    // updated mobile app parsing this same token's future responses) keeps
+    // working. tokenServices is the authoritative full set, created
+    // atomically with the token itself in this same transaction/statement.
     return tx.token.create({
       data: {
         organizationId: lockedQueue.organizationId,
         queueId: input.queueId,
-        serviceId: input.serviceId,
+        serviceId: input.serviceIds[0]!,
         deviceId: device.id,
         sequenceNumber,
         serialNumber: `${lockedQueue.tokenPrefix}${String(sequenceNumber).padStart(3, '0')}`,
@@ -276,6 +317,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         formData: formData as Prisma.InputJsonValue,
         formVersion: lockedQueue.formVersion,
         idempotencyKey,
+        tokenServices: { create: input.serviceIds.map((serviceId) => ({ serviceId })) },
       },
     });
   });
@@ -316,13 +358,16 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
         // invariant (callToken/nextToken never let two CALLED/IN_PROGRESS
         // tokens share a counter) — never trusted as a hard guarantee here,
         // just how the data is actually shaped.
-        tokens: { where: { status: { in: ['CALLED', 'IN_PROGRESS'] } }, include: { service: true } },
+        tokens: {
+          where: { status: { in: ['CALLED', 'IN_PROGRESS'] } },
+          include: { tokenServices: { include: { service: true } } },
+        },
       },
     }),
     prisma.token.findMany({
       where: { queueId, status: 'WAITING' },
       orderBy: { sequenceNumber: 'asc' },
-      include: { service: true },
+      include: { tokenServices: { include: { service: true } } },
     }),
   ]);
 
@@ -346,9 +391,14 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
     if (!occupying) {
       return { freeAt: now };
     }
+    // V2 Checkpoint 5 (ADR-027): the base (pre-override) duration is now
+    // the sum of every selected service's own duration, not one service's
+    // — the staff override, when set, still fully replaces this rather
+    // than adding to it (computeEffectiveDurationMinutes's existing
+    // either/or logic, unchanged).
     const durationMinutes = computeEffectiveDurationMinutes(
       occupying.requiredDurationMinutes,
-      occupying.service.durationMinutes,
+      sumServiceDurations(occupying.tokenServices),
     );
     // IN_PROGRESS anchors from when service actually began (startedAt);
     // CALLED-but-not-yet-started anchors from calledAt as the best
@@ -359,7 +409,7 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
 
   const waitingInputs: WaitingTokenInput[] = waitingTokens.map((token) => ({
     id: token.id,
-    durationMinutes: token.service.durationMinutes,
+    durationMinutes: sumServiceDurations(token.tokenServices),
   }));
 
   const etaByTokenId = simulateWaitingTokenEtas(counterOccupancy, waitingInputs);
@@ -424,11 +474,39 @@ type ComputedFields = {
   estimatedReadyAt: Date | null;
 };
 
-function toCustomerView(token: Token & { counter?: Counter | null }, computed: ComputedFields) {
+interface SelectedService {
+  id: string;
+  name: string;
+  durationMinutes: number;
+}
+
+/** Deterministic order (the queue's own service-menu order), not insertion
+ * order into the join table — every response that lists a token's selected
+ * services shows them the same way regardless of how they were submitted. */
+type TokenWithSelectedServices = { tokenServices: { service: { id: string; serviceName: string; durationMinutes: number; createdAt: Date } }[] };
+
+function toSelectedServices(token: TokenWithSelectedServices): SelectedService[] {
+  return [...token.tokenServices]
+    .sort((a, b) => a.service.createdAt.getTime() - b.service.createdAt.getTime())
+    .map((ts) => ({ id: ts.service.id, name: ts.service.serviceName, durationMinutes: ts.service.durationMinutes }));
+}
+
+const TOKEN_SERVICES_INCLUDE = {
+  tokenServices: { include: { service: { select: { id: true, serviceName: true, durationMinutes: true, createdAt: true } } } },
+} satisfies Prisma.TokenInclude;
+
+function toCustomerView(
+  token: Token & { counter?: Counter | null } & TokenWithSelectedServices,
+  computed: ComputedFields,
+) {
   return {
     id: token.id,
     queueId: token.queueId,
+    /// LEGACY — the first selected service, kept for an old mobile client
+    /// still parsing this field directly (V2 Checkpoint 5, ADR-027).
     serviceId: token.serviceId,
+    /// The authoritative, complete selection. New clients should read this.
+    services: toSelectedServices(token),
     serialNumber: token.serialNumber,
     status: token.status,
     formData: token.formData,
@@ -444,8 +522,11 @@ function toCustomerView(token: Token & { counter?: Counter | null }, computed: C
   };
 }
 
-function toStaffView(token: Token & { counter?: Counter | null }, computed: ComputedFields) {
-  return { ...token, ...computed };
+function toStaffView(
+  token: Token & { counter?: Counter | null } & TokenWithSelectedServices,
+  computed: ComputedFields,
+) {
+  return { ...token, services: toSelectedServices(token), ...computed };
 }
 
 /**
@@ -456,7 +537,7 @@ function toStaffView(token: Token & { counter?: Counter | null }, computed: Comp
 export async function getTokenCustomerView(tokenId: string) {
   const token = await prisma.token.findUniqueOrThrow({
     where: { id: tokenId },
-    include: { counter: true },
+    include: { counter: true, ...TOKEN_SERVICES_INCLUDE },
   });
   const computed = await computeComputedFields(token);
   return toCustomerView(token, computed);
@@ -472,7 +553,7 @@ export async function getTokenCustomerView(tokenId: string) {
 export async function getTokenStaffView(tokenId: string) {
   const token = await prisma.token.findUniqueOrThrow({
     where: { id: tokenId },
-    include: { counter: true },
+    include: { counter: true, ...TOKEN_SERVICES_INCLUDE },
   });
   const computed = await computeComputedFields(token);
   return toStaffView(token, computed);
@@ -487,7 +568,7 @@ export async function getTokenStaffView(tokenId: string) {
 export async function getToken(tokenId: string, auth?: AuthContext) {
   const token = await prisma.token.findUnique({
     where: { id: tokenId },
-    include: { counter: true },
+    include: { counter: true, ...TOKEN_SERVICES_INCLUDE },
   });
   if (!token) {
     throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');

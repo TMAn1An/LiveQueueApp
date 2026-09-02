@@ -43,14 +43,14 @@ class TokenRepository {
 
   Future<LiveQueueToken> createToken({
     required String queueId,
-    required String serviceId,
+    required List<String> serviceIds,
     required String deviceIdentifier,
     required Map<String, dynamic> formData,
     required String idempotencyKey,
   }) {
     return _apiService.createToken(
       queueId: queueId,
-      serviceId: serviceId,
+      serviceIds: serviceIds,
       deviceIdentifier: deviceIdentifier,
       formData: formData,
       idempotencyKey: idempotencyKey,

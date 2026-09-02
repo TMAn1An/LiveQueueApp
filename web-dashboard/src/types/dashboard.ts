@@ -18,7 +18,8 @@ export interface LiveQueueTokenRow {
   serialNumber: string;
   status: TokenStatus;
   queue: { id: string; name: string };
-  service: { id: string; name: string };
+  /** V2 Checkpoint 5 (ADR-027): the full multi-service selection. */
+  services: { id: string; name: string }[];
   counter: { id: string; name: string } | null;
   position: number | null;
   estimatedWaitMinutes: number | null;

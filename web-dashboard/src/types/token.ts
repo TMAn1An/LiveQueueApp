@@ -5,7 +5,10 @@ export interface StaffToken {
   id: string;
   organizationId: string;
   queueId: string;
+  /** LEGACY — the first selected service (V2 Checkpoint 5, ADR-027). */
   serviceId: string;
+  /** The authoritative, complete multi-service selection. */
+  services: { id: string; name: string; durationMinutes: number }[];
   counterId: string | null;
   deviceId: string;
   sequenceNumber: number;

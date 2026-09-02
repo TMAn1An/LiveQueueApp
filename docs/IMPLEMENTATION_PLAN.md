@@ -284,23 +284,51 @@ See ADR-025 for full design/implementation detail, including why `/next` needed 
 
 See ADR-026 for full design/implementation detail, including exactly why the old formula was wrong (not just imprecise) and the full realtime-broadcast rationale.
 
-## V2 Checkpoint 5: Queue repeat-visit policy
+## V2 Checkpoint 5: Multi-service selection
 
-**Goal:** A queue-level setting for whether a device/person may take only one token ever (until a documented reset condition) or may rejoin after completing. A SKIPPED token never consumes the single-visit allowance. Enforced backend-side; idempotent retries never miscounted as a second visit. Deliberately sequenced after the queue engine (Checkpoint 3) is stable, not before.
+**Goal:** A customer may select more than one service when joining a queue; the backend computes and validates the total duration from `QueueService.durationMinutes` rows, never a client-supplied number, and feeds it into the unchanged Checkpoint 4 ETA engine. Production-safe: `Token.serviceId` is preserved (not dropped), a new `TokenService` join table is backfilled from every existing token in the same migration, and the create-token endpoint accepts either the legacy singular `serviceId` or the new `serviceIds` array so an already-installed V1 mobile app is never broken.
 
-## V2 Checkpoint 6: Customer cancellation
+### Tasks
 
-**Goal:** A customer can cancel their own token while WAITING; cannot once service has started (CALLED or later). Enforced backend-side regardless of what the mobile UI shows. Consistent with the repeat-visit rule from Checkpoint 5 — a skipped token remains eligible to rejoin per that rule, a cancelled one follows whatever this checkpoint's own state-machine addition specifies.
+- [x] Re-verify Checkpoint 4's +2min auto-extension against the exact rolling example first — confirmed already correct, no change made
+- [x] `TokenService` join table (additive migration) + backfill of every existing token's `serviceId` into it, verified against a simulated pre-migration row before committing
+- [x] `createTokenSchema`: dual-accept `serviceId` (legacy) / `serviceIds` (new), canonicalized internally, min 1, no duplicates
+- [x] `createToken`: validate every selected service belongs to the queue and is active as a set; create the token + all `TokenService` rows atomically
+- [x] Idempotency: same-key requests compared by canonical (sorted) service set, order-independent but set-exact
+- [x] ETA engine: duration source changed to `sum(selected services' durationMinutes)`, staff-override priority unchanged
+- [x] Every token view gains an additive `services: [...]` array alongside the still-populated legacy `serviceId`
+- [x] Dashboard: live queue table + Blocked-Devices context show the full service list ("+N more")
+- [x] Mobile: checkbox multi-select UI with a running (UX-only) total; always sends the new `serviceIds` shape
+- [x] Commit
 
-## V2 Checkpoint 7: Anti-bias OTP verification
+### Acceptance
+
+- A token can be created with two (or more) valid services; the backend-computed total equals their sum, provable through a real ETA read
+- A service from another queue, a duplicate service id, or an inactive service is rejected
+- `[A,B]` and `[B,A]` under the same idempotency key resolve to the same token; `[A,B]` vs `[A,C]` under the same key is rejected
+- The legacy singular `serviceId` request shape still works end-to-end (old mobile app compatibility)
+- Every existing token remains fully readable after migration — `serviceId` still populated, `services` correctly backfilled
+- Full backend + mobile + dashboard test suites pass; one additive migration, backfill-verified, applied locally only
+
+See ADR-027 for full design/implementation detail, including the exact backward-compatibility mechanism and the service-deletion safety analysis.
+
+## V2 Checkpoint 6: Queue repeat-visit policy
+
+**Goal:** A queue-level setting for whether a device/person may take only one token ever (until a documented reset condition) or may rejoin after completing. A SKIPPED token never consumes the single-visit allowance. Enforced backend-side; idempotent retries never miscounted as a second visit. `serviceIds` has no upper bound enforced anywhere yet (Checkpoint 5), so a `multiServiceAllowed` restriction here needs no further Token schema change.
+
+## V2 Checkpoint 7: Customer cancellation
+
+**Goal:** A customer can cancel their own token while WAITING; cannot once service has started (CALLED or later). Enforced backend-side regardless of what the mobile UI shows. Consistent with the repeat-visit rule from Checkpoint 6 — a skipped token remains eligible to rejoin per that rule, a cancelled one follows whatever this checkpoint's own state-machine addition specifies.
+
+## V2 Checkpoint 8: Anti-bias OTP verification
 
 **Goal:** `CALLED → OTP → IN_PROGRESS`. A server-generated, short-lived, single-use OTP — visible only inside the customer's own app session, never a public API response, never client-generatable — must be correctly entered by staff before a CALLED token can transition to IN_PROGRESS, protecting against staff silently starting service without customer consent/presence. Reuses existing FCM delivery, rate limiting, and auth/tenant infrastructure. Its own checkpoint, separate from cancellation, since this is a distinct security feature.
 
-## V2 Checkpoint 8: Mobile force-update system
+## V2 Checkpoint 9: Mobile force-update system
 
 **Goal:** A backend-controlled minimum supported app version (e.g. `minimumSupportedAndroidVersion`/`minimumSupportedIosVersion`, likely a simple app-config endpoint or existing public-config response addition) that the mobile app checks at startup — a version below the minimum shows a Force Update screen instead of continuing normally. Lets an old app be forced to update without a new backend release for every version bump. A proper platform feature recorded now rather than left as something to remember manually later.
 
-## V2 Checkpoint 9: V2 production verification
+## V2 Checkpoint 10: V2 production verification
 
 **Goal:** A focused final regression pass across all V2 business rules, tenant isolation, concurrency, migrations, and cross-app compatibility — no unnecessary new tests, final build/typecheck/lint verification across all three apps.
 

@@ -21,6 +21,23 @@ const STAT_CARDS: { key: keyof DashboardStats; label: string; minutes?: boolean 
   { key: 'skippedToday', label: 'Skipped Today' },
 ];
 
+/** V2 Checkpoint 5 (ADR-027): "Passport Renewal +2 more" — the full list
+ * stays a plain tooltip rather than its own modal, since (unlike the
+ * dynamic form fields below) there's rarely more than a handful of
+ * services and nothing to click through to. */
+function ServicesSummaryCell({ services }: { services: LiveQueueTokenRow['services'] }) {
+  if (services.length === 0) {
+    return <span className="text-slate-400">—</span>;
+  }
+  const [first, ...rest] = services;
+  return (
+    <span title={services.map((s) => s.name).join(', ')}>
+      {first!.name}
+      {rest.length > 0 ? ` +${rest.length} more` : ''}
+    </span>
+  );
+}
+
 /** A short one-line summary for the table cell — the full list is only ever
  * shown in the details modal, so the table never has to grow to fit
  * however many dynamic fields a queue happens to collect (Issue #4). */
@@ -125,7 +142,9 @@ export function DashboardPage() {
                   <tr key={row.id} className="border-b border-slate-100">
                     <td className="py-2 pr-4 text-lg font-bold text-slate-900">{row.serialNumber}</td>
                     <td className="py-2 pr-4">{row.queue.name}</td>
-                    <td className="py-2 pr-4">{row.service.name}</td>
+                    <td className="py-2 pr-4">
+                      <ServicesSummaryCell services={row.services} />
+                    </td>
                     <td className="py-2 pr-4">
                       <CustomerSummaryCell row={row} onOpenDetails={() => setDetailsRow(row)} />
                     </td>

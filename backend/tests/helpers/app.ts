@@ -230,11 +230,17 @@ export interface TokenResponse {
   [key: string]: unknown;
 }
 
-/** Raw supertest response — callers that need to assert on status/error codes use this. */
+/**
+ * Raw supertest response — callers that need to assert on status/error codes
+ * use this. V2 Checkpoint 5 (ADR-027): accepts either the legacy singular
+ * `serviceId` (existing callers, unchanged) or the new `serviceIds` array —
+ * mirrors the backend's own dual-accept contract, never both at once.
+ */
 export function createTokenRequest(
   overrides: {
     queueId: string;
-    serviceId: string;
+    serviceId?: string;
+    serviceIds?: string[];
     deviceIdentifier?: string;
     formData?: Record<string, unknown>;
     idempotencyKey?: string;
@@ -242,13 +248,16 @@ export function createTokenRequest(
   headerOverrides: Record<string, string> = {},
 ) {
   const idempotencyKey = overrides.idempotencyKey ?? `idem-${Math.random().toString(36).slice(2, 10)}`;
+  const serviceFields = overrides.serviceIds
+    ? { serviceIds: overrides.serviceIds }
+    : { serviceId: overrides.serviceId };
   return api()
     .post('/api/tokens')
     .set('Idempotency-Key', idempotencyKey)
     .set(headerOverrides)
     .send({
       queueId: overrides.queueId,
-      serviceId: overrides.serviceId,
+      ...serviceFields,
       deviceIdentifier: overrides.deviceIdentifier ?? `device-${Math.random().toString(36).slice(2, 10)}`,
       formData: overrides.formData ?? {},
     });
@@ -256,7 +265,8 @@ export function createTokenRequest(
 
 export async function createToken(overrides: {
   queueId: string;
-  serviceId: string;
+  serviceId?: string;
+  serviceIds?: string[];
   deviceIdentifier?: string;
   formData?: Record<string, unknown>;
   idempotencyKey?: string;

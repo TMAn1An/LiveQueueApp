@@ -9,9 +9,13 @@ class TokenApiService {
 
   final ApiClient _client;
 
+  /// V2 Checkpoint 5 (ADR-027): always sends the new `serviceIds` shape —
+  /// this IS the updated client. The backend also still accepts the legacy
+  /// singular `serviceId` for any not-yet-updated install, but a build from
+  /// this source always uses the array form.
   Future<LiveQueueToken> createToken({
     required String queueId,
-    required String serviceId,
+    required List<String> serviceIds,
     required String deviceIdentifier,
     required Map<String, dynamic> formData,
     required String idempotencyKey,
@@ -21,7 +25,7 @@ class TokenApiService {
       headers: {'Idempotency-Key': idempotencyKey},
       body: {
         'queueId': queueId,
-        'serviceId': serviceId,
+        'serviceIds': serviceIds,
         'deviceIdentifier': deviceIdentifier,
         'formData': formData,
       },

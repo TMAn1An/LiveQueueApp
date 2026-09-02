@@ -195,7 +195,13 @@ model QueueService {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// Legacy single-service relation (Token.serviceId) — see V2 Checkpoint 5
+  /// / ADR-027. Kept alongside `tokenServices` during the transition; do not
+  /// remove without first confirming every Token.serviceId read site has
+  /// moved to the full `tokenServices` set.
   tokens Token[]
+  /// The authoritative multi-service selection (V2 Checkpoint 5, ADR-027).
+  tokenServices TokenService[]
 
   @@index([queueId])
   @@map("queue_services")
@@ -301,6 +307,12 @@ model Token {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   queueId        String       @map("queue_id")
   queue          Queue        @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  /// LEGACY single-service FK (pre-V2-Checkpoint-5). Still written on every
+  /// create — set to the first service in the customer's selection — so any
+  /// code path (including an old, not-yet-updated mobile app) that still
+  /// reads Token.serviceId directly keeps working. The authoritative,
+  /// complete selection is `tokenServices` (V2 Checkpoint 5, ADR-027); do
+  /// not add new reads of this field going forward.
   serviceId      String       @map("service_id")
   service        QueueService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
   counterId      String?      @map("counter_id")
@@ -341,6 +353,11 @@ model Token {
   reminderSentAt DateTime? @map("reminder_sent_at")
 
   notificationPreferences NotificationPreference[]
+  /// V2 Checkpoint 5 (ADR-027): the authoritative multi-service selection —
+  /// one row per selected service, backfilled from every pre-existing
+  /// Token.serviceId at migration time. Always non-empty for every token,
+  /// old and new alike.
+  tokenServices           TokenService[]
 
   @@unique([queueId, sequenceNumber])
   @@unique([deviceId, idempotencyKey])
@@ -354,6 +371,26 @@ model Token {
   // historical COMPLETED/SKIPPED token in the table each run.
   @@index([status, reminderSentAt])
   @@map("tokens")
+}
+
+/// V2 Checkpoint 5 (ADR-027): the customer's multi-service selection for one
+/// token. A pure join table — composite primary key is the natural unique
+/// constraint, no surrogate id needed. `onDelete: Restrict` on `service`
+/// mirrors Token.serviceId's existing protection exactly (a service
+/// referenced by any historical token, via either relation, cannot be
+/// deleted) — deliberately not weakened by this migration.
+model TokenService {
+  tokenId String @map("token_id")
+  token   Token  @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+
+  serviceId String       @map("service_id")
+  service   QueueService @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([tokenId, serviceId])
+  @@index([serviceId])
+  @@map("token_services")
 }
 
 /// Phase 7 Step 7: one current FCM registration token per device. A device's

@@ -32,7 +32,7 @@ void main() {
         expect(request.headers['Idempotency-Key'], 'idem-key-1');
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         expect(body['queueId'], 'queue-1');
-        expect(body['serviceId'], 'service-1');
+        expect(body['serviceIds'], ['service-1', 'service-2']);
         expect(body['deviceIdentifier'], 'device-1');
         expect(body['formData'], {'phone': '555-0100'});
         return http.Response(jsonEncode({'success': true, 'data': _tokenJson()}), 201);
@@ -41,7 +41,7 @@ void main() {
       final service = TokenApiService(ApiClient(httpClient: mockClient, baseUrl: 'http://localhost:4000'));
       final token = await service.createToken(
         queueId: 'queue-1',
-        serviceId: 'service-1',
+        serviceIds: ['service-1', 'service-2'],
         deviceIdentifier: 'device-1',
         formData: {'phone': '555-0100'},
         idempotencyKey: 'idem-key-1',

@@ -77,7 +77,13 @@ export async function getLiveQueueTable(organizationId: string, page: number, pa
   const [tokens, total] = await Promise.all([
     prisma.token.findMany({
       where,
-      include: { queue: true, service: true, counter: true },
+      include: {
+        queue: true,
+        counter: true,
+        // V2 Checkpoint 5 (ADR-027): the full selection, not just the
+        // legacy singular `service` relation.
+        tokenServices: { include: { service: true }, orderBy: { service: { createdAt: 'asc' } } },
+      },
       orderBy: { createdAt: 'asc' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -105,7 +111,7 @@ export async function getLiveQueueTable(organizationId: string, page: number, pa
       serialNumber: token.serialNumber,
       status: token.status,
       queue: { id: token.queue.id, name: token.queue.name },
-      service: { id: token.service.id, name: token.service.serviceName },
+      services: token.tokenServices.map((ts) => ({ id: ts.service.id, name: ts.service.serviceName })),
       counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
       position: position?.position ?? null,
       estimatedWaitMinutes: position?.estimatedWaitMinutes ?? null,

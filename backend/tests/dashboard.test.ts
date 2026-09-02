@@ -72,7 +72,7 @@ describe('GET /api/dashboard/stats', () => {
 });
 
 describe('GET /api/dashboard/tokens (live queue table)', () => {
-  it('lists waiting/called/in-progress tokens with queue, service, position', async () => {
+  it('lists waiting/called/in-progress tokens with queue, services, position', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
@@ -84,7 +84,9 @@ describe('GET /api/dashboard/tokens (live queue table)', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
     expect(res.body.data[0].queue.id).toBe(queue.id);
-    expect(res.body.data[0].service.id).toBe(service.id);
+    // V2 Checkpoint 5 (ADR-027): the live queue table now lists every
+    // selected service, not a single one.
+    expect(res.body.data[0].services).toEqual([{ id: service.id, name: service.serviceName }]);
     expect(res.body.data[0].position).toBe(1);
     expect(res.body.data[1].position).toBe(2);
   });

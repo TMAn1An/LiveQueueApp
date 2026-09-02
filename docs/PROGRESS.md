@@ -11,17 +11,18 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 - V2 is delivered through small, independently reviewable and releasable checkpoints, each committed (and pushed, per the standing checkpoint rule below) once implemented and verified.
 - Existing V1 behavior remains unchanged unless a specific V2 requirement explicitly changes it.
 
-**V2 checkpoint roadmap** (reordered 2026-08-26, see ADR-023 — email verification moved ahead of queue-behavior work since it closes a pre-existing V1 trust-boundary gap, and ETA/multi-service/duration-override were consolidated into one checkpoint as a single coherent model):
+**V2 checkpoint roadmap** (reordered twice — 2026-08-26 per ADR-023, then again before Checkpoint 4 to split multi-service into its own checkpoint after ETA, per direct instruction — this list reflects the final, actual order):
 
 1. Password change + `ACCOUNTANT` → `STAFF` terminology migration — **done**
 2. Registration / email verification (required, 15-minute link, 1-hour pending-registration window, unverified accounts blocked from queue features) — **done**
 3. Strict FCFS + multi-counter queue engine (active-counter capacity, backend + dashboard enforcement) — **done**
 4. ETA + live countdown + variable service duration (actual work ahead, staff-adjustable duration, +2min auto-extension, mobile countdown — multi-service total duration deferred to Checkpoint 5, see ADR-026) — **done**
-5. Queue repeat-visit policy
-6. Customer cancellation
-7. Anti-bias OTP verification for CALLED → IN_PROGRESS
-8. Mobile force-update system (backend-controlled minimum supported app version)
-9. V2 production verification (final regression pass)
+5. Multi-service selection (backward-compatible with the already-installed V1 mobile app, see ADR-027) — **done**
+6. Queue repeat-visit policy
+7. Customer cancellation
+8. Anti-bias OTP verification for CALLED → IN_PROGRESS
+9. Mobile force-update system (backend-controlled minimum supported app version)
+10. V2 production verification (final regression pass)
 
 ### V2 Checkpoint 1 — Password change + role rename (2026-08-26)
 
@@ -64,6 +65,19 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 - **Mobile live countdown** (Rule F): `estimatedReadyAt`, a server-authoritative timestamp, now flows through every token view and the `position_changed` socket event. `LiveTrackingScreen` ticks a local 1-second `Timer` against it and re-anchors automatically whenever a fresh value arrives — no polling, never computing its own estimate.
 - **Verification:** backend `typecheck`/`lint` clean, `npm test` — 53 files / 486 tests passing (19 new: 12 pure unit tests for the simulation algorithm in isolation, 7 integration tests for the new endpoint; 3 pre-existing test files updated where they encoded the old formula's specific numbers or the old narrower broadcast scope, each documented inline). Mobile `flutter analyze` clean, `flutter test` — 105/105 passing. Dashboard `tsc -b`/`oxlint`/`npm run build` clean, 75 tests passing (3 new). One purely-additive migration (`Token.requiredDurationMinutes`), applied to the local dev database only. See ADR-026 for full design/implementation detail.
 - **Intentionally unchanged:** multi-service selection (the simulation's duration input is deliberately generic so a future checkpoint can pass a summed total without touching the algorithm), repeat-visit policy, cancellation, OTP, force-update.
+
+### V2 Checkpoint 5 — Multi-service selection (2026-09-02)
+
+**Status: implemented, tested, committed.**
+
+- **Checkpoint 4's +2min auto-extension re-verified first, unchanged.** Traced by hand against the exact rolling example (10→12→14→16; an 18-minute override then rolling 18→20→22) — already correct, confirmed by the existing unit tests. No code change, per the explicit "if it already behaves this way, do not change it" instruction.
+- **Customers can now select more than one service.** The backend sums `QueueService.durationMinutes` from a new `TokenService` join table — never a client-supplied total — and feeds that sum into the unchanged Checkpoint 4 ETA engine exactly where a single service's duration used to go.
+- **Production-safe migration, additive only.** `Token.serviceId` is kept (not dropped, not made nullable) and still written on every insert — the first selected service — so any code path still reading it directly, including an old, not-yet-updated mobile app, keeps working. The new `token_services` table is backfilled from every existing token's `serviceId` in the same migration. Verified against a simulated pre-migration row before committing, not just inspected.
+- **Backward compatible with the already-installed V1 mobile app.** The create-token endpoint accepts either the legacy singular `serviceId` or the new `serviceIds` array (never both), canonicalizing internally; every token response includes both the legacy `serviceId` and a new additive `services: [...]` array. No Force Update dependency needed for this checkpoint to ship.
+- **Idempotency strengthened, not weakened:** the same key now requires the *same set* of services, order-independent — `[A,B]` matches `[B,A]` but not `[A,C]`.
+- **Mobile:** `ServiceSelectionScreen` is now checkbox-based with a running "Estimated service time" total (UX only; backend-authoritative). **Dashboard:** live queue table and Blocked-Devices context show every selected service ("Passport Renewal +2 more"), a safe non-backward-compat-constrained shape change since the dashboard has no old-install concern.
+- **Verification:** backend `typecheck`/`lint` clean, `npm test` — 54 files / 496 tests passing (10 new, 1 pre-existing test updated for the intentional dashboard shape change). Mobile `flutter analyze` clean, `flutter test` — 108/108 passing (3 new, 2 existing files mechanically updated). Dashboard `tsc -b`/`oxlint`/`npm run build` clean, 75 tests passing (unchanged). One additive migration, backfill-verified against a simulated legacy row on the local dev database only. See ADR-027 for full design/implementation detail, including the exact backward-compatibility mechanism and why service deletion remains equally safe under the new join-table model.
+- **Intentionally unchanged:** queue repeat-visit policy (designed for — no upper bound on `serviceIds` yet, so a future `multiServiceAllowed` restriction needs no further schema change), customer cancellation, OTP, force-update.
 
 ## Status
 

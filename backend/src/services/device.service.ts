@@ -15,7 +15,8 @@ export interface CustomerContext {
   serialNumber: string;
   status: TokenStatus;
   queue: { id: string; name: string };
-  service: { id: string; name: string };
+  /** V2 Checkpoint 5 (ADR-027): the full multi-service selection. */
+  services: { id: string; name: string }[];
   formFields: DisplayFormField[];
   createdAt: Date;
   calledAt: Date | null;
@@ -57,14 +58,13 @@ type CustomerContextTokenRow = {
   status: TokenStatus;
   formData: Prisma.JsonValue;
   queueId: string;
-  serviceId: string;
   formVersion: number;
   deviceId: string;
   createdAt: Date;
   calledAt: Date | null;
   startedAt: Date | null;
   queue: { id: string; name: string };
-  service: { id: string; serviceName: string };
+  tokenServices: { service: { id: string; serviceName: string } }[];
 };
 
 const CUSTOMER_CONTEXT_TOKEN_SELECT = {
@@ -73,14 +73,14 @@ const CUSTOMER_CONTEXT_TOKEN_SELECT = {
   status: true,
   formData: true,
   queueId: true,
-  serviceId: true,
   formVersion: true,
   deviceId: true,
   createdAt: true,
   calledAt: true,
   startedAt: true,
   queue: { select: { id: true, name: true } },
-  service: { select: { id: true, serviceName: true } },
+  // V2 Checkpoint 5 (ADR-027): the full multi-service selection.
+  tokenServices: { select: { service: { select: { id: true, serviceName: true } } } },
 } satisfies Prisma.TokenSelect;
 
 /**
@@ -153,7 +153,7 @@ async function fetchCustomerContexts(
       serialNumber: token.serialNumber,
       status: token.status,
       queue: token.queue,
-      service: { id: token.service.id, name: token.service.serviceName },
+      services: token.tokenServices.map((ts) => ({ id: ts.service.id, name: ts.service.serviceName })),
       formFields: buildDisplayFormFields(token.queueId, token.formVersion, token.formData, formFieldDefs),
       createdAt: token.createdAt,
       calledAt: token.calledAt,

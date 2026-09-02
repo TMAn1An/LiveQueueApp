@@ -20,7 +20,8 @@ export interface CustomerContext {
   serialNumber: string;
   status: TokenStatus;
   queue: { id: string; name: string };
-  service: { id: string; name: string };
+  /** V2 Checkpoint 5 (ADR-027): the full multi-service selection. */
+  services: { id: string; name: string }[];
   formFields: DisplayFormField[];
   createdAt: string;
   calledAt: string | null;

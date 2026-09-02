@@ -13,6 +13,7 @@ class HistoryEntry {
     required this.queueName,
     required this.serviceId,
     required this.serviceName,
+    this.additionalServiceNames = const [],
     required this.serialNumber,
     required this.createdAt,
     required this.finalStatus,
@@ -21,8 +22,15 @@ class HistoryEntry {
   final String tokenId;
   final String queueId;
   final String queueName;
+  /// The first selected service (V2 Checkpoint 5) — kept as its own field,
+  /// not folded into a list, so every already-stored on-device history
+  /// entry from before this checkpoint keeps round-tripping unchanged.
   final String serviceId;
   final String serviceName;
+  /// Names of any services beyond the first, if the customer selected more
+  /// than one (V2 Checkpoint 5). Empty for a single-service join, and for
+  /// every entry recorded before this checkpoint.
+  final List<String> additionalServiceNames;
   final String serialNumber;
   final DateTime createdAt;
   final TokenStatus finalStatus;
@@ -34,6 +42,7 @@ class HistoryEntry {
       queueName: queueName,
       serviceId: serviceId,
       serviceName: serviceName,
+      additionalServiceNames: additionalServiceNames,
       serialNumber: serialNumber,
       createdAt: createdAt,
       finalStatus: finalStatus ?? this.finalStatus,
@@ -47,6 +56,7 @@ class HistoryEntry {
       'queueName': queueName,
       'serviceId': serviceId,
       'serviceName': serviceName,
+      'additionalServiceNames': additionalServiceNames,
       'serialNumber': serialNumber,
       'createdAt': createdAt.toIso8601String(),
       'finalStatus': finalStatus.name,
@@ -60,6 +70,10 @@ class HistoryEntry {
       queueName: json['queueName'] as String,
       serviceId: json['serviceId'] as String,
       serviceName: json['serviceName'] as String,
+      // Absent on every entry stored before V2 Checkpoint 5 — defaults to
+      // empty rather than failing to parse.
+      additionalServiceNames:
+          (json['additionalServiceNames'] as List<dynamic>?)?.map((e) => e as String).toList() ?? const [],
       serialNumber: json['serialNumber'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
       finalStatus: TokenStatus.values.firstWhere(

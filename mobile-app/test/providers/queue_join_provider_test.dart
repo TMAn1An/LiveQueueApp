@@ -25,6 +25,7 @@ Map<String, dynamic> _queueJson({String status = 'ACTIVE'}) => {
       'clientTerminology': null,
       'services': [
         {'id': 'service-1', 'serviceName': 'General Inquiry', 'description': null, 'durationMinutes': 5},
+        {'id': 'service-2', 'serviceName': 'Document Check', 'description': null, 'durationMinutes': 7},
       ],
       'formFields': [
         {
@@ -124,7 +125,7 @@ void main() {
       });
       final provider = _buildProvider(mockClient);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
 
       final success = await provider.submitJoin();
 
@@ -145,7 +146,7 @@ void main() {
       });
       final provider = _buildProvider(mockClient);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
 
       final success = await provider.submitJoin();
@@ -159,6 +160,39 @@ void main() {
       expect(history, hasLength(1));
       expect(history.single.serialNumber, 'A001');
       expect(history.single.queueName, 'Customer Service');
+    });
+
+    test('V2 Checkpoint 5: selecting multiple services sends all of them and sums the displayed duration', () async {
+      Map<String, dynamic>? capturedBody;
+      final mockClient = MockClient((request) async {
+        if (request.url.path.contains('/config')) {
+          return http.Response(jsonEncode({'success': true, 'data': _queueJson()}), 200);
+        }
+        if (request.url.path == '/api/devices/register') {
+          return http.Response(jsonEncode({'success': true, 'data': {'id': 'device-1'}}), 201);
+        }
+        capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'success': true, 'data': _tokenJson()}), 201);
+      });
+      final provider = _buildProvider(mockClient);
+      await provider.loadQueueById('queue-1');
+
+      provider.toggleService('service-1');
+      provider.toggleService('service-2');
+      expect(provider.selectedServiceIds, {'service-1', 'service-2'});
+      expect(provider.selectedTotalDurationMinutes, 12); // 5 + 7
+
+      // Toggling one back off removes only that one.
+      provider.toggleService('service-1');
+      expect(provider.selectedServiceIds, {'service-2'});
+      provider.toggleService('service-1'); // back on for the actual submit below
+      provider.updateFormField('fullName', 'Jane Doe');
+
+      final success = await provider.submitJoin();
+
+      expect(success, isTrue);
+      expect(capturedBody, isNotNull);
+      expect(Set<String>.from(capturedBody!['serviceIds'] as List), {'service-1', 'service-2'});
     });
 
     test('maps QUEUE_NOT_ACTIVE to a user-friendly message', () async {
@@ -179,7 +213,7 @@ void main() {
       });
       final provider = _buildProvider(mockClient);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
 
       final success = await provider.submitJoin();
@@ -228,7 +262,7 @@ void main() {
       final built = buildFailThenSucceedClient(failCount: 0);
       final provider = _buildProvider(built.client);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
 
       final success = await provider.submitJoin();
@@ -243,7 +277,7 @@ void main() {
       final built = buildFailThenSucceedClient(failCount: 1);
       final provider = _buildProvider(built.client);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
 
       final firstAttempt = await provider.submitJoin();
@@ -266,7 +300,7 @@ void main() {
       final built = buildFailThenSucceedClient(failCount: 0);
       final provider = _buildProvider(built.client);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
 
       final success = await provider.submitJoin();
@@ -277,7 +311,7 @@ void main() {
       // queue later) must not reuse the now-completed attempt's key.
       provider.reset();
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
       final secondSuccess = await provider.submitJoin();
 
@@ -292,7 +326,7 @@ void main() {
       final built = buildFailThenSucceedClient(failCount: 2);
       final provider = _buildProvider(built.client);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
 
       final failedAttempt = await provider.submitJoin();
@@ -302,7 +336,7 @@ void main() {
       // must start a genuinely new attempt with a new key next time.
       provider.reset();
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
       final freshAttempt = await provider.submitJoin();
 
@@ -319,13 +353,13 @@ void main() {
       });
       final provider = _buildProvider(mockClient);
       await provider.loadQueueById('queue-1');
-      provider.selectService(provider.queueConfig!.services.first);
+      provider.toggleService(provider.queueConfig!.services.first.id);
       provider.updateFormField('fullName', 'Jane Doe');
 
       provider.reset();
 
       expect(provider.queueConfig, isNull);
-      expect(provider.selectedService, isNull);
+      expect(provider.selectedServiceIds, isEmpty);
       expect(provider.formData, isEmpty);
       expect(provider.createdToken, isNull);
       expect(provider.errorMessage, isNull);

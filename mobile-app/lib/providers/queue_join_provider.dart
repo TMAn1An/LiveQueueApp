@@ -38,10 +38,25 @@ class QueueJoinProvider extends ChangeNotifier {
   bool isSubmitting = false;
   String? errorMessage;
   QueueConfig? queueConfig;
-  ServiceOption? selectedService;
+  /// V2 Checkpoint 5 (ADR-027): checkbox-style multi-selection — ids only;
+  /// the corresponding [ServiceOption]s are looked up from [queueConfig] on
+  /// demand ([selectedServices]) rather than duplicated here, so this never
+  /// drifts from the queue's actual service list.
+  Set<String> selectedServiceIds = {};
   Map<String, dynamic> formData = {};
   Map<String, String> formErrors = {};
   LiveQueueToken? createdToken;
+
+  List<ServiceOption> get selectedServices {
+    final config = queueConfig;
+    if (config == null) return const [];
+    return config.services.where((s) => selectedServiceIds.contains(s.id)).toList();
+  }
+
+  /// UX only — the backend recalculates and is authoritative for the total
+  /// used in the actual ETA engine (V2 Checkpoint 5 requirement).
+  int get selectedTotalDurationMinutes =>
+      selectedServices.fold(0, (sum, s) => sum + s.durationMinutes);
 
   /// One logical join attempt must use exactly one idempotency key (spec
   /// section 26). Generated lazily on the first submit and reused on every
@@ -83,8 +98,17 @@ class QueueJoinProvider extends ChangeNotifier {
     }
   }
 
-  void selectService(ServiceOption service) {
-    selectedService = service;
+  /// Checkbox toggle — several services may be selected at once (V2
+  /// Checkpoint 5). Clearing formData/formErrors on every change mirrors
+  /// the previous single-select behavior exactly: the dynamic form is
+  /// queue-level, not service-level, but a changed selection means the
+  /// customer hasn't seen/confirmed the form for it yet.
+  void toggleService(String serviceId) {
+    final updated = Set<String>.from(selectedServiceIds);
+    if (!updated.remove(serviceId)) {
+      updated.add(serviceId);
+    }
+    selectedServiceIds = updated;
     formData = {};
     formErrors = {};
     notifyListeners();
@@ -103,9 +127,9 @@ class QueueJoinProvider extends ChangeNotifier {
   /// failures) and re-render rather than navigate forward.
   Future<bool> submitJoin() async {
     final config = queueConfig;
-    final service = selectedService;
-    if (config == null || service == null) {
-      errorMessage = 'Please select a service before continuing.';
+    final services = selectedServices;
+    if (config == null || services.isEmpty) {
+      errorMessage = 'Please select at least one service before continuing.';
       notifyListeners();
       return false;
     }
@@ -126,7 +150,7 @@ class QueueJoinProvider extends ChangeNotifier {
       _pendingIdempotencyKey ??= generateUuidV4();
       final token = await _tokenRepository.createToken(
         queueId: config.id,
-        serviceId: service.id,
+        serviceIds: services.map((s) => s.id).toList(),
         deviceIdentifier: deviceIdentifier,
         formData: formData,
         idempotencyKey: _pendingIdempotencyKey!,
@@ -137,8 +161,9 @@ class QueueJoinProvider extends ChangeNotifier {
           tokenId: token.id,
           queueId: config.id,
           queueName: config.name,
-          serviceId: service.id,
-          serviceName: service.serviceName,
+          serviceId: services.first.id,
+          serviceName: services.first.serviceName,
+          additionalServiceNames: services.skip(1).map((s) => s.serviceName).toList(),
           serialNumber: token.serialNumber,
           createdAt: token.createdAt,
           finalStatus: token.status,
@@ -184,7 +209,7 @@ class QueueJoinProvider extends ChangeNotifier {
     isSubmitting = false;
     errorMessage = null;
     queueConfig = null;
-    selectedService = null;
+    selectedServiceIds = {};
     formData = {};
     formErrors = {};
     createdToken = null;
