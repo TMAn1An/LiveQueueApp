@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/live_queue_token.dart';
+import '../theme/app_colors.dart';
 
 class StatusBadge extends StatelessWidget {
   const StatusBadge({super.key, required this.status});
@@ -12,7 +13,7 @@ class StatusBadge extends StatelessWidget {
     final (label, color) = switch (status) {
       TokenStatus.waiting => ('Waiting', Colors.orange),
       TokenStatus.called => ('Your Turn', Colors.green),
-      TokenStatus.inProgress => ('In Progress', Colors.blue),
+      TokenStatus.inProgress => ('In Progress', AppColors.brandBlue),
       TokenStatus.completed => ('Completed', Colors.grey),
       TokenStatus.skipped => ('Skipped', Colors.red),
       TokenStatus.cancelled => ('Cancelled', Colors.deepOrange),

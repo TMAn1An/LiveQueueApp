@@ -15,6 +15,19 @@ vi.mock('../hooks/useOrganizationSocket', () => ({
   useOrganizationSocket: () => undefined,
 }));
 
+describe('AppLayout branding', () => {
+  it('shows the LiveQueue logo in the sidebar above the organization name', () => {
+    render(
+      <MemoryRouter>
+        <AppLayout />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByAltText('LiveQueue')).toHaveAttribute('src', '/logo-horizontal.png');
+    expect(screen.getByText('Test Org')).toBeInTheDocument();
+  });
+});
+
 describe('AppLayout navigation', () => {
   it('labels the device section "Device Blocking" while keeping the /devices route', () => {
     render(

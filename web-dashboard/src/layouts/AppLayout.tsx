@@ -2,10 +2,11 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useOrganizationSocket } from '../hooks/useOrganizationSocket';
 import { EmailVerificationBanner } from '../components/EmailVerificationBanner';
+import { BrandLogo } from '../components/BrandLogo';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `block rounded-md px-3 py-2 text-sm font-medium ${
-    isActive ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-100'
+    isActive ? 'bg-brand-600 text-white' : 'text-slate-700 hover:bg-slate-100'
   }`;
 
 export function AppLayout() {
@@ -16,7 +17,7 @@ export function AppLayout() {
     <div className="flex min-h-screen bg-slate-50">
       <aside className="w-56 shrink-0 border-r border-slate-200 bg-white p-4">
         <div className="mb-6">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">LiveQueue</p>
+          <BrandLogo className="mb-2 h-auto w-40" />
           <p className="truncate text-sm font-semibold text-slate-900">{organization?.name}</p>
         </div>
         <nav className="space-y-1">

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+
 /// Spec section 26: "show connection status... do not show stale
 /// information as current."
 class ConnectionIndicator extends StatelessWidget {
@@ -17,7 +19,7 @@ class ConnectionIndicator extends StatelessWidget {
       color = Colors.orange;
     } else if (isResyncing) {
       label = 'Updating…';
-      color = Colors.blue;
+      color = AppColors.brandBlue;
     } else {
       label = 'Live';
       color = Colors.green;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_version_policy.dart';
+import '../theme/app_colors.dart';
 
 /// V2 Checkpoint 9 (ADR-031): the blocking gate — shown instead of Home
 /// whenever [AppVersionCompatibility.updateRequired] is true. No dismiss
@@ -30,7 +31,7 @@ class UpdateRequiredScreen extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.system_update, size: 64, color: Colors.indigo),
+                  const Icon(Icons.system_update, size: 64, color: AppColors.brandBlue),
                   const SizedBox(height: 16),
                   Text('Update Required', style: Theme.of(context).textTheme.headlineSmall),
                   const SizedBox(height: 12),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/queue_join_provider.dart';
+import '../theme/app_colors.dart';
 import 'qr_scanner_screen.dart';
 import 'settings_screen.dart';
 import 'token_history_screen.dart';
@@ -14,14 +15,25 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('LiveQueue')),
+      appBar: AppBar(
+        // Symbol + name rather than the full lockup: an app bar is far too
+        // short for the wordmark artwork to stay legible.
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset('assets/images/livequeue-mark.png', height: 28),
+            const SizedBox(width: 8),
+            const Text('LiveQueue'),
+          ],
+        ),
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.qr_code_scanner, size: 96, color: Colors.indigo),
+              const Icon(Icons.qr_code_scanner, size: 96, color: AppColors.brandBlue),
               const SizedBox(height: 24),
               const Text(
                 'Scan a queue QR code to join',

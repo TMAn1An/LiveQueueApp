@@ -3,7 +3,9 @@ import type { ButtonHTMLAttributes } from 'react';
 type Variant = 'primary' | 'secondary' | 'danger' | 'ghost';
 
 const VARIANT_CLASSES: Record<Variant, string> = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 disabled:bg-blue-300',
+  // `danger` deliberately stays red: it is the only signal that separates a
+  // destructive action from an ordinary one, and brand color must not blur it.
+  primary: 'bg-brand-600 text-white hover:bg-brand-700 disabled:bg-brand-300',
   secondary: 'bg-slate-200 text-slate-900 hover:bg-slate-300 disabled:bg-slate-100',
   danger: 'bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300',
   ghost: 'bg-transparent text-slate-700 hover:bg-slate-100 disabled:text-slate-400',

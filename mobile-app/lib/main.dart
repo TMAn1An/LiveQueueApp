@@ -28,6 +28,7 @@ import 'services/preferences_storage_service.dart';
 import 'services/queue_api_service.dart';
 import 'services/socket_service.dart';
 import 'services/token_api_service.dart';
+import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -161,7 +162,7 @@ class LiveQueueApp extends StatelessWidget {
       child: MaterialApp(
         title: 'LiveQueue',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
+        theme: AppTheme.light,
         home: const SplashScreen(),
       ),
     );

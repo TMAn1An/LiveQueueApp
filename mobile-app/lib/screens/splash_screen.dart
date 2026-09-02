@@ -167,16 +167,25 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    return Scaffold(
+      backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.groups_2_outlined, size: 72, color: Colors.indigo),
-            SizedBox(height: 16),
-            Text('LiveQueue', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-            SizedBox(height: 24),
-            CircularProgressIndicator(),
+            // The full lockup (symbol, wordmark and tagline) — this is the
+            // one screen with enough width to show it legibly.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Image.asset(
+                'assets/images/livequeue-logo-full.png',
+                width: 320,
+                fit: BoxFit.contain,
+                semanticLabel: 'LiveQueue',
+              ),
+            ),
+            const SizedBox(height: 32),
+            const CircularProgressIndicator(),
           ],
         ),
       ),

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../models/live_queue_token.dart';
 import '../providers/token_tracking_provider.dart';
+import '../theme/app_colors.dart';
 import '../widgets/connection_indicator.dart';
 import '../widgets/status_badge.dart';
 import 'home_screen.dart';
@@ -324,7 +325,7 @@ class _VerificationCodeSectionState extends State<_VerificationCodeSection> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.blue.withValues(alpha: 0.08),
+        color: AppColors.brandSurface,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(

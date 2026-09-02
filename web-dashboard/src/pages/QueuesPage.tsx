@@ -102,7 +102,7 @@ function QueueRow({ queue }: { queue: Queue }) {
   return (
     <tr className="border-b border-slate-100">
       <td className="py-2 pr-4">
-        <Link to={`/queues/${queue.id}`} className="font-medium text-blue-600 hover:underline">
+        <Link to={`/queues/${queue.id}`} className="font-medium text-brand-600 hover:underline">
           {queue.name}
         </Link>
         {queue.deletedAt && <span className="ml-2 text-xs text-slate-400">(archived)</span>}
@@ -113,7 +113,7 @@ function QueueRow({ queue }: { queue: Queue }) {
       </td>
       <td className="py-2 pr-4">{queue.services.length}</td>
       <td className="py-2 pr-4">
-        <Link to={`/queues/${queue.id}/counters`} className="font-medium text-blue-600 hover:underline">
+        <Link to={`/queues/${queue.id}/counters`} className="font-medium text-brand-600 hover:underline">
           {queue.counterCount ?? 0}
         </Link>
       </td>

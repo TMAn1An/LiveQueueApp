@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The logo is drawn on white in the official artwork; a brand-colored
+         plate behind it would change how the mark itself reads. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

@@ -51,7 +51,7 @@ function CustomerSummaryCell({ row, onOpenDetails }: { row: LiveQueueTokenRow; o
     <button
       type="button"
       onClick={onOpenDetails}
-      className="text-left text-blue-600 hover:underline"
+      className="text-left text-brand-600 hover:underline"
       title="View submitted form details"
     >
       {first.value}
@@ -69,11 +69,11 @@ function TokenDetailsModal({ row, onClose }: { row: LiveQueueTokenRow; onClose: 
             <dt className="text-xs text-slate-400">{field.label}</dt>
             <dd className="text-slate-700">
               {field.type === 'phone' ? (
-                <a href={`tel:${field.value}`} className="text-blue-600 hover:underline">
+                <a href={`tel:${field.value}`} className="text-brand-600 hover:underline">
                   {field.value}
                 </a>
               ) : field.type === 'email' ? (
-                <a href={`mailto:${field.value}`} className="text-blue-600 hover:underline">
+                <a href={`mailto:${field.value}`} className="text-brand-600 hover:underline">
                   {field.value}
                 </a>
               ) : (

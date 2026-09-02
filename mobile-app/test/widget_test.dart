@@ -51,6 +51,16 @@ void main() {
     await tester.pumpWidget(_homeScreenUnderTest());
 
     expect(find.text('LiveQueue'), findsOneWidget);
+    // Branding: the app bar carries the LiveQueue symbol beside the name.
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Image &&
+            widget.image is AssetImage &&
+            (widget.image as AssetImage).assetName == 'assets/images/livequeue-mark.png',
+      ),
+      findsOneWidget,
+    );
     expect(find.widgetWithText(FilledButton, 'Scan QR Code'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'Token History'), findsOneWidget);
     expect(find.widgetWithText(OutlinedButton, 'Settings'), findsOneWidget);

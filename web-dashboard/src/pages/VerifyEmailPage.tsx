@@ -47,7 +47,7 @@ export function VerifyEmailPage() {
           <p className="mb-4 text-sm font-medium text-green-700">
             Your email has been verified. You can now use LiveQueue.
           </p>
-          <Link to="/dashboard" className="font-medium text-blue-600 hover:underline">
+          <Link to="/dashboard" className="font-medium text-brand-600 hover:underline">
             Go to dashboard
           </Link>
         </>
@@ -55,7 +55,7 @@ export function VerifyEmailPage() {
       {status === 'error' && (
         <>
           <p className="mb-4 text-sm text-red-700">{error}</p>
-          <Link to="/login" className="font-medium text-blue-600 hover:underline">
+          <Link to="/login" className="font-medium text-brand-600 hover:underline">
             Back to sign in
           </Link>
         </>

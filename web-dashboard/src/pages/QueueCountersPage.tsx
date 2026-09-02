@@ -152,7 +152,7 @@ export function QueueCountersPage() {
   return (
     <div>
       <div className="mb-4 flex items-center gap-2">
-        <Link to={`/queues/${queueId}`} className="text-sm text-blue-600 hover:underline">
+        <Link to={`/queues/${queueId}`} className="text-sm text-brand-600 hover:underline">
           ← {queue?.name ?? 'Queue'}
         </Link>
       </div>

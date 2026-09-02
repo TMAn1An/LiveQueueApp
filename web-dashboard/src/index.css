@@ -1,6 +1,53 @@
 @import 'tailwindcss';
 
+/*
+ * LiveQueue brand palette. Both anchors are sampled directly from the
+ * official logo artwork, not invented: brand-600 is the blue of the "LIVE"
+ * wordmark stroke, accent-500 the teal of "QUEUE" and the ribbon. The rest
+ * of each scale is a tint/shade of its anchor.
+ *
+ * Contrast (measured, WCAG 2.1 relative luminance):
+ *   white on brand-600  7.6:1   white on brand-700  10.3:1
+ *   brand-600 on white  7.6:1   accent-700 on white  5.9:1
+ * accent-500 is only 2.9:1 on white, so it is used for fills and accents —
+ * never for text or for a control that carries white text. accent-700 is
+ * the readable teal.
+ *
+ * Semantic colors are deliberately NOT part of this palette: red stays red
+ * for destructive/error states, amber for warnings, green for success.
+ */
+@theme {
+  --color-brand-50: #eef5fc;
+  --color-brand-100: #d7e7f6;
+  --color-brand-200: #aecdeb;
+  --color-brand-300: #7ba9d8;
+  --color-brand-400: #3c7cbc;
+  --color-brand-500: #15619f;
+  --color-brand-600: #0f539e;
+  --color-brand-700: #0a4179;
+  --color-brand-800: #0b3560;
+  --color-brand-900: #0c2b4b;
+
+  --color-accent-50: #edfaf7;
+  --color-accent-100: #d2f2ec;
+  --color-accent-200: #a4e4d9;
+  --color-accent-300: #68cfc0;
+  --color-accent-400: #31b5a3;
+  --color-accent-500: #25a596;
+  --color-accent-600: #158c80;
+  --color-accent-700: #0f7168;
+  --color-accent-800: #0e5a53;
+  --color-accent-900: #0d4a45;
+}
+
 /* Operational software: speed and clarity over visual effects (spec section 33). */
 body {
   @apply bg-slate-50 text-slate-900 antialiased;
+}
+
+/* One brand-colored focus ring for every interactive element, instead of the
+   browser default — keyboard position must stay obvious on every page. */
+:focus-visible {
+  outline: 2px solid var(--color-brand-600);
+  outline-offset: 2px;
 }

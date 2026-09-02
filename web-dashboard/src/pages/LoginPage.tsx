@@ -61,7 +61,7 @@ export function LoginPage() {
       </Button>
       <p className="mt-4 text-center text-sm text-slate-500">
         No organization yet?{' '}
-        <Link to="/register" className="font-medium text-blue-600 hover:underline">
+        <Link to="/register" className="font-medium text-brand-600 hover:underline">
           Register
         </Link>
       </p>

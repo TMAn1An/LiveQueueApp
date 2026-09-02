@@ -135,7 +135,7 @@ export function ReportsPage() {
                 return (
                   <div key={entry.hour} className="flex flex-1 flex-col items-center gap-1">
                     <div
-                      className="w-full rounded-t bg-blue-500"
+                      className="w-full rounded-t bg-brand-500"
                       style={{ height: `${(entry.count / max) * 100}%` }}
                       title={`${entry.count} tokens`}
                     />

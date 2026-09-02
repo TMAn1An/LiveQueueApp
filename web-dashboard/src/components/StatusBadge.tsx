@@ -2,8 +2,8 @@
 const COLORS: Record<string, string> = {
   ACTIVE: 'bg-green-100 text-green-800',
   WAITING: 'bg-amber-100 text-amber-800',
-  CALLED: 'bg-blue-100 text-blue-800',
-  IN_PROGRESS: 'bg-indigo-100 text-indigo-800',
+  CALLED: 'bg-brand-100 text-brand-800',
+  IN_PROGRESS: 'bg-accent-100 text-accent-800',
   COMPLETED: 'bg-slate-100 text-slate-600',
   SKIPPED: 'bg-red-100 text-red-700',
   CANCELLED: 'bg-orange-100 text-orange-700',

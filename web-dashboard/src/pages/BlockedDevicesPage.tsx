@@ -22,11 +22,11 @@ function CustomerContextPanel({ context }: { context: CustomerContext | null }) 
           <dt className="text-slate-400">{field.label}</dt>
           <dd className="text-slate-700">
             {field.type === 'phone' ? (
-              <a href={`tel:${field.value}`} className="text-blue-600 hover:underline">
+              <a href={`tel:${field.value}`} className="text-brand-600 hover:underline">
                 {field.value}
               </a>
             ) : field.type === 'email' ? (
-              <a href={`mailto:${field.value}`} className="text-blue-600 hover:underline">
+              <a href={`mailto:${field.value}`} className="text-brand-600 hover:underline">
                 {field.value}
               </a>
             ) : (
