@@ -42,6 +42,11 @@ export function AppLayout() {
               Reports
             </NavLink>
           )}
+          {hasPermission('view_reports') && (
+            <NavLink to="/service-history" className={navLinkClass}>
+              Service History
+            </NavLink>
+          )}
           {hasPermission('view_audit_logs') && (
             <NavLink to="/audit-logs" className={navLinkClass}>
               Audit Logs

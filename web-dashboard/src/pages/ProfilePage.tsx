@@ -4,6 +4,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { PasswordInput } from '../components/PasswordInput';
 import { ApiError } from '../api/client';
 import { formatDateTime } from '../utils/format';
 
@@ -112,31 +113,31 @@ function ChangePasswordCard() {
       {success && <p className="mb-3 text-sm text-green-600">Password changed successfully.</p>}
       <div className="mb-3">
         <label className="mb-1 block text-xs text-slate-500">Current password</label>
-        <input
-          type="password"
+        <PasswordInput
+          autoComplete="current-password"
           value={currentPassword}
           onChange={(e) => setCurrentPassword(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+          className="px-2 py-1 text-sm"
         />
       </div>
       <div className="mb-3">
         <label className="mb-1 block text-xs text-slate-500">New password</label>
-        <input
-          type="password"
+        <PasswordInput
+          autoComplete="new-password"
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
           minLength={8}
-          className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+          className="px-2 py-1 text-sm"
         />
       </div>
       <div className="mb-4">
         <label className="mb-1 block text-xs text-slate-500">Confirm new password</label>
-        <input
-          type="password"
+        <PasswordInput
+          autoComplete="new-password"
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
           minLength={8}
-          className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+          className="px-2 py-1 text-sm"
         />
         {mismatch && <p className="mt-1 text-xs text-red-600">Passwords do not match.</p>}
       </div>

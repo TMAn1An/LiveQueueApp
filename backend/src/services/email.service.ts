@@ -33,6 +33,50 @@ export function isEmailAvailable(): boolean {
   return getClient() !== null;
 }
 
+/** Resend's shared sandbox sender. Usable without verifying a domain, but
+ * it can only deliver to the address that owns the Resend account — every
+ * other recipient is rejected by the provider. */
+const RESEND_SANDBOX_SENDER = 'onboarding@resend.dev';
+
+/**
+ * Registration is unusable if verification email never arrives, and an
+ * unverified account is deleted an hour later — so a misconfiguration here
+ * is not a quiet degradation, it is a broken signup funnel. These checks
+ * run once at boot and say exactly what is wrong, instead of leaving the
+ * first failed registration to discover it. Deliberately warnings, not a
+ * fatal exit: local development and the test suite must still start with no
+ * email account at all, and a running backend serving existing customers is
+ * better than one that refuses to boot.
+ *
+ * Never logs the API key, a sender address's credentials, or any token.
+ */
+export function reportEmailConfiguration(): void {
+  const isProduction = env.NODE_ENV === 'production';
+
+  if (!env.RESEND_API_KEY) {
+    const message =
+      'RESEND_API_KEY is not set — no verification emails can be sent, so new registrations cannot be completed.';
+    if (isProduction) {
+      logger.error(message);
+    } else {
+      logger.warn(message);
+    }
+    return;
+  }
+
+  if (env.EMAIL_FROM.includes(RESEND_SANDBOX_SENDER) && isProduction) {
+    logger.error(
+      `EMAIL_FROM still uses Resend's sandbox sender (${RESEND_SANDBOX_SENDER}), which only delivers to the Resend account owner's own address. Set EMAIL_FROM to a sender on a domain verified in Resend.`,
+    );
+  }
+
+  if (isProduction && /localhost|127\.0\.0\.1/.test(env.APP_BASE_URL)) {
+    logger.error(
+      `APP_BASE_URL is ${env.APP_BASE_URL} — verification links will point at localhost and cannot be opened by a recipient. Set it to the dashboard's public URL.`,
+    );
+  }
+}
+
 /**
  * Never throws — a delivery failure is reported back as a result, matching
  * fcm.service.ts's sendNotification exactly, so callers (register/resend)
@@ -53,7 +97,18 @@ export async function sendVerificationEmail(to: string, verificationUrl: string)
       html: buildVerificationEmailHtml(verificationUrl),
     });
     if (error) {
-      logger.error({ message: error.message }, 'Resend reported an error sending the verification email');
+      // name/statusCode are what distinguish an operator-fixable rejection
+      // (unverified sending domain, sandbox-sender restriction, bad key)
+      // from a transient provider outage — the message alone often doesn't.
+      // None of these fields carry the API key or the verification token.
+      logger.error(
+        {
+          name: error.name,
+          message: error.message,
+          from: env.EMAIL_FROM,
+        },
+        'Resend rejected the verification email — check the sender domain and API key configuration',
+      );
       return false;
     }
     logger.info('Verification email sent');

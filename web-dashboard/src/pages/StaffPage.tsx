@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { Pagination } from '../components/Pagination';
+import { PasswordInput } from '../components/PasswordInput';
 import { SearchInput } from '../components/SearchInput';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { ApiError } from '../api/client';
@@ -71,12 +72,12 @@ function CreateStaffModal({ onClose }: { onClose: () => void }) {
       </div>
       <div className="mb-3">
         <label className="mb-1 block text-xs text-slate-500">Temporary password</label>
-        <input
-          type="password"
+        <PasswordInput
+          autoComplete="new-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           minLength={8}
-          className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+          className="px-2 py-1 text-sm"
         />
       </div>
       <p className="mb-4 text-xs text-slate-400">

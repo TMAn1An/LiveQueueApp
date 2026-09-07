@@ -4,6 +4,7 @@ import { env } from './config/env';
 import { logger } from './config/logger';
 import { prisma } from './config/prisma';
 import { attachSocketServer } from './realtime/socketServer';
+import { reportEmailConfiguration } from './services/email.service';
 import { startReminderScheduler, stopReminderScheduler } from './scheduler/reminderScheduler';
 import {
   startPendingRegistrationCleanupScheduler,
@@ -16,6 +17,9 @@ attachSocketServer(server);
 
 server.listen(env.PORT, () => {
   logger.info(`LiveQueue backend listening on port ${env.PORT} (${env.NODE_ENV})`);
+  // Surfaced at boot, not at the first failed signup — see the function's
+  // own doc comment for why this warns rather than exits.
+  reportEmailConfiguration();
   startReminderScheduler();
   startPendingRegistrationCleanupScheduler();
 });

@@ -109,9 +109,33 @@ deliberately rather than trusting `/health`.
 | `CORS_ORIGINS` | `''` → blocks **all** cross-origin | The dashboard cannot call the API at all. Comma-separated origin list. |
 | `RESEND_API_KEY` | unset → emails not sent | **Registration is effectively broken**: the account is created `PENDING_EMAIL_VERIFICATION`, the verification email is never delivered, the user can never verify, and the pending organization is auto-deleted one hour later by the cleanup scheduler (§5). |
 | `APP_BASE_URL` | `http://localhost:5173` | Verification emails link to `localhost` — every verification link is unusable. Set to the real dashboard origin. |
-| `EMAIL_FROM` | `LiveQueue <onboarding@resend.dev>` | Works, but sends from Resend's shared sandbox sender. Use a verified sending domain. |
+| `EMAIL_FROM` | `LiveQueue <onboarding@resend.dev>` | **Delivers only to the email address that owns the Resend account.** `onboarding@resend.dev` is Resend's shared sandbox sender: every send to any other recipient is rejected by the provider (typically a 403 "you can only send testing emails to your own email address"), so real signups silently never receive their link. Set this to a sender on a domain verified in Resend. |
 | `FIREBASE_CREDENTIALS` *or* `FIREBASE_SERVICE_ACCOUNT_PATH` | unset → push disabled | No push notifications (reminders, lifecycle). See §6 — **on Render, use `FIREBASE_CREDENTIALS`**. |
 | `MOBILE_ANDROID_STORE_URL` | `''` | Only matters once you raise the minimum app version — the Update Required screen then has no store to send users to. See §11. |
+
+### 3b-i. "The verification email never arrives"
+
+The backend now reports these at boot (`reportEmailConfiguration()`, logged
+once when the server starts) rather than leaving the first failed signup to
+discover them. Check the startup logs first, then work down this list:
+
+1. **`RESEND_API_KEY` set on the Render service?** Unset means no send is
+   ever attempted — the log line says so explicitly at startup.
+2. **`EMAIL_FROM` still the sandbox sender?** See the row above; this is the
+   single most common cause of "registration works but no email arrives",
+   because the send fails only for recipients other than the Resend account
+   owner, so it appears to work when the operator tests it themselves.
+3. **Sending domain verified in Resend?** A sender on an unverified domain is
+   rejected. The rejection is logged with the provider's own error name.
+4. **`APP_BASE_URL` pointing at the dashboard's public origin?** If it still
+   says `localhost`, the email arrives but its link cannot be opened.
+5. **Check the Resend dashboard's own delivery log** for the recipient — a
+   provider-side bounce or suppression is invisible to this backend.
+
+A failed send never fails the registration: the account exists as
+`PENDING_EMAIL_VERIFICATION` and the dashboard offers a resend. But it is
+deleted an hour later if never verified, so a misconfiguration here does
+break signup end to end.
 
 ### 3c. Safe defaults — set only to override
 

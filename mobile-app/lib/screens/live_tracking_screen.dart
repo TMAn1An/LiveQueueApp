@@ -7,6 +7,7 @@ import '../models/live_queue_token.dart';
 import '../providers/token_tracking_provider.dart';
 import '../theme/app_colors.dart';
 import '../widgets/connection_indicator.dart';
+import '../widgets/eta_update_dialog.dart';
 import '../widgets/status_badge.dart';
 import 'home_screen.dart';
 
@@ -28,6 +29,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   // still active, so this is the safe place to grab the reference.
   TokenTrackingProvider? _trackingProvider;
 
+  /// Guards against re-opening the same notice on every rebuild — the
+  /// provider notifies on each socket frame, and a popup that reappeared
+  /// after being closed would be worse than no popup at all.
+  bool _etaDialogVisible = false;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -40,10 +46,36 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     super.dispose();
   }
 
+  /// Opens at most one dialog per distinct notice. Deferred to after the
+  /// frame because showing a route mid-build is illegal; the provider's own
+  /// state is what decides whether there is anything to show, so a rebuild
+  /// for any other reason never opens one.
+  void _syncEtaNoticeDialog(TokenTrackingProvider tracking) {
+    final notice = tracking.etaUpdateNotice;
+    if (notice == null || _etaDialogVisible) return;
+
+    _etaDialogVisible = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => EtaUpdateDialog(notice: notice),
+      );
+      if (!mounted) return;
+      // Clears only the notice that was actually shown: if staff changed the
+      // time again while this was open, the newer one survives and opens a
+      // fresh dialog with the current time rather than being swallowed.
+      context.read<TokenTrackingProvider>().dismissEtaUpdateNotice();
+      setState(() => _etaDialogVisible = false);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final tracking = context.watch<TokenTrackingProvider>();
     final token = tracking.token;
+
+    _syncEtaNoticeDialog(tracking);
 
     return Scaffold(
       appBar: AppBar(

@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../api/client';
 import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { PasswordInput } from '../components/PasswordInput';
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -47,13 +48,13 @@ export function LoginPage() {
         <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">
           Password
         </label>
-        <input
+        <PasswordInput
           id="password"
-          type="password"
           required
+          autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="px-3 py-2 text-sm"
         />
       </div>
       <Button type="submit" disabled={submitting} className="w-full">

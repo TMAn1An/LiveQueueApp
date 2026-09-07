@@ -48,4 +48,35 @@ void main() {
       expect(() => QrParser.parseQueueId('not a qr code at all'), throwsA(isA<QrParseException>()));
     });
   });
+
+  _contractTests();
+}
+
+
+/// The contract test for the QR flow: the exact string the backend puts in
+/// `queue.qrCodeUri` (backend/src/services/queue.service.ts) is what the
+/// dashboard encodes verbatim into the printed code, so the parser has to
+/// accept that shape and nothing weaker.
+void _contractTests() {
+  group('dashboard/backend payload contract', () {
+    // Mirrors `livequeue://queue/${queue.id}` with a real UUID v4 exactly as
+    // Prisma generates it.
+    const backendQueueId = '7f1c2b3a-9d4e-4c6f-8a1b-2c3d4e5f6a7b';
+    const backendPayload = 'livequeue://queue/$backendQueueId';
+
+    test('parses the payload the dashboard actually encodes', () {
+      expect(QrParser.parseQueueId(backendPayload), backendQueueId);
+    });
+
+    test('tolerates the whitespace some scanners append', () {
+      expect(QrParser.parseQueueId('  $backendPayload\n'), backendQueueId);
+    });
+
+    test('rejects a queue id that is not a UUID, so a typo never reaches the API', () {
+      expect(
+        () => QrParser.parseQueueId('livequeue://queue/7f1c2b3a'),
+        throwsA(isA<QrParseException>()),
+      );
+    });
+  });
 }

@@ -248,5 +248,12 @@ export async function setRequiredDuration(req: Request, res: Response) {
     metadata: { requiredDurationMinutes: req.body.requiredDurationMinutes },
     ipAddress: req.ip,
   });
-  await realtime.broadcastQueueEtaUpdate(token.queueId);
+  // Tagged with a reason (unlike every other ETA broadcast in this file) so
+  // the customer app can tell an explicit staff service-time change apart
+  // from ordinary queue movement, and only then show its "estimated time
+  // updated" notice. The push is the backgrounded-app equivalent of that
+  // same notice — same guarded, after-the-response contract as the
+  // status-change dispatch above it.
+  await realtime.broadcastQueueEtaUpdate(token.queueId, 'duration_updated');
+  await tokenNotificationDispatch.notifyQueueEtaUpdated(token.queueId);
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -45,15 +46,29 @@ class _SplashScreenState extends State<SplashScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
   }
 
+  /// Startup is split in two: the work that must finish before the customer
+  /// may use the app, and the work that only has to happen eventually.
+  ///
+  /// Everything below used to be awaited in sequence before Home appeared,
+  /// which meant a customer could watch this screen for a minute or more:
+  /// `FirebaseMessaging.getToken()` is a network round-trip with no timeout
+  /// of its own, device registration and FCM-token registration are two
+  /// more requests, and on a cold backend each of those spends its full
+  /// timeout before failing. None of it is needed to show Home — Home only
+  /// offers "scan a QR code", "history" and "settings" — so only the
+  /// version gate and local preferences block now, and the rest continues
+  /// behind the already-visible UI.
   Future<void> _bootstrap() async {
-    // V2 Checkpoint 9 (ADR-031): the version-compatibility gate runs first,
-    // before any other startup work — a blocked install has no reason to
-    // register FCM tokens, request notification permissions, or register a
-    // device, and the rest of the app must not be reachable through normal
-    // navigation if it's incompatible (pushReplacement below leaves nothing
-    // to back-navigate into).
+    final startedAt = DateTime.now();
+
+    // V2 Checkpoint 9 (ADR-031): the version-compatibility gate still runs
+    // first and still blocks. It is a safety gate, not an optimisation:
+    // a blocked install must never reach the rest of the app. Its own
+    // request carries a short timeout and falls back to the cached policy,
+    // so a sleeping backend delays startup by seconds, not minutes.
     final appVersionRepository = context.read<AppVersionRepository>();
     final compatibility = await appVersionRepository.checkCompatibility();
+    _logPhase('version policy', startedAt);
     if (!mounted) return;
     if (compatibility.updateRequired) {
       Navigator.of(context).pushReplacement(
@@ -68,6 +83,9 @@ class _SplashScreenState extends State<SplashScreen> {
     final preferencesProvider = context.read<NotificationPreferencesProvider>();
     final tokenRepository = context.read<TokenRepository>();
     final trackingProvider = context.read<TokenTrackingProvider>();
+    // Captured while this widget is still mounted: the background work below
+    // outlives this screen, so it can never touch `context` again.
+    final navigator = Navigator.of(context);
 
     // Subscribed BEFORE fcmService.initialize() runs — initialize() may
     // synchronously replay a cold-start getInitialMessage() into this same
@@ -76,12 +94,56 @@ class _SplashScreenState extends State<SplashScreen> {
     RemoteMessage? pendingTap;
     final tapSub = fcmService.onNotificationTapped.listen((message) => pendingTap = message);
 
-    await notificationService.initialize();
-    // Best-effort: never blocks startup if unavailable (see FcmService doc).
-    await fcmService.initialize();
-    // So TokenConfirmationScreen/TokenTrackingProvider read real saved
-    // preferences (not just in-memory defaults) once the customer joins.
+    // Local storage only — no network, so this stays on the blocking path:
+    // TokenConfirmationScreen and TokenTrackingProvider must read the
+    // customer's real saved preferences, not in-memory defaults.
     await preferencesProvider.load();
+    _logPhase('preferences', startedAt);
+    if (!mounted) return;
+
+    navigator.pushReplacement(MaterialPageRoute(builder: (_) => const HomeScreen()));
+    _logPhase('home visible', startedAt);
+
+    unawaited(
+      _initializeInBackground(
+        startedAt: startedAt,
+        navigator: navigator,
+        notificationService: notificationService,
+        fcmService: fcmService,
+        deviceRepository: deviceRepository,
+        tokenRepository: tokenRepository,
+        trackingProvider: trackingProvider,
+        preferencesProvider: preferencesProvider,
+        tapSub: tapSub,
+        readPendingTap: () => pendingTap,
+      ),
+    );
+  }
+
+  /// Runs after Home is already on screen. Every step here was previously
+  /// awaited ahead of it; none of them gate anything Home itself can do, and
+  /// each already degrades safely on failure.
+  Future<void> _initializeInBackground({
+    required DateTime startedAt,
+    required NavigatorState navigator,
+    required NotificationService notificationService,
+    required FcmService fcmService,
+    required DeviceRepository deviceRepository,
+    required TokenRepository tokenRepository,
+    required TokenTrackingProvider trackingProvider,
+    required NotificationPreferencesProvider preferencesProvider,
+    required StreamSubscription<RemoteMessage> tapSub,
+    required RemoteMessage? Function() readPendingTap,
+  }) async {
+    await notificationService.initialize();
+    _logPhase('notifications', startedAt);
+
+    // Best-effort: never blocks anything if unavailable (see FcmService
+    // doc). getToken() in particular is an unbounded network call, which is
+    // exactly why it no longer sits in front of Home.
+    await fcmService.initialize();
+    _logPhase('fcm', startedAt);
+
     // Best-effort: a failed registration here just means it retries the
     // next time the customer actually tries to join a queue.
     try {
@@ -91,11 +153,11 @@ class _SplashScreenState extends State<SplashScreen> {
       // calls ensureRegisteredDevice() and will surface any real failure
       // to the user at the point where it actually matters.
     }
+    _logPhase('device registration', startedAt);
 
     // Issue #5: register the FCM token the same best-effort way — a failed
     // registration here just means this device won't receive push updates
-    // until the next launch retries it; it must never block startup or the
-    // rest of the app (REST, Socket.io) from working.
+    // until the next launch retries it.
     final currentFcmToken = fcmService.fcmToken;
     if (currentFcmToken != null) {
       await _registerFcmTokenSafely(deviceRepository, currentFcmToken);
@@ -109,19 +171,28 @@ class _SplashScreenState extends State<SplashScreen> {
     });
 
     await tapSub.cancel();
-    if (!mounted) return;
 
-    final resumed = await _tryResumeFromTap(
-      pendingTap,
+    // A cold start from a tapped notification still resumes live tracking.
+    // It now opens on top of Home rather than replacing the splash, since
+    // Home is already showing by the time FCM finishes initializing — which
+    // also leaves the customer somewhere sensible to go back to.
+    await _tryResumeFromTap(
+      readPendingTap(),
+      navigator: navigator,
       tokenRepository: tokenRepository,
       trackingProvider: trackingProvider,
       preferences: preferencesProvider.preferences,
     );
-    if (!mounted || resumed) return;
+    _logPhase('background init complete', startedAt);
+  }
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
-    );
+  /// Debug builds only — startup phase timings, so a regression here can be
+  /// measured instead of guessed at. Never compiled into a release build,
+  /// and carries no identifiers of any kind.
+  void _logPhase(String phase, DateTime startedAt) {
+    if (kDebugMode) {
+      debugPrint('[startup] $phase: ${DateTime.now().difference(startedAt).inMilliseconds}ms');
+    }
   }
 
   Future<void> _registerFcmTokenSafely(DeviceRepository deviceRepository, String fcmToken) async {
@@ -140,11 +211,16 @@ class _SplashScreenState extends State<SplashScreen> {
   /// (never the tapped notification's own payload).
   Future<bool> _tryResumeFromTap(
     RemoteMessage? pendingTap, {
+    required NavigatorState navigator,
     required TokenRepository tokenRepository,
     required TokenTrackingProvider trackingProvider,
     required NotificationPreferences preferences,
   }) async {
-    if (pendingTap == null || pendingTap.data['type'] != 'token_status_changed') {
+    // 'token_eta_updated' resumes tracking for exactly the same reason a
+    // status change does: the customer tapped a notification about a token
+    // they are still waiting on, and expects to land on it.
+    const resumableTypes = {'token_status_changed', 'token_eta_updated'};
+    if (pendingTap == null || !resumableTypes.contains(pendingTap.data['type'])) {
       return false;
     }
     final tokenId = pendingTap.data['tokenId'] as String?;
@@ -153,8 +229,9 @@ class _SplashScreenState extends State<SplashScreen> {
     try {
       final fetchedToken = await tokenRepository.getToken(tokenId);
       trackingProvider.start(fetchedToken, preferences);
-      if (!mounted) return true;
-      Navigator.of(context).pushReplacement(
+      // Pushed on top of Home (which is already showing by now) rather than
+      // replacing it — so closing live tracking returns somewhere useful.
+      navigator.push(
         MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
       );
       return true;

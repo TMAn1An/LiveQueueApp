@@ -15,3 +15,11 @@ import 'package:intl/intl.dart';
 String formatLocalDateTime(DateTime value) {
   return DateFormat.yMMMd().add_jm().format(value.toLocal());
 }
+
+/// Time-of-day only ("8:35 PM"), for when the date is implied by context —
+/// an estimated turn later today. Same single [DateTime.toLocal] conversion
+/// as [formatLocalDateTime]: what the customer reads always matches the
+/// clock on their own device, wherever they are.
+String formatLocalTime(DateTime value) {
+  return DateFormat.jm().format(value.toLocal());
+}

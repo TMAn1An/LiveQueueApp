@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 
+import '../models/eta_update_notice.dart';
 import '../models/live_queue_token.dart';
 import '../models/notification_preferences.dart';
 import '../repositories/device_repository.dart';
@@ -59,6 +60,16 @@ class TokenTrackingProvider extends ChangeNotifier {
   bool isLoadingVerificationCode = false;
   bool isCancelling = false;
 
+  /// Set when staff explicitly changed how long a service is expected to
+  /// take and that changed this customer's ETA — the one-shot signal the
+  /// Live Tracking screen turns into a dismissible notice. Null means
+  /// "nothing to announce", which is also the state after [dismissEtaUpdateNotice].
+  ///
+  /// Only ever the newest value: a burst of recalculations collapses into a
+  /// single notice showing the latest time, rather than a queue of stale
+  /// popups the customer has to dismiss one by one.
+  EtaUpdateNotice? etaUpdateNotice;
+
   NotificationPreferences _preferences = const NotificationPreferences();
   bool _reminderShown = false;
 
@@ -101,7 +112,13 @@ class TokenTrackingProvider extends ChangeNotifier {
   /// source). Ignored if it isn't about the token currently being tracked,
   /// or isn't the event type this provider knows how to react to.
   Future<void> _onFcmDataMessage(Map<String, dynamic> data) async {
-    if (data['type'] != 'token_status_changed') return;
+    // 'token_eta_updated' is the push sent when staff change a service time
+    // while the app is backgrounded. It resyncs exactly like a status
+    // change and deliberately does NOT raise the in-app notice: while the
+    // app is open the socket already delivers that, and showing both would
+    // be two alerts for one update.
+    const handled = {'token_status_changed', 'token_eta_updated'};
+    if (!handled.contains(data['type'])) return;
     final current = token;
     if (current == null || data['tokenId'] != current.id) return;
     await _resyncFromServer();
@@ -155,7 +172,36 @@ class TokenTrackingProvider extends ChangeNotifier {
       estimatedWaitMinutes: update.estimatedWaitMinutes,
       estimatedReadyAt: update.estimatedReadyAt,
     );
+    _maybeAnnounceEtaUpdate(update);
     _maybeShowReminder();
+    notifyListeners();
+  }
+
+  /// A notice is raised only when the backend says an explicit staff
+  /// service-time change caused this recalculation. Ordinary queue movement
+  /// carries no reason and passes through silently — the countdown already
+  /// shows it — so the customer is never interrupted by the queue simply
+  /// advancing.
+  ///
+  /// A finished token (completed/cancelled/skipped) is never announced to:
+  /// there is no waiting time left to update.
+  void _maybeAnnounceEtaUpdate(PositionUpdate update) {
+    final notice = etaNoticeFor(
+      isStaffDurationChange: update.isStaffDurationChange,
+      tokenIsActive: token?.isActive ?? false,
+      estimatedReadyAt: update.estimatedReadyAt,
+      estimatedWaitMinutes: update.estimatedWaitMinutes,
+      current: etaUpdateNotice,
+    );
+    if (notice == null) return;
+    etaUpdateNotice = notice;
+  }
+
+  /// Called when the customer closes the notice. Nothing else clears it, so
+  /// a rebuild can never resurrect a dismissed popup.
+  void dismissEtaUpdateNotice() {
+    if (etaUpdateNotice == null) return;
+    etaUpdateNotice = null;
     notifyListeners();
   }
 

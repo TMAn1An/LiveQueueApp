@@ -107,3 +107,56 @@ function buildNotificationText(status: TokenStatus, serialNumber: string): Notif
       return null;
   }
 }
+
+/**
+ * Pushes "your estimated wait changed" to every customer still WAITING in a
+ * queue whose expected timings were just changed by an explicit staff
+ * service-time update.
+ *
+ * Deliberately a sibling of notifyTokenStatusChange rather than a new
+ * mechanism: identical guarantees (called after the HTTP response and after
+ * the Socket.io emission, fully guarded, never throws, dead-token cleanup on
+ * the same classification) and the same minimal payload discipline — only
+ * {type, tokenId}, no timings, no PII, no staff identity. The app treats it
+ * as a prompt to resync authoritative state, never as the state itself.
+ *
+ * Only WAITING tokens are notified: a COMPLETED, CANCELLED or SKIPPED token
+ * has no remaining wait to update, and a CALLED/IN_PROGRESS customer is
+ * already at the counter.
+ */
+export async function notifyQueueEtaUpdated(queueId: string): Promise<void> {
+  try {
+    const tokens = await prisma.token.findMany({
+      where: { queueId, status: 'WAITING' },
+      select: { id: true, deviceId: true },
+    });
+    if (tokens.length === 0) {
+      return;
+    }
+
+    const fcmRecords = await prisma.deviceFcmToken.findMany({
+      where: { deviceId: { in: tokens.map((token) => token.deviceId) } },
+    });
+    const tokenByDevice = new Map(tokens.map((token) => [token.deviceId, token.id]));
+
+    for (const record of fcmRecords) {
+      const tokenId = tokenByDevice.get(record.deviceId);
+      if (!tokenId) continue;
+
+      const result = await fcmService.sendNotification(record.fcmToken, {
+        title: 'Estimated time updated',
+        body: 'Your estimated waiting time has changed. Open LiveQueue to see the new time.',
+        data: {
+          type: 'token_eta_updated',
+          tokenId,
+        },
+      });
+
+      if (!result.ok && result.invalidToken) {
+        await prisma.deviceFcmToken.deleteMany({ where: { deviceId: record.deviceId } });
+      }
+    }
+  } catch (err) {
+    logger.error({ err, queueId }, 'Queue ETA-update FCM dispatch failed');
+  }
+}

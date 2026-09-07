@@ -171,7 +171,12 @@ export const emitTokenCancelled = (tokenId: string) =>
  * sizes in a live queue-management system stay small, so this remains
  * cheap; never broadcast to the public queue room (unchanged).
  */
-export function broadcastQueueEtaUpdate(queueId: string): Promise<void> {
+export type EtaUpdateReason = 'duration_updated';
+
+export function broadcastQueueEtaUpdate(
+  queueId: string,
+  reason?: EtaUpdateReason,
+): Promise<void> {
   return guarded(async () => {
     const io = getIO();
     if (!io) return; // skip the recompute query entirely when nothing is listening
@@ -189,6 +194,13 @@ export function broadcastQueueEtaUpdate(queueId: string): Promise<void> {
         position: entry.position,
         estimatedWaitMinutes: entry.estimatedWaitMinutes,
         estimatedReadyAt: entry.estimatedReadyAt,
+        // Present only when an explicit staff action changed how long a
+        // customer's service is expected to take. Ordinary queue movement
+        // (someone ahead finishing, a counter opening) carries no reason,
+        // so a client can tell "the queue moved" apart from "staff changed
+        // the service time" without inferring it from the numbers. A fixed
+        // code — never staff identity, never a free-text note.
+        ...(reason ? { reason } : {}),
       };
 
       emitToRoom(organizationRoom(entry.organizationId), SOCKET_EVENTS.TOKEN_POSITION_CHANGED, {

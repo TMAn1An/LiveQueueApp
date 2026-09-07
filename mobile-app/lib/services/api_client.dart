@@ -15,6 +15,14 @@ import 'api_exception.dart';
 /// fast into the existing NetworkException handling below.
 const _requestTimeout = Duration(seconds: 12);
 
+/// The shorter budget for a request that a person is actively waiting behind
+/// — currently only the startup version-policy check. The production backend
+/// runs on a free tier that sleeps when idle, so the first request after a
+/// quiet period can take tens of seconds to answer; a startup gate must give
+/// up long before that and fall back, rather than holding the splash screen
+/// for the full general timeout.
+const startupRequestTimeout = Duration(seconds: 6);
+
 /// Thin wrapper over `http` that understands the backend's response
 /// envelope (`{ success, data }` / `{ success: false, error: { code,
 /// message } }`, unchanged since Phase 1) and turns any non-2xx response
@@ -50,11 +58,11 @@ class ApiClient {
     );
   }
 
-  Future<Map<String, dynamic>> get(String path) async {
+  Future<Map<String, dynamic>> get(String path, {Duration? timeout}) async {
     try {
       final response = await _httpClient
           .get(_uri(path), headers: {'Accept': 'application/json'})
-          .timeout(_requestTimeout);
+          .timeout(timeout ?? _requestTimeout);
       return _handle(response);
     } on SocketException {
       throw const NetworkException('No network connection. Please check your connection and try again.');

@@ -10,11 +10,22 @@ class PositionUpdate {
     required this.position,
     required this.estimatedWaitMinutes,
     required this.estimatedReadyAt,
+    this.reason,
   });
   final int position;
   final int? estimatedWaitMinutes;
   /// V2 Checkpoint 4 (ADR-026) — see LiveQueueToken.estimatedReadyAt.
   final DateTime? estimatedReadyAt;
+
+  /// Why the backend recalculated. Absent for ordinary queue movement
+  /// (someone ahead finishing, a counter opening); `'duration_updated'`
+  /// when staff explicitly changed how long a service is expected to take.
+  /// Only the latter is worth interrupting the customer about.
+  final String? reason;
+
+  static const String reasonDurationUpdated = 'duration_updated';
+
+  bool get isStaffDurationChange => reason == reasonDurationUpdated;
 }
 
 /// True when the queue this token belongs to was just paused, false when
@@ -102,6 +113,7 @@ class TokenRepository {
         estimatedReadyAt: data['estimatedReadyAt'] == null
             ? null
             : DateTime.parse(data['estimatedReadyAt'] as String),
+        reason: data['reason'] as String?,
       );
     });
   }

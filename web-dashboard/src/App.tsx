@@ -16,6 +16,7 @@ import { StaffPage } from './pages/StaffPage';
 import { BlockedDevicesPage } from './pages/BlockedDevicesPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
+import { ServiceHistoryPage } from './pages/ServiceHistoryPage';
 import { OrganizationSettingsPage } from './pages/OrganizationSettingsPage';
 import { ProfilePage } from './pages/ProfilePage';
 
@@ -50,6 +51,9 @@ function App() {
                   <Route path="/devices" element={<BlockedDevicesPage />} />
                 </Route>
                 <Route path="/reports" element={<ReportsPage />} />
+                <Route element={<PermissionRoute permission="view_reports" />}>
+                  <Route path="/service-history" element={<ServiceHistoryPage />} />
+                </Route>
                 <Route element={<PermissionRoute permission="view_audit_logs" />}>
                   <Route path="/audit-logs" element={<AuditLogsPage />} />
                 </Route>
