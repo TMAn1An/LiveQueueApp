@@ -34,20 +34,20 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
     <Modal title="Create Queue" onClose={onClose}>
       <ErrorBanner message={error} />
       <div className="mb-3">
-        <label className="mb-1 block text-sm font-medium text-slate-700">Queue name</label>
+        <label className="mb-1 block text-sm font-medium text-fg-soft">Queue name</label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
         />
       </div>
       <div className="mb-4">
-        <label className="mb-1 block text-sm font-medium text-slate-700">Token prefix</label>
+        <label className="mb-1 block text-sm font-medium text-fg-soft">Token prefix</label>
         <input
           value={tokenPrefix}
           onChange={(e) => setTokenPrefix(e.target.value)}
           maxLength={10}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
         />
       </div>
       <div className="mb-4 space-y-2">
@@ -59,8 +59,8 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
             className="mt-0.5"
           />
           <span>
-            <span className="block font-medium text-slate-700">Allow repeat visits</span>
-            <span className="block text-xs text-slate-500">
+            <span className="block font-medium text-fg-soft">Allow repeat visits</span>
+            <span className="block text-xs text-muted">
               Customers can join this queue again after completing service.
             </span>
           </span>
@@ -73,8 +73,8 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
             className="mt-0.5"
           />
           <span>
-            <span className="block font-medium text-slate-700">Allow multiple services</span>
-            <span className="block text-xs text-slate-500">
+            <span className="block font-medium text-fg-soft">Allow multiple services</span>
+            <span className="block text-xs text-muted">
               Customers can select more than one service when joining.
             </span>
           </span>
@@ -100,12 +100,12 @@ function QueueRow({ queue }: { queue: Queue }) {
   const nextStatus: QueueStatus = queue.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
 
   return (
-    <tr className="border-b border-slate-100">
+    <tr className="border-b border-border transition-colors duration-150 hover:bg-subtle">
       <td className="py-2 pr-4">
         <Link to={`/queues/${queue.id}`} className="font-medium text-brand-600 hover:underline">
           {queue.name}
         </Link>
-        {queue.deletedAt && <span className="ml-2 text-xs text-slate-400">(archived)</span>}
+        {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived)</span>}
       </td>
       <td className="py-2 pr-4">{queue.tokenPrefix}</td>
       <td className="py-2 pr-4">
@@ -176,7 +176,7 @@ export function QueuesPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-900">Queues</h1>
+        <h1 className="text-xl font-semibold text-fg">Queues</h1>
         <PermissionGate permission="manage_queues">
           <Button onClick={() => setShowCreate(true)}>Create Queue</Button>
         </PermissionGate>
@@ -192,7 +192,7 @@ export function QueuesPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as QueueStatus | 'ALL')}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="rounded-md border border-border-strong px-3 py-2 text-sm"
         >
           <option value="ALL">All statuses</option>
           <option value="ACTIVE">Active</option>
@@ -215,7 +215,7 @@ export function QueuesPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
+              <tr className="border-b border-border text-left text-xs uppercase text-faint">
                 <th className="py-2 pr-4">Name</th>
                 <th className="py-2 pr-4">Prefix</th>
                 <th className="py-2 pr-4">Status</th>

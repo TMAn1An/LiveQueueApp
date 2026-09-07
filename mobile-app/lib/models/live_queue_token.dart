@@ -43,6 +43,7 @@ class LiveQueueToken {
     required this.position,
     required this.estimatedWaitMinutes,
     required this.estimatedReadyAt,
+    this.etaUnavailableReason,
     required this.counter,
     required this.createdAt,
     this.calledAt,
@@ -66,6 +67,21 @@ class LiveQueueToken {
   /// estimate. Null exactly when estimatedWaitMinutes is (no active
   /// counters, or not a WAITING token).
   final DateTime? estimatedReadyAt;
+
+  /// Why the backend could not estimate a wait, when it knows. Today the
+  /// only value is `no_active_counter` — nobody is serving this queue, so
+  /// any number would be invented. Null means either an estimate exists or
+  /// the reason is unknown; both are handled by the generic fallback text.
+  final String? etaUnavailableReason;
+
+  /// Whether the missing estimate is explained by the queue simply having
+  /// nobody serving right now, which is worth telling the customer plainly
+  /// rather than leaving them at "unavailable".
+  bool get isWaitingForActiveCounter =>
+      etaUnavailableReason == LiveQueueToken.reasonNoActiveCounter;
+
+  static const String reasonNoActiveCounter = 'NO_ACTIVE_COUNTER';
+
   final CounterInfo? counter;
   final DateTime createdAt;
   final DateTime? calledAt;
@@ -91,6 +107,7 @@ class LiveQueueToken {
       estimatedReadyAt: json['estimatedReadyAt'] == null
           ? null
           : DateTime.parse(json['estimatedReadyAt'] as String),
+      etaUnavailableReason: json['etaUnavailableReason'] as String?,
       counter: json['counter'] == null
           ? null
           : CounterInfo.fromJson(json['counter'] as Map<String, dynamic>),
@@ -111,6 +128,10 @@ class LiveQueueToken {
     bool clearEstimatedWaitMinutes = false,
     DateTime? estimatedReadyAt,
     bool clearEstimatedReadyAt = false,
+    /// Always replaced outright rather than merged: a live update carries
+    /// the current reason or none at all, and keeping a stale one would tell
+    /// the customer a counter is still missing after one has opened.
+    String? etaUnavailableReason,
     CounterInfo? counter,
   }) {
     return LiveQueueToken(
@@ -125,6 +146,7 @@ class LiveQueueToken {
           clearEstimatedWaitMinutes ? null : (estimatedWaitMinutes ?? this.estimatedWaitMinutes),
       estimatedReadyAt:
           clearEstimatedReadyAt ? null : (estimatedReadyAt ?? this.estimatedReadyAt),
+      etaUnavailableReason: etaUnavailableReason,
       counter: counter ?? this.counter,
       createdAt: createdAt,
       calledAt: calledAt,

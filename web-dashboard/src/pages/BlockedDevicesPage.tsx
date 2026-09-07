@@ -12,15 +12,15 @@ import type { CustomerContext, Device, DeviceStatus } from '../types/device';
 
 function CustomerContextPanel({ context }: { context: CustomerContext | null }) {
   if (!context) {
-    return <p className="text-xs italic text-slate-400">No recent queue activity.</p>;
+    return <p className="text-xs italic text-faint">No recent queue activity.</p>;
   }
 
   return (
     <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs sm:grid-cols-3">
       {context.formFields.map((field) => (
         <div key={field.key}>
-          <dt className="text-slate-400">{field.label}</dt>
-          <dd className="text-slate-700">
+          <dt className="text-faint">{field.label}</dt>
+          <dd className="text-fg-soft">
             {field.type === 'phone' ? (
               <a href={`tel:${field.value}`} className="text-brand-600 hover:underline">
                 {field.value}
@@ -36,26 +36,26 @@ function CustomerContextPanel({ context }: { context: CustomerContext | null }) 
         </div>
       ))}
       <div>
-        <dt className="text-slate-400">Token</dt>
-        <dd className="text-slate-700">{context.serialNumber}</dd>
+        <dt className="text-faint">Token</dt>
+        <dd className="text-fg-soft">{context.serialNumber}</dd>
       </div>
       <div>
-        <dt className="text-slate-400">Queue</dt>
-        <dd className="text-slate-700">{context.queue.name}</dd>
+        <dt className="text-faint">Queue</dt>
+        <dd className="text-fg-soft">{context.queue.name}</dd>
       </div>
       <div>
-        <dt className="text-slate-400">Service</dt>
-        <dd className="text-slate-700">{context.services.map((s) => s.name).join(', ') || '—'}</dd>
+        <dt className="text-faint">Service</dt>
+        <dd className="text-fg-soft">{context.services.map((s) => s.name).join(', ') || '—'}</dd>
       </div>
       <div>
-        <dt className="text-slate-400">Status</dt>
+        <dt className="text-faint">Status</dt>
         <dd>
           <StatusBadge status={context.status} />
         </dd>
       </div>
       <div>
-        <dt className="text-slate-400">Taken</dt>
-        <dd className="text-slate-700">{formatDateTime(context.createdAt)}</dd>
+        <dt className="text-faint">Taken</dt>
+        <dd className="text-fg-soft">{formatDateTime(context.createdAt)}</dd>
       </div>
     </dl>
   );
@@ -71,10 +71,10 @@ function DeviceRow({
   onUnblock: (deviceId: string) => void;
 }) {
   return (
-    <div className="border-b border-slate-100 py-4 last:border-b-0">
+    <div className="border-b border-border py-4 last:border-b-0">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-slate-500">{device.deviceIdentifier}</span>
+          <span className="font-mono text-xs text-muted">{device.deviceIdentifier}</span>
           <StatusBadge status={device.status} />
         </div>
         <Button
@@ -85,10 +85,10 @@ function DeviceRow({
         </Button>
       </div>
 
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Customer / Visit</h3>
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">Customer / Visit</h3>
       <CustomerContextPanel context={device.customerContext} />
 
-      <p className="mt-2 text-xs text-slate-400">Last seen: {formatDateTime(device.lastSeenAt)}</p>
+      <p className="mt-2 text-xs text-faint">Last seen: {formatDateTime(device.lastSeenAt)}</p>
     </div>
   );
 }
@@ -112,8 +112,8 @@ export function BlockedDevicesPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-xl font-semibold text-slate-900">Device Blocking</h1>
-      <p className="mb-4 max-w-2xl text-sm text-slate-500">
+      <h1 className="mb-2 text-xl font-semibold text-fg">Device Blocking</h1>
+      <p className="mb-4 max-w-2xl text-sm text-muted">
         Devices that have joined one of your queues. Blocking a device only affects your organization
         — it can still be used to join queues at other businesses.
       </p>
@@ -131,7 +131,7 @@ export function BlockedDevicesPage() {
             setPage(1);
             setStatusFilter((e.target.value || undefined) as DeviceStatus | undefined);
           }}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="rounded-md border border-border-strong px-3 py-2 text-sm"
         >
           <option value="">All statuses</option>
           <option value="ACTIVE">Active</option>

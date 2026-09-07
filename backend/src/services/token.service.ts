@@ -403,6 +403,15 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   return getTokenCustomerView(created.id);
 }
 
+/**
+ * Why a waiting customer has no estimate. `NO_ACTIVE_COUNTER` is the honest
+ * and by far most common answer: with nobody serving, any number would be
+ * invented. Sent to the customer app so it can say something useful instead
+ * of a bare "not available" — it names a queue-level operational state, not
+ * anything about staff or other customers.
+ */
+export type EtaUnavailableReason = 'NO_ACTIVE_COUNTER';
+
 interface QueueEtaEntry {
   id: string;
   organizationId: string;
@@ -411,6 +420,7 @@ interface QueueEtaEntry {
   position: number;
   estimatedWaitMinutes: number | null;
   estimatedReadyAt: Date | null;
+  etaUnavailableReason: EtaUnavailableReason | null;
 }
 
 /**
@@ -461,6 +471,7 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
       position: index + 1,
       estimatedWaitMinutes: null,
       estimatedReadyAt: null,
+      etaUnavailableReason: 'NO_ACTIVE_COUNTER' as const,
     }));
   }
 
@@ -502,15 +513,22 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
       position: index + 1,
       estimatedWaitMinutes: estimatedReadyAt ? minutesUntil(estimatedReadyAt, now) : null,
       estimatedReadyAt,
+      // Capacity exists, so any missing value here is a genuine anomaly
+      // rather than the expected "nobody is serving" case — deliberately
+      // left unexplained rather than mislabelled.
+      etaUnavailableReason: null,
     };
   });
 }
 
-async function computeComputedFields(
-  token: Token,
-): Promise<{ position: number | null; estimatedWaitMinutes: number | null; estimatedReadyAt: Date | null }> {
+async function computeComputedFields(token: Token): Promise<ComputedFields> {
   if (token.status !== 'WAITING') {
-    return { position: null, estimatedWaitMinutes: null, estimatedReadyAt: null };
+    return {
+      position: null,
+      estimatedWaitMinutes: null,
+      estimatedReadyAt: null,
+      etaUnavailableReason: null,
+    };
   }
 
   const entries = await computeQueueEtas(token.queueId);
@@ -520,8 +538,14 @@ async function computeComputedFields(
         position: entry.position,
         estimatedWaitMinutes: entry.estimatedWaitMinutes,
         estimatedReadyAt: entry.estimatedReadyAt,
+        etaUnavailableReason: entry.etaUnavailableReason,
       }
-    : { position: null, estimatedWaitMinutes: null, estimatedReadyAt: null };
+    : {
+        position: null,
+        estimatedWaitMinutes: null,
+        estimatedReadyAt: null,
+        etaUnavailableReason: null,
+      };
 }
 
 /**
@@ -550,6 +574,10 @@ type ComputedFields = {
    * re-anchors whenever a fresh one arrives, never treating its own clock
    * as authoritative (Rule F). */
   estimatedReadyAt: Date | null;
+  /** Why the two fields above are null, when the reason is a known
+   * operational state rather than an anomaly. Lets the customer app explain
+   * the wait instead of showing a bare "unavailable". */
+  etaUnavailableReason: EtaUnavailableReason | null;
 };
 
 interface SelectedService {
@@ -591,6 +619,7 @@ function toCustomerView(
     position: computed.position,
     estimatedWaitMinutes: computed.estimatedWaitMinutes,
     estimatedReadyAt: computed.estimatedReadyAt,
+    etaUnavailableReason: computed.etaUnavailableReason,
     counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
     createdAt: token.createdAt,
     calledAt: token.calledAt,
@@ -846,6 +875,119 @@ export async function callToken(
   });
 }
 
+/**
+ * Why a WAITING token cannot currently be acted on. Both reasons are
+ * queue-operational facts staff can act on, not internal detail.
+ */
+export type WaitingActionBlockedReason = 'EARLIER_WAITING' | 'NO_AVAILABLE_COUNTER';
+
+export interface WaitingActionEligibility {
+  eligible: boolean;
+  reason: WaitingActionBlockedReason | null;
+}
+
+/**
+ * The single authority on whether a WAITING token may be acted on right now.
+ *
+ * The product rule is that Skip unlocks exactly when Call unlocks — a
+ * customer who cannot yet be called cannot be skipped either, so staff can
+ * never quietly remove a later customer from the queue ahead of their turn.
+ * Both conditions below are precisely the two that `callToken` enforces for
+ * a WAITING source:
+ *
+ *  1. strict FCFS — no earlier WAITING token in the same queue;
+ *  2. capacity — at least one ACTIVE counter in the queue is free.
+ *
+ * Call additionally requires the *specific* counter staff picked to be
+ * active and free; that stays inside callToken's own transaction, where the
+ * counter row is locked. This function answers the counter-agnostic
+ * question ("could this token be called by someone right now?"), which is
+ * what Skip needs and what the dashboard renders.
+ *
+ * Runs on a transaction client when called inside one, so the check and the
+ * state change it guards observe the same snapshot.
+ */
+export async function getWaitingTokenActionEligibility(
+  client: Prisma.TransactionClient,
+  token: { id: string; queueId: string; sequenceNumber: number },
+): Promise<WaitingActionEligibility> {
+  const earlierWaitingRows = await client.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM tokens
+      WHERE queue_id = ${token.queueId}
+        AND status = 'WAITING'
+        AND sequence_number < ${token.sequenceNumber}
+    ) AS "exists"
+  `;
+  if (earlierWaitingRows[0]?.exists) {
+    return { eligible: false, reason: 'EARLIER_WAITING' };
+  }
+
+  // "Free" means active and not already serving a CALLED/IN_PROGRESS token —
+  // the same occupancy rule callToken's busy-check applies to one counter.
+  const freeCounterRows = await client.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM counters c
+      WHERE c.queue_id = ${token.queueId}
+        AND c.status = 'ACTIVE'
+        AND NOT EXISTS (
+          SELECT 1 FROM tokens t
+          WHERE t.counter_id = c.id
+            AND t.status IN ('CALLED', 'IN_PROGRESS')
+        )
+    ) AS "exists"
+  `;
+  if (!freeCounterRows[0]?.exists) {
+    return { eligible: false, reason: 'NO_AVAILABLE_COUNTER' };
+  }
+
+  return { eligible: true, reason: null };
+}
+
+/** Queue-level half of the eligibility rule, for read-only display paths
+ * (the live queue table) that already know each row's position and only
+ * need one capacity probe per queue rather than one per row. */
+export async function hasFreeActiveCounter(queueId: string): Promise<boolean> {
+  const rows = await prisma.$queryRaw<{ exists: boolean }[]>`
+    SELECT EXISTS (
+      SELECT 1 FROM counters c
+      WHERE c.queue_id = ${queueId}
+        AND c.status = 'ACTIVE'
+        AND NOT EXISTS (
+          SELECT 1 FROM tokens t
+          WHERE t.counter_id = c.id
+            AND t.status IN ('CALLED', 'IN_PROGRESS')
+        )
+    ) AS "exists"
+  `;
+  return rows[0]?.exists ?? false;
+}
+
+/**
+ * The same rule as getWaitingTokenActionEligibility, expressed over values
+ * a caller already has. Position 1 *is* "no earlier WAITING token" — that is
+ * how listWaitingTokenPositions numbers them — so the two conditions and
+ * their order match the authoritative check exactly. Display-only: the API
+ * still re-decides authoritatively inside the transaction that acts.
+ */
+export function waitingActionEligibilityFrom(
+  position: number | null,
+  queueHasFreeCounter: boolean,
+): WaitingActionEligibility {
+  if (position !== 1) {
+    return { eligible: false, reason: 'EARLIER_WAITING' };
+  }
+  if (!queueHasFreeCounter) {
+    return { eligible: false, reason: 'NO_AVAILABLE_COUNTER' };
+  }
+  return { eligible: true, reason: null };
+}
+
+const WAITING_ACTION_BLOCKED_MESSAGE: Record<WaitingActionBlockedReason, string> = {
+  EARLIER_WAITING: 'An earlier customer is still waiting. The earliest eligible customer must be handled first.',
+  NO_AVAILABLE_COUNTER: 'No active counter is free right now, so this customer cannot be handled yet.',
+};
+
 type TimestampField = 'completedAt' | 'skippedAt';
 
 /**
@@ -872,28 +1014,63 @@ async function transitionToken(
   tokenId: string,
   targetStatus: TokenStatus,
   timestampField: TimestampField,
+  guard?: (tx: Prisma.TransactionClient, token: Token) => Promise<void>,
 ): Promise<{ token: Omit<Token, 'serviceStartOtpCipher' | 'serviceStartOtpExpiresAt' | 'serviceStartOtpFailedAttempts'>; previousStatus: TokenStatus }> {
   const token = await findTokenScoped(organizationId, tokenId);
   assertValidTransition(token.status, targetStatus);
   const previousStatus = token.status;
 
-  const result = await prisma.token.updateMany({
-    where: { id: tokenId, status: token.status },
-    data: { status: targetStatus, [timestampField]: new Date() },
-  });
-  if (result.count === 0) {
-    throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
-  }
+  // The guard and the compare-and-swap share one transaction so an
+  // eligibility decision can never be made against a snapshot the write
+  // then contradicts.
+  return prisma.$transaction(async (tx) => {
+    if (guard) {
+      await guard(tx, token);
+    }
 
-  const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
-  return { token: omitOtpFields(updated), previousStatus };
+    const result = await tx.token.updateMany({
+      where: { id: tokenId, status: token.status },
+      data: { status: targetStatus, [timestampField]: new Date() },
+    });
+    if (result.count === 0) {
+      throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+    }
+
+    const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
+    return { token: omitOtpFields(updated), previousStatus };
+  });
 }
 
 export const completeToken = (organizationId: string, tokenId: string) =>
   transitionToken(organizationId, tokenId, 'COMPLETED', 'completedAt');
 
+/**
+ * Skipping a WAITING customer is gated on exactly the same eligibility that
+ * unlocks Call (getWaitingTokenActionEligibility): a customer who is not yet
+ * callable is not yet skippable either. Without this, staff — or anyone with
+ * direct API access — could remove a later customer from the queue while
+ * earlier ones still waited, which is the same out-of-order handling strict
+ * FCFS exists to prevent.
+ *
+ * Skipping a CALLED or IN_PROGRESS token is untouched: that customer is
+ * already at a counter, so neither queue order nor free capacity is in
+ * question.
+ */
 export const skipToken = (organizationId: string, tokenId: string) =>
-  transitionToken(organizationId, tokenId, 'SKIPPED', 'skippedAt');
+  transitionToken(organizationId, tokenId, 'SKIPPED', 'skippedAt', async (tx, token) => {
+    if (token.status !== 'WAITING') {
+      return;
+    }
+    const eligibility = await getWaitingTokenActionEligibility(tx, token);
+    if (eligibility.eligible || !eligibility.reason) {
+      return;
+    }
+    throw new AppError(
+      409,
+      eligibility.reason === 'EARLIER_WAITING' ? 'FCFS_VIOLATION' : 'COUNTER_NOT_AVAILABLE',
+      WAITING_ACTION_BLOCKED_MESSAGE[eligibility.reason],
+    );
+  });
 
 /**
  * V2 Checkpoint 7 (ADR-029): CALLED -> IN_PROGRESS, gated on a customer-

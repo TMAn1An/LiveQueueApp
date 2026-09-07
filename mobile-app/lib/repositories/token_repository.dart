@@ -11,6 +11,7 @@ class PositionUpdate {
     required this.estimatedWaitMinutes,
     required this.estimatedReadyAt,
     this.reason,
+    this.etaUnavailableReason,
   });
   final int position;
   final int? estimatedWaitMinutes;
@@ -22,6 +23,11 @@ class PositionUpdate {
   /// when staff explicitly changed how long a service is expected to take.
   /// Only the latter is worth interrupting the customer about.
   final String? reason;
+
+  /// Why there is no estimate in this update, when the backend knows —
+  /// mirrors the same field on the REST token view so a queue opening or
+  /// closing a counter changes what the customer is told immediately.
+  final String? etaUnavailableReason;
 
   static const String reasonDurationUpdated = 'duration_updated';
 
@@ -114,6 +120,7 @@ class TokenRepository {
             ? null
             : DateTime.parse(data['estimatedReadyAt'] as String),
         reason: data['reason'] as String?,
+        etaUnavailableReason: data['etaUnavailableReason'] as String?,
       );
     });
   }

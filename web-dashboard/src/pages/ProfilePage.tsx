@@ -21,43 +21,43 @@ export function ProfilePage() {
 
   return (
     <div className="max-w-md space-y-6">
-      <h1 className="text-xl font-semibold text-slate-900">Profile</h1>
+      <h1 className="text-xl font-semibold text-fg">Profile</h1>
       <Card>
         <dl className="space-y-3 text-sm">
           <div>
-            <dt className="text-xs text-slate-400">Name</dt>
-            <dd className="text-slate-900">{staff.name}</dd>
+            <dt className="text-xs text-faint">Name</dt>
+            <dd className="text-fg">{staff.name}</dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-400">Email</dt>
-            <dd className="text-slate-900">{staff.email}</dd>
+            <dt className="text-xs text-faint">Email</dt>
+            <dd className="text-fg">{staff.email}</dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-400">Role</dt>
-            <dd className="text-slate-900">{staff.role}</dd>
+            <dt className="text-xs text-faint">Role</dt>
+            <dd className="text-fg">{staff.role}</dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-400">Status</dt>
+            <dt className="text-xs text-faint">Status</dt>
             <dd>
               <StatusBadge status={staff.status} />
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-400">Organization</dt>
-            <dd className="text-slate-900">{organization.name}</dd>
+            <dt className="text-xs text-faint">Organization</dt>
+            <dd className="text-fg">{organization.name}</dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-400">Last Login</dt>
-            <dd className="text-slate-900">{formatDateTime(staff.lastLoginAt)}</dd>
+            <dt className="text-xs text-faint">Last Login</dt>
+            <dd className="text-fg">{formatDateTime(staff.lastLoginAt)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-slate-400">Permissions</dt>
+            <dt className="text-xs text-faint">Permissions</dt>
             <dd className="mt-1 flex flex-wrap gap-1">
               {permissions.length === 0 ? (
-                <span className="text-slate-400">None</span>
+                <span className="text-faint">None</span>
               ) : (
                 permissions.map((p) => (
-                  <span key={p} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                  <span key={p} className="rounded bg-subtle px-2 py-0.5 text-xs text-muted">
                     {p}
                   </span>
                 ))
@@ -108,11 +108,11 @@ function ChangePasswordCard() {
 
   return (
     <Card>
-      <h2 className="mb-3 text-sm font-semibold text-slate-900">Change Password</h2>
+      <h2 className="mb-3 text-sm font-semibold text-fg">Change Password</h2>
       <ErrorBanner message={error} />
       {success && <p className="mb-3 text-sm text-green-600">Password changed successfully.</p>}
       <div className="mb-3">
-        <label className="mb-1 block text-xs text-slate-500">Current password</label>
+        <label className="mb-1 block text-xs text-muted">Current password</label>
         <PasswordInput
           autoComplete="current-password"
           value={currentPassword}
@@ -121,7 +121,7 @@ function ChangePasswordCard() {
         />
       </div>
       <div className="mb-3">
-        <label className="mb-1 block text-xs text-slate-500">New password</label>
+        <label className="mb-1 block text-xs text-muted">New password</label>
         <PasswordInput
           autoComplete="new-password"
           value={newPassword}
@@ -131,7 +131,7 @@ function ChangePasswordCard() {
         />
       </div>
       <div className="mb-4">
-        <label className="mb-1 block text-xs text-slate-500">Confirm new password</label>
+        <label className="mb-1 block text-xs text-muted">Confirm new password</label>
         <PasswordInput
           autoComplete="new-password"
           value={confirmPassword}
@@ -141,7 +141,7 @@ function ChangePasswordCard() {
         />
         {mismatch && <p className="mt-1 text-xs text-red-600">Passwords do not match.</p>}
       </div>
-      <p className="mb-4 text-xs text-slate-400">
+      <p className="mb-4 text-xs text-faint">
         Changing your password will sign you out of your other sessions on other devices.
       </p>
       <Button

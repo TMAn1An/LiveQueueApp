@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AppLayout } from './AppLayout';
+import { ThemeProvider } from '../context/ThemeContext';
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
@@ -18,9 +19,11 @@ vi.mock('../hooks/useOrganizationSocket', () => ({
 describe('AppLayout branding', () => {
   it('shows the LiveQueue logo in the sidebar above the organization name', () => {
     render(
-      <MemoryRouter>
-        <AppLayout />
-      </MemoryRouter>,
+      <ThemeProvider>
+        <MemoryRouter>
+          <AppLayout />
+        </MemoryRouter>
+      </ThemeProvider>,
     );
 
     expect(screen.getByAltText('LiveQueue')).toHaveAttribute('src', '/logo-horizontal.png');
@@ -31,9 +34,11 @@ describe('AppLayout branding', () => {
 describe('AppLayout navigation', () => {
   it('labels the device section "Device Blocking" while keeping the /devices route', () => {
     render(
-      <MemoryRouter>
-        <AppLayout />
-      </MemoryRouter>,
+      <ThemeProvider>
+        <MemoryRouter>
+          <AppLayout />
+        </MemoryRouter>
+      </ThemeProvider>,
     );
 
     const link = screen.getByRole('link', { name: 'Device Blocking' });

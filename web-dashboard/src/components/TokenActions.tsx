@@ -13,6 +13,7 @@ import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
 import { ApiError } from '../api/client';
 import type { TokenStatus } from '../types/token';
+import type { WaitingActionEligibility } from '../types/dashboard';
 
 /**
  * Spec section 10: Call/Start/Complete/Skip, each appearing only when valid
@@ -40,13 +41,29 @@ export function TokenActions({
   queueId,
   status,
   position,
+  actionEligibility,
 }: {
   tokenId: string;
   queueId: string;
   status: TokenStatus;
   position?: number | null;
+  actionEligibility?: WaitingActionEligibility | null;
 }) {
-  const isFcfsEligible = position == null || position === 1;
+  // Call and Skip unlock together, always. The backend decides this — the
+  // row carries its answer — and a locked row must never show a live Skip,
+  // which would let staff drop a later customer ahead of their turn.
+  // Falls back to the position rule when a caller has not been updated to
+  // pass eligibility, so nothing regresses to "unlocked by default".
+  const eligibility: WaitingActionEligibility =
+    actionEligibility ??
+    (position == null || position === 1
+      ? { eligible: true, reason: null }
+      : { eligible: false, reason: 'EARLIER_WAITING' });
+  const isFcfsEligible = eligibility.eligible;
+  const lockedTitle =
+    eligibility.reason === 'NO_AVAILABLE_COUNTER'
+      ? 'Waiting for an available counter.'
+      : 'Earlier customers must be handled first.';
   const [pickingCounter, setPickingCounter] = useState(false);
   const [pickingRecallCounter, setPickingRecallCounter] = useState(false);
   const [recallError, setRecallError] = useState<string | null>(null);
@@ -114,14 +131,14 @@ export function TokenActions({
           </Button>
         )}
         {status === 'WAITING' && !isFcfsEligible && (
-          <Button variant="secondary" disabled title="An earlier customer must be called first">
+          <Button variant="secondary" disabled title={lockedTitle}>
             Locked
           </Button>
         )}
         {status === 'WAITING' && pickingCounter && (
           <select
             autoFocus
-            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+            className="rounded-md border border-border-strong px-2 py-1 text-sm"
             defaultValue=""
             onBlur={() => setPickingCounter(false)}
             onChange={(e) => {
@@ -161,7 +178,7 @@ export function TokenActions({
               placeholder="Verification code"
               value={verificationCodeInput}
               onChange={(e) => setVerificationCodeInput(e.target.value)}
-              className="w-36 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              className="w-36 rounded-md border border-border-strong px-2 py-1 text-sm"
             />
             <Button type="submit" variant="primary" disabled={startToken.isPending}>
               Confirm
@@ -205,7 +222,7 @@ export function TokenActions({
               placeholder="Minutes"
               value={durationInput}
               onChange={(e) => setDurationInput(e.target.value)}
-              className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              className="w-20 rounded-md border border-border-strong px-2 py-1 text-sm"
             />
             <Button type="submit" variant="primary" disabled={setRequiredDuration.isPending}>
               Set
@@ -222,8 +239,14 @@ export function TokenActions({
             </Button>
           </form>
         )}
-        {(status === 'WAITING' || status === 'CALLED' || status === 'IN_PROGRESS') && (
-          <Button variant="secondary" onClick={() => skipToken.mutate(tokenId)}>
+        {/* A waiting customer may only be skipped while they could also be
+            called; once at a counter, Skip is always available. The single
+            "Locked" chip above already explains a locked waiting row, so no
+            second disabled button is rendered beside it. */}
+        {((status === 'WAITING' && isFcfsEligible) ||
+          status === 'CALLED' ||
+          status === 'IN_PROGRESS') && (
+          <Button variant="outline" onClick={() => skipToken.mutate(tokenId)}>
             Skip
           </Button>
         )}
@@ -235,7 +258,7 @@ export function TokenActions({
         {status === 'SKIPPED' && pickingRecallCounter && (
           <select
             autoFocus
-            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+            className="rounded-md border border-border-strong px-2 py-1 text-sm"
             defaultValue=""
             onBlur={() => setPickingRecallCounter(false)}
             onChange={(e) => {

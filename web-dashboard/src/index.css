@@ -1,5 +1,10 @@
 @import 'tailwindcss';
 
+/* Dark mode is driven by a `dark` class on <html>, set by ThemeProvider —
+   not by the media query alone, because the user's explicit choice has to
+   win over the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * LiveQueue brand palette. Both anchors are sampled directly from the
  * official logo artwork, not invented: brand-600 is the blue of the "LIVE"
@@ -38,16 +43,94 @@
   --color-accent-700: #0f7168;
   --color-accent-800: #0e5a53;
   --color-accent-900: #0d4a45;
+
+  /*
+   * Semantic surface/text tokens. Components reference these rather than a
+   * literal slate shade, so one definition per theme flips the whole
+   * dashboard — there is no per-component dark styling to keep in sync.
+   * Light values are exactly the slate shades the dashboard already used,
+   * so light mode is unchanged.
+   */
+  --color-page: #f8fafc;
+  --color-surface: #ffffff;
+  --color-subtle: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  --color-fg: #0f172a;
+  --color-fg-soft: #334155;
+  --color-muted: #64748b;
+  --color-faint: #94a3b8;
+  /* The brand tone that reads correctly on the current surface — swapped in
+     dark mode, where brand-600 on a dark ground is too heavy to read. */
+  --color-brand-fg: #0f539e;
+}
+
+/*
+ * Dark theme. Not an inversion: the surfaces are true slate darks, and the
+ * brand blue moves *up* its own scale (600 -> 300) so LiveQueue still reads
+ * as LiveQueue while clearing contrast on a dark ground. Semantic red,
+ * amber and green are untouched here and stay exactly as bright as they are
+ * in light mode — a destructive action must never soften into brand color.
+ */
+.dark {
+  --color-page: #0b1220;
+  --color-surface: #111a2b;
+  --color-subtle: #1b263b;
+  --color-border: #24334d;
+  --color-border-strong: #35486a;
+  --color-fg: #e8eef7;
+  --color-fg-soft: #c3cfe0;
+  --color-muted: #93a3ba;
+  --color-faint: #7386a1;
+  --color-brand-fg: #7ba9d8;
 }
 
 /* Operational software: speed and clarity over visual effects (spec section 33). */
 body {
-  @apply bg-slate-50 text-slate-900 antialiased;
+  @apply bg-page text-fg antialiased;
 }
 
 /* One brand-colored focus ring for every interactive element, instead of the
-   browser default — keyboard position must stay obvious on every page. */
+   browser default — keyboard position must stay obvious on every page, and
+   the ring has to stay visible against a dark surface too. */
 :focus-visible {
-  outline: 2px solid var(--color-brand-600);
+  outline: 2px solid var(--color-brand-fg);
   outline-offset: 2px;
+}
+
+/*
+ * Form controls are the one place the browser paints its own colors, so they
+ * need the surface tokens applied globally rather than class by class —
+ * otherwise a dark dashboard still shows white input wells. Placeholder and
+ * disabled treatments live here for the same reason.
+ */
+input,
+select,
+textarea {
+  background-color: var(--color-surface);
+  color: var(--color-fg);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-faint);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background-color: var(--color-subtle);
+  color: var(--color-muted);
+  cursor: not-allowed;
+}
+
+/* The native date picker and select arrow are drawn by the browser in its
+   own light palette; this asks for the dark set when the theme is dark. */
+.dark input,
+.dark select,
+.dark textarea {
+  color-scheme: dark;
 }

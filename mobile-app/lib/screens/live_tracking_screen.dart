@@ -133,7 +133,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     if (token.estimatedReadyAt != null)
                       _CountdownRow(label: 'Estimated Wait', estimatedReadyAt: token.estimatedReadyAt!)
                     else
-                      const _InfoRow(label: 'Estimated Wait', value: 'Not available'),
+                      // No estimate is ever invented when nobody is serving —
+                      // but the customer is told which of the two situations
+                      // they are in rather than a bare "unavailable".
+                      _InfoRow(
+                        label: 'Estimated Wait',
+                        value: token.isWaitingForActiveCounter
+                            ? 'Waiting for an active counter'
+                            : 'Estimated time unavailable',
+                      ),
                   ],
                   if (token.status == TokenStatus.called && token.counter != null)
                     _InfoRow(label: 'Counter', value: token.counter!.name),

@@ -4,19 +4,19 @@ const COLORS: Record<string, string> = {
   WAITING: 'bg-amber-100 text-amber-800',
   CALLED: 'bg-brand-100 text-brand-800',
   IN_PROGRESS: 'bg-accent-100 text-accent-800',
-  COMPLETED: 'bg-slate-100 text-slate-600',
+  COMPLETED: 'bg-subtle text-muted',
   SKIPPED: 'bg-red-100 text-red-700',
   CANCELLED: 'bg-orange-100 text-orange-700',
   PAUSED: 'bg-amber-100 text-amber-800',
-  INACTIVE: 'bg-slate-100 text-slate-600',
+  INACTIVE: 'bg-subtle text-muted',
   ON_BREAK: 'bg-amber-100 text-amber-800',
-  OFFLINE: 'bg-slate-100 text-slate-600',
+  OFFLINE: 'bg-subtle text-muted',
   BLOCKED: 'bg-red-100 text-red-700',
   SUSPENDED: 'bg-red-100 text-red-700',
 };
 
 export function StatusBadge({ status }: { status: string }) {
-  const classes = COLORS[status] ?? 'bg-slate-100 text-slate-600';
+  const classes = COLORS[status] ?? 'bg-subtle text-muted';
   return (
     <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${classes}`}>
       {status.replace(/_/g, ' ')}

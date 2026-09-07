@@ -63,14 +63,28 @@ export async function updateStatus(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitCounterStatusChanged(counter, req.auth!.organizationId);
+  // A counter going ACTIVE (or leaving it) changes the queue's serving
+  // capacity, which is the denominator of every waiting customer's ETA —
+  // with no active counter there is no honest estimate at all. Without this
+  // recompute, a customer who joined while the queue had no active counter
+  // kept seeing "no estimate" indefinitely after staff opened one, because
+  // nothing else in the system told them otherwise until some unrelated
+  // token event happened to fire.
+  await realtime.broadcastQueueEtaUpdate(counter.queueId);
 }
 
 export async function remove(req: Request, res: Response) {
   // Counter deletion has no approved audit action (only create/update/status
   // changes were named for counter_changed) — not audited here; see the
   // Phase 7 Step 5 report for this gap.
-  await counterService.deleteCounter(req.auth!.organizationId, req.params.counterId as string);
+  const deleted = await counterService.deleteCounter(
+    req.auth!.organizationId,
+    req.params.counterId as string,
+  );
   res.status(204).send();
+  // Removing an ACTIVE counter reduces capacity exactly the way deactivating
+  // one does, so waiting ETAs have to be recomputed for the same reason.
+  await realtime.broadcastQueueEtaUpdate(deleted.queueId);
 }
 
 export async function assign(req: Request, res: Response) {

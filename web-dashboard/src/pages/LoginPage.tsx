@@ -32,7 +32,7 @@ export function LoginPage() {
     <form onSubmit={handleSubmit}>
       <ErrorBanner message={error} />
       <div className="mb-3">
-        <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
+        <label htmlFor="email" className="mb-1 block text-sm font-medium text-fg-soft">
           Email
         </label>
         <input
@@ -41,11 +41,11 @@ export function LoginPage() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
         />
       </div>
       <div className="mb-4">
-        <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">
+        <label htmlFor="password" className="mb-1 block text-sm font-medium text-fg-soft">
           Password
         </label>
         <PasswordInput
@@ -57,10 +57,10 @@ export function LoginPage() {
           className="px-3 py-2 text-sm"
         />
       </div>
-      <Button type="submit" disabled={submitting} className="w-full">
+      <Button type="submit" loading={submitting} className="w-full">
         {submitting ? 'Signing in…' : 'Sign in'}
       </Button>
-      <p className="mt-4 text-center text-sm text-slate-500">
+      <p className="mt-4 text-center text-sm text-muted">
         No organization yet?{' '}
         <Link to="/register" className="font-medium text-brand-600 hover:underline">
           Register

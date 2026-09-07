@@ -36,9 +36,9 @@ export function QueueDetailsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-slate-900">{queue.name}</h1>
+          <h1 className="text-xl font-semibold text-fg">{queue.name}</h1>
           <StatusBadge status={queue.status} />
-          {queue.deletedAt && <span className="ml-2 text-xs text-slate-400">(archived — read only)</span>}
+          {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived — read only)</span>}
         </div>
         <Link to={`/queues/${queue.id}/counters`}>
           <Button variant="secondary">Manage Counters</Button>
@@ -47,7 +47,7 @@ export function QueueDetailsPage() {
 
       <Card>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">Details</h2>
+          <h2 className="text-sm font-semibold text-fg-soft">Details</h2>
           {!queue.deletedAt && !editing && (
             <PermissionGate permission="manage_queues">
               <Button variant="secondary" onClick={startEditing}>
@@ -59,19 +59,19 @@ export function QueueDetailsPage() {
         {editing ? (
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-slate-500">Name</label>
+              <label className="mb-1 block text-xs text-muted">Name</label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-slate-500">Description</label>
+              <label className="mb-1 block text-xs text-muted">Description</label>
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
               />
             </div>
             <div className="space-y-2">
@@ -83,8 +83,8 @@ export function QueueDetailsPage() {
                   className="mt-0.5"
                 />
                 <span>
-                  <span className="block font-medium text-slate-700">Allow repeat visits</span>
-                  <span className="block text-xs text-slate-500">
+                  <span className="block font-medium text-fg-soft">Allow repeat visits</span>
+                  <span className="block text-xs text-muted">
                     Customers can join this queue again after completing service.
                   </span>
                 </span>
@@ -97,8 +97,8 @@ export function QueueDetailsPage() {
                   className="mt-0.5"
                 />
                 <span>
-                  <span className="block font-medium text-slate-700">Allow multiple services</span>
-                  <span className="block text-xs text-slate-500">
+                  <span className="block font-medium text-fg-soft">Allow multiple services</span>
+                  <span className="block text-xs text-muted">
                     Customers can select more than one service when joining.
                   </span>
                 </span>
@@ -121,24 +121,24 @@ export function QueueDetailsPage() {
         ) : (
           <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
             <div>
-              <dt className="text-xs text-slate-400">Token Prefix</dt>
+              <dt className="text-xs text-faint">Token Prefix</dt>
               <dd>{queue.tokenPrefix}</dd>
             </div>
             <div>
-              <dt className="text-xs text-slate-400">Base Time</dt>
+              <dt className="text-xs text-faint">Base Time</dt>
               <dd>{queue.baseTimeMinutes} min</dd>
             </div>
             <div>
-              <dt className="text-xs text-slate-400">Reminder</dt>
+              <dt className="text-xs text-faint">Reminder</dt>
               <dd>{queue.defaultNotificationMinutes} min before</dd>
             </div>
             <div>
-              <dt className="text-xs text-slate-400">Form Version</dt>
+              <dt className="text-xs text-faint">Form Version</dt>
               <dd>{queue.formVersion}</dd>
             </div>
             {queue.description && (
               <div className="col-span-full">
-                <dt className="text-xs text-slate-400">Description</dt>
+                <dt className="text-xs text-faint">Description</dt>
                 <dd>{queue.description}</dd>
               </div>
             )}
@@ -147,17 +147,17 @@ export function QueueDetailsPage() {
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">Services</h2>
+        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Services</h2>
         <ServicesManager queueId={queue.id} services={queue.services} />
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">Dynamic Form Fields</h2>
+        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Dynamic Form Fields</h2>
         <FormBuilder queueId={queue.id} />
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">QR Code</h2>
+        <h2 className="mb-3 text-sm font-semibold text-fg-soft">QR Code</h2>
         <QrCodeDisplay
           qrCodeUri={queue.qrCodeUri}
           organizationName={organization?.name ?? ''}

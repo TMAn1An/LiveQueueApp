@@ -259,6 +259,10 @@ describe('All 12 specification events are emitted to the organization room', () 
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
+    // Skipping a WAITING customer now requires a free active counter — the
+    // same condition that unlocks Call for them.
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);

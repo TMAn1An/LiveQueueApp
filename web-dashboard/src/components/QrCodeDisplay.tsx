@@ -41,9 +41,9 @@ export function QrCodeDisplay({
   return (
     <div>
       <div id="qr-print-area" className="flex flex-col items-center gap-2 text-center">
-        <p className="text-sm text-slate-500">{organizationName}</p>
-        <h3 className="text-lg font-semibold text-slate-900">{queueName}</h3>
-        <p className="text-sm text-slate-500">Scan to Join</p>
+        <p className="text-sm text-muted">{organizationName}</p>
+        <h3 className="text-lg font-semibold text-fg">{queueName}</h3>
+        <p className="text-sm text-muted">Scan to Join</p>
         <canvas ref={canvasRef} aria-label={`QR code to join ${queueName}`} />
       </div>
       <div className="mt-4 flex justify-center gap-2 print:hidden">

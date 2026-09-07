@@ -41,7 +41,7 @@ export function VerifyEmailPage() {
 
   return (
     <div className="text-center">
-      {status === 'verifying' && <p className="text-sm text-slate-600">Verifying your email…</p>}
+      {status === 'verifying' && <p className="text-sm text-muted">Verifying your email…</p>}
       {status === 'success' && (
         <>
           <p className="mb-4 text-sm font-medium text-green-700">

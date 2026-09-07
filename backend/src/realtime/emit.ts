@@ -194,6 +194,11 @@ export function broadcastQueueEtaUpdate(
         position: entry.position,
         estimatedWaitMinutes: entry.estimatedWaitMinutes,
         estimatedReadyAt: entry.estimatedReadyAt,
+        // Carried on the live update too, not just the REST read: a queue
+        // whose last active counter just closed (or just opened) has to be
+        // able to change what the customer is told without them reopening
+        // the app.
+        etaUnavailableReason: entry.etaUnavailableReason,
         // Present only when an explicit staff action changed how long a
         // customer's service is expected to take. Ordinary queue movement
         // (someone ahead finishing, a counter opening) carries no reason,

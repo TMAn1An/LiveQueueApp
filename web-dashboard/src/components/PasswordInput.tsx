@@ -25,7 +25,7 @@ export function PasswordInput({
         {...props}
         id={inputId}
         type={visible ? 'text' : 'password'}
-        className={`w-full rounded-md border border-slate-300 pr-10 ${className}`}
+        className={`w-full rounded-md border border-border-strong pr-10 ${className}`}
       />
       <button
         type="button"
@@ -36,7 +36,7 @@ export function PasswordInput({
         aria-pressed={visible}
         aria-controls={inputId}
         onClick={() => setVisible((current) => !current)}
-        className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-600"
+        className="absolute inset-y-0 right-0 flex items-center px-3 text-faint hover:text-muted"
       >
         {visible ? <EyeOffIcon /> : <EyeIcon />}
       </button>

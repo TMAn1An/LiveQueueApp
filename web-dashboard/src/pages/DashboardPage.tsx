@@ -27,7 +27,7 @@ const STAT_CARDS: { key: keyof DashboardStats; label: string; minutes?: boolean 
  * services and nothing to click through to. */
 function ServicesSummaryCell({ services }: { services: LiveQueueTokenRow['services'] }) {
   if (services.length === 0) {
-    return <span className="text-slate-400">—</span>;
+    return <span className="text-faint">—</span>;
   }
   const [first, ...rest] = services;
   return (
@@ -43,7 +43,7 @@ function ServicesSummaryCell({ services }: { services: LiveQueueTokenRow['servic
  * however many dynamic fields a queue happens to collect (Issue #4). */
 function CustomerSummaryCell({ row, onOpenDetails }: { row: LiveQueueTokenRow; onOpenDetails: () => void }) {
   if (row.formFields.length === 0) {
-    return <span className="text-slate-400">—</span>;
+    return <span className="text-faint">—</span>;
   }
 
   const first = row.formFields[0]!;
@@ -66,8 +66,8 @@ function TokenDetailsModal({ row, onClose }: { row: LiveQueueTokenRow; onClose: 
       <dl className="space-y-2 text-sm">
         {row.formFields.map((field) => (
           <div key={field.key}>
-            <dt className="text-xs text-slate-400">{field.label}</dt>
-            <dd className="text-slate-700">
+            <dt className="text-xs text-faint">{field.label}</dt>
+            <dd className="text-fg-soft">
               {field.type === 'phone' ? (
                 <a href={`tel:${field.value}`} className="text-brand-600 hover:underline">
                   {field.value}
@@ -83,7 +83,7 @@ function TokenDetailsModal({ row, onClose }: { row: LiveQueueTokenRow; onClose: 
           </div>
         ))}
         {row.formFields.length === 0 && (
-          <p className="text-xs italic text-slate-400">No form data was submitted for this token.</p>
+          <p className="text-xs italic text-faint">No form data was submitted for this token.</p>
         )}
       </dl>
     </Modal>
@@ -98,7 +98,7 @@ export function DashboardPage() {
 
   return (
     <div>
-      <h1 className="mb-4 text-xl font-semibold text-slate-900">Dashboard</h1>
+      <h1 className="mb-4 text-xl font-semibold text-fg">Dashboard</h1>
 
       {statsLoading || !stats ? (
         <Spinner label="Loading stats…" />
@@ -106,8 +106,8 @@ export function DashboardPage() {
         <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {STAT_CARDS.map(({ key, label, minutes }) => (
             <Card key={key}>
-              <p className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</p>
-              <p className="mt-1 text-2xl font-bold text-slate-900">
+              <p className="text-xs font-medium uppercase tracking-wide text-faint">{label}</p>
+              <p className="mt-1 text-2xl font-bold text-fg">
                 {minutes ? formatMinutes(stats[key] as number | null) : stats[key]}
               </p>
             </Card>
@@ -116,7 +116,7 @@ export function DashboardPage() {
       )}
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-slate-700">Live Queue</h2>
+        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Live Queue</h2>
         {tableLoading ? (
           <Spinner />
         ) : !liveTable?.data.length ? (
@@ -125,7 +125,7 @@ export function DashboardPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
+                <tr className="border-b border-border text-left text-xs uppercase text-faint">
                   <th className="py-2 pr-4">Token</th>
                   <th className="py-2 pr-4">Queue</th>
                   <th className="py-2 pr-4">Service</th>
@@ -139,8 +139,8 @@ export function DashboardPage() {
               </thead>
               <tbody>
                 {liveTable.data.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100">
-                    <td className="py-2 pr-4 text-lg font-bold text-slate-900">{row.serialNumber}</td>
+                  <tr key={row.id} className="border-b border-border transition-colors duration-150 hover:bg-subtle">
+                    <td className="py-2 pr-4 text-lg font-bold text-fg">{row.serialNumber}</td>
                     <td className="py-2 pr-4">{row.queue.name}</td>
                     <td className="py-2 pr-4">
                       <ServicesSummaryCell services={row.services} />
@@ -160,6 +160,7 @@ export function DashboardPage() {
                         queueId={row.queue.id}
                         status={row.status}
                         position={row.position}
+                        actionEligibility={row.actionEligibility}
                       />
                     </td>
                   </tr>

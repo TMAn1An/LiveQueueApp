@@ -10,7 +10,7 @@ export function Pagination({
 }) {
   if (!pagination || pagination.totalPages <= 1) return null;
   return (
-    <div className="mt-4 flex items-center justify-between text-sm text-slate-600">
+    <div className="mt-4 flex items-center justify-between text-sm text-muted">
       <span>
         Page {pagination.page} of {pagination.totalPages} ({pagination.total} total)
       </span>

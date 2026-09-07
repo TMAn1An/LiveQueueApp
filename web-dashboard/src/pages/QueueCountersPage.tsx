@@ -45,13 +45,13 @@ function CounterRow({
   const staffName = staffResult?.data.find((s) => s.id === counter.staffId)?.name ?? '—';
 
   return (
-    <tr className="border-b border-slate-100">
+    <tr className="border-b border-border">
       <td className="py-2 pr-4">
         {editing ? (
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+            className="rounded-md border border-border-strong px-2 py-1 text-sm"
           />
         ) : (
           counter.name
@@ -94,7 +94,7 @@ function CounterRow({
                   { onError: (err) => onError(errorMessage(err, 'Failed to change counter status.')) },
                 )
               }
-              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              className="rounded-md border border-border-strong px-2 py-1 text-sm"
             >
               {COUNTER_STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -111,7 +111,7 @@ function CounterRow({
                   { onError: (err) => onError(errorMessage(err, 'Failed to assign staff to counter.')) },
                 )
               }
-              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              className="rounded-md border border-border-strong px-2 py-1 text-sm"
             >
               <option value="" disabled>
                 Assign staff…
@@ -156,7 +156,7 @@ export function QueueCountersPage() {
           ← {queue?.name ?? 'Queue'}
         </Link>
       </div>
-      <h1 className="mb-4 text-xl font-semibold text-slate-900">Counters</h1>
+      <h1 className="mb-4 text-xl font-semibold text-fg">Counters</h1>
 
       <ErrorBanner message={error} />
 
@@ -168,7 +168,7 @@ export function QueueCountersPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
+              <tr className="border-b border-border text-left text-xs uppercase text-faint">
                 <th className="py-2 pr-4">Name</th>
                 <th className="py-2 pr-4">Status</th>
                 <th className="py-2 pr-4">Assigned Staff</th>
@@ -184,13 +184,13 @@ export function QueueCountersPage() {
         )}
 
         <PermissionGate permission="manage_counters">
-          <div className="mt-4 flex items-end gap-2 border-t border-slate-100 pt-4">
+          <div className="mt-4 flex items-end gap-2 border-t border-border pt-4">
             <div>
-              <label className="mb-1 block text-xs text-slate-500">New counter name</label>
+              <label className="mb-1 block text-xs text-muted">New counter name</label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="rounded-md border border-border-strong px-2 py-1 text-sm"
               />
             </div>
             <Button

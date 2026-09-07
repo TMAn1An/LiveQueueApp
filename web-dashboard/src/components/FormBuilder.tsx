@@ -95,33 +95,33 @@ export function FormBuilder({ queueId }: { queueId: string }) {
   return (
     <div>
       <ErrorBanner message={error} />
-      {fields.length === 0 && <p className="mb-3 text-sm text-slate-500">No custom fields yet.</p>}
+      {fields.length === 0 && <p className="mb-3 text-sm text-muted">No custom fields yet.</p>}
       <div className="space-y-3">
         {fields.map((field) => (
-          <div key={field._localId} className="rounded-md border border-slate-200 p-3">
+          <div key={field._localId} className="rounded-md border border-border p-3">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div>
-                <label className="mb-1 block text-xs text-slate-500">Key</label>
+                <label className="mb-1 block text-xs text-muted">Key</label>
                 <input
                   value={field.key}
                   onChange={(e) => updateField(field._localId, { key: e.target.value })}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-500">Label</label>
+                <label className="mb-1 block text-xs text-muted">Label</label>
                 <input
                   value={field.label}
                   onChange={(e) => updateField(field._localId, { label: e.target.value })}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-slate-500">Type</label>
+                <label className="mb-1 block text-xs text-muted">Type</label>
                 <select
                   value={field.type}
                   onChange={(e) => updateField(field._localId, { type: e.target.value as FormFieldType })}
-                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
                 >
                   {FIELD_TYPES.map((t) => (
                     <option key={t} value={t}>
@@ -131,7 +131,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                 </select>
               </div>
               <div className="flex items-end gap-2">
-                <label className="flex items-center gap-1 text-xs text-slate-500">
+                <label className="flex items-center gap-1 text-xs text-muted">
                   <input
                     type="checkbox"
                     checked={field.required}
@@ -148,7 +148,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
             </div>
             {OPTION_TYPES.includes(field.type) && (
               <div className="mt-2">
-                <label className="mb-1 block text-xs text-slate-500">Options (comma-separated)</label>
+                <label className="mb-1 block text-xs text-muted">Options (comma-separated)</label>
                 <input
                   value={(field.options ?? []).join(', ')}
                   onChange={(e) =>
@@ -159,7 +159,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                         .filter(Boolean),
                     })
                   }
-                  className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
                 />
               </div>
             )}

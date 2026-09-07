@@ -21,12 +21,12 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
 
   if (editing) {
     return (
-      <tr className="border-b border-slate-100">
+      <tr className="border-b border-border">
         <td className="py-2 pr-4">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+            className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
           />
         </td>
         <td className="py-2 pr-4">
@@ -35,7 +35,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             min={1}
             value={duration}
             onChange={(e) => setDuration(Number(e.target.value))}
-            className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm"
+            className="w-20 rounded-md border border-border-strong px-2 py-1 text-sm"
           />
         </td>
         <td className="py-2 pr-4">
@@ -62,7 +62,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
   }
 
   return (
-    <tr className="border-b border-slate-100">
+    <tr className="border-b border-border">
       <td className="py-2 pr-4">{service.serviceName}</td>
       <td className="py-2 pr-4">{service.durationMinutes} min</td>
       <td className="py-2 pr-4">
@@ -105,7 +105,7 @@ export function ServicesManager({
       ) : (
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
+            <tr className="border-b border-border text-left text-xs uppercase text-faint">
               <th className="py-2 pr-4">Name</th>
               <th className="py-2 pr-4">Duration</th>
               <th className="py-2 pr-4">Status</th>
@@ -121,23 +121,23 @@ export function ServicesManager({
       )}
 
       <PermissionGate permission="manage_services">
-        <div className="mt-4 flex items-end gap-2 border-t border-slate-100 pt-4">
+        <div className="mt-4 flex items-end gap-2 border-t border-border pt-4">
           <div>
-            <label className="mb-1 block text-xs text-slate-500">Service name</label>
+            <label className="mb-1 block text-xs text-muted">Service name</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+              className="rounded-md border border-border-strong px-2 py-1 text-sm"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-slate-500">Duration (min)</label>
+            <label className="mb-1 block text-xs text-muted">Duration (min)</label>
             <input
               type="number"
               min={1}
               value={duration}
               onChange={(e) => setDuration(Number(e.target.value))}
-              className="w-20 rounded-md border border-slate-300 px-2 py-1 text-sm"
+              className="w-20 rounded-md border border-border-strong px-2 py-1 text-sm"
             />
           </div>
           <Button

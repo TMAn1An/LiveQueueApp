@@ -450,6 +450,11 @@ describe('Issue #4: GET /api/devices customerContext', () => {
 
   it('Test D4: falls back to the most recent historical token when no active token exists', async () => {
     const org = await setupOrg();
+    // This test reaches its historical state by skipping, which now requires
+    // the queue to have a free active counter — the same condition that
+    // would let those customers be called.
+    const counter = await createCounter(org.accessToken, org.queue.id);
+    await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
     const deviceIdentifier = 'device-ctx-history';
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`);

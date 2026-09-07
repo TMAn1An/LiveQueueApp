@@ -29,8 +29,8 @@ export function AuditLogsPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-xl font-semibold text-slate-900">Audit Logs</h1>
-      <p className="mb-4 max-w-2xl text-sm text-slate-500">
+      <h1 className="mb-2 text-xl font-semibold text-fg">Audit Logs</h1>
+      <p className="mb-4 max-w-2xl text-sm text-muted">
         A record of staff actions in this organization — newest first.
       </p>
 
@@ -53,7 +53,7 @@ export function AuditLogsPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
+              <tr className="border-b border-border text-left text-xs uppercase text-faint">
                 <th className="py-2 pr-4">Time</th>
                 <th className="py-2 pr-4">Staff</th>
                 <th className="py-2 pr-4">Action</th>
@@ -64,22 +64,22 @@ export function AuditLogsPage() {
             </thead>
             <tbody>
               {result.data.map((entry) => (
-                <tr key={entry.id} className="border-b border-slate-100 align-top">
+                <tr key={entry.id} className="border-b border-border align-top transition-colors duration-150 hover:bg-subtle">
                   <td className="py-2 pr-4 whitespace-nowrap">{formatDateTime(entry.createdAt)}</td>
                   <td className="py-2 pr-4">{entry.staffEmail}</td>
-                  <td className="py-2 pr-4 font-medium text-slate-800">{formatActionLabel(entry.action)}</td>
+                  <td className="py-2 pr-4 font-medium text-fg">{formatActionLabel(entry.action)}</td>
                   <td className="py-2 pr-4">
-                    <span className="text-slate-600">{entry.entityType}</span>
+                    <span className="text-muted">{entry.entityType}</span>
                     {entry.entityId && (
-                      <span className="ml-1 font-mono text-xs text-slate-400">
+                      <span className="ml-1 font-mono text-xs text-faint">
                         {entry.entityId.slice(0, 8)}…
                       </span>
                     )}
                   </td>
-                  <td className="py-2 pr-4 font-mono text-xs text-slate-500">
+                  <td className="py-2 pr-4 font-mono text-xs text-muted">
                     {entry.metadata ? JSON.stringify(entry.metadata) : '—'}
                   </td>
-                  <td className="py-2 pr-4 font-mono text-xs text-slate-400">{entry.ipAddress ?? '—'}</td>
+                  <td className="py-2 pr-4 font-mono text-xs text-faint">{entry.ipAddress ?? '—'}</td>
                 </tr>
               ))}
             </tbody>

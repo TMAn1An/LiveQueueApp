@@ -817,3 +817,26 @@ Confirmed against the current `IMPLEMENTATION_PLAN.md`/`PROGRESS.md` text and th
 - **Reports do not break out `CANCELLED`.** No metric is wrong — `tokensCompleted`/`tokensSkipped` are status-exact and cancelled tokens are never miscounted as either — but `tokensCreated` now spans a third terminal outcome that no metric surfaces. Adding one would be a new feature, out of scope here.
 
 **Verification:** backend `typecheck`/`lint`/`build` clean, `npm test` — 58 files / 534 tests passing (3 new, zero regressions). Dashboard `tsc`/`oxlint`/`vitest`/`build` clean — 78/78. Mobile `flutter analyze` clean (same pre-existing info hints), `flutter test` — 127/127. `prisma validate` clean; `prisma migrate status` up to date against the local dev database only. All thirteen V2 migrations re-read individually: every one additive (new columns/tables/indexes, two `ALTER TYPE ... ADD VALUE`, one in-place `RENAME VALUE`), no destructive rebuild, no unsafe `NOT NULL` without a default, `ON DELETE RESTRICT` preserving service history intact.
+
+## ADR-033: Skip inherits Call's eligibility, and ETA follows counter capacity live (2026-09-08)
+
+**Status:** Implemented, tested, committed. No migration.
+
+**Decision 1 — a WAITING token may be skipped only while it is currently eligible to be called.** ADR-025 closed the ordering gap on `/call` but left `/skip` governed solely by the abstract state machine: `WAITING → SKIPPED` was legal from any position, so staff — or anyone with direct API access — could remove a later customer from the queue while earlier ones still waited. That is the same out-of-order handling strict FCFS exists to prevent, reached through a different verb.
+
+The rule is now literal: **if Call is locked, Skip is locked.** Both conditions come from one function, `getWaitingTokenActionEligibility()` (`token.service.ts`), rather than two similar-but-drifting implementations:
+
+1. strict FCFS — no earlier WAITING token in the same queue;
+2. capacity — at least one ACTIVE counter in the queue is not already serving a CALLED/IN_PROGRESS token.
+
+Capacity is deliberately included. Skip is *not* an administrative bypass around counter availability: a customer nobody could serve right now is also a customer nobody may quietly drop. `/call` additionally requires the specific counter staff picked to be active and free — that check stays inside `callToken`'s own transaction where the counter row is locked, and this function answers the counter-agnostic question ("could anyone call this token right now?") that Skip and the dashboard need.
+
+**Concurrency.** The eligibility check runs on the transaction client, inside the same transaction as the compare-and-swap `UPDATE` that performs the transition, so a decision can never be made against a snapshot the write then contradicts. `transitionToken` gained an optional guard for this; `completeToken` passes none and is unchanged in behavior. The FCFS half is race-free for exactly the reason ADR-025 documents (the set of earlier WAITING tokens can only shrink). A later token being skipped *after* the one ahead of it commits is correct sequential handling, not a bypass — the invariant that holds under any interleaving is that skipped tokens form an unbroken prefix of arrival order, which is what the concurrency test asserts.
+
+**Unchanged:** skipping a CALLED or IN_PROGRESS customer (already at a counter, so neither queue order nor free capacity is in question), and Recall (`SKIPPED → CALLED`), which keeps its deliberate override of arrival order and its existing counter-capacity constraint.
+
+**Dashboard:** the live-queue row now carries `actionEligibility: { eligible, reason }`, computed from the same rule via `waitingActionEligibilityFrom()` — one capacity probe per queue on the page, not one per row. A locked row shows a single disabled "Locked" chip whose tooltip names the actual reason ("Earlier customers must be handled first." / "Waiting for an available counter."), and renders no Skip button at all. Three pre-existing backend tests failed on this change because their setups skipped a WAITING token in a queue with no counters; they were given an active counter rather than the rule being weakened.
+
+**Decision 2 — a counter status change recomputes and broadcasts waiting ETAs.** `PATCH /api/counters/:id/status` emitted `counter.status_changed` to the staff organization room and nothing else. Since ETA has no honest value with zero active counters (ADR-026, unchanged), a customer who joined while nothing was open kept seeing no estimate *after* staff opened a counter — until some unrelated token event happened to trigger a recompute. Both that endpoint and counter deletion now call the existing `broadcastQueueEtaUpdate(queueId)`; counter creation does not, because counters are created OFFLINE and change no capacity.
+
+**Decision 3 — the customer is told *why* there is no estimate.** `etaUnavailableReason: 'NO_ACTIVE_COUNTER' | null` is now part of the computed token fields, the customer view, and the `token.position_changed` payload. No value is ever fabricated — the mobile app still shows no number — but it now says "Waiting for an active counter" when that is the reason, and "Estimated time unavailable" otherwise. The field names a queue-level operational state; it carries nothing about staff or other customers.

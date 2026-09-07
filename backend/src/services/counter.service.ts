@@ -64,10 +64,13 @@ export async function setCounterStatus(
   return prisma.counter.update({ where: { id: counterId }, data: { status } });
 }
 
+/** Returns the deleted counter's queue id so the caller can recompute that
+ * queue's ETAs — removing an ACTIVE counter changes serving capacity. */
 export async function deleteCounter(organizationId: string, counterId: string) {
   const counter = await findCounterScoped(organizationId, counterId);
   assertQueueMutable(counter.queue);
   await prisma.counter.delete({ where: { id: counterId } });
+  return { queueId: counter.queueId };
 }
 
 /**

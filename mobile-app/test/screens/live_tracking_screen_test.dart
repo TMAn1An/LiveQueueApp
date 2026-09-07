@@ -63,6 +63,7 @@ LiveQueueToken _token({
   int? estimatedWaitMinutes,
   DateTime? estimatedReadyAt,
   CounterInfo? counter,
+  String? etaUnavailableReason,
 }) {
   return LiveQueueToken(
     id: 'token-1',
@@ -74,6 +75,7 @@ LiveQueueToken _token({
     position: position,
     estimatedWaitMinutes: estimatedWaitMinutes,
     estimatedReadyAt: estimatedReadyAt,
+    etaUnavailableReason: etaUnavailableReason,
     counter: counter,
     createdAt: DateTime.utc(2026, 1, 1),
   );
@@ -119,14 +121,30 @@ void main() {
     );
   });
 
-  testWidgets('shows "Not available" when no estimate exists yet (e.g. zero active counters)', (tester) async {
+  testWidgets('explains that nobody is serving when that is why there is no estimate', (tester) async {
+    final provider = _FakeTokenTrackingProvider();
+    provider.pushState(
+      token: _token(
+        status: TokenStatus.waiting,
+        position: 1,
+        estimatedWaitMinutes: null,
+        etaUnavailableReason: 'NO_ACTIVE_COUNTER',
+      ),
+    );
+    await _pump(tester, provider);
+
+    // Never a fabricated "0 minutes" — but not a bare "unavailable" either.
+    expect(find.text('Waiting for an active counter'), findsOneWidget);
+  });
+
+  testWidgets('falls back to a plain message when the reason is unknown', (tester) async {
     final provider = _FakeTokenTrackingProvider();
     provider.pushState(
       token: _token(status: TokenStatus.waiting, position: 1, estimatedWaitMinutes: null),
     );
     await _pump(tester, provider);
 
-    expect(find.text('Not available'), findsOneWidget);
+    expect(find.text('Estimated time unavailable'), findsOneWidget);
   });
 
   testWidgets('shows the counter name and turn banner when CALLED', (tester) async {

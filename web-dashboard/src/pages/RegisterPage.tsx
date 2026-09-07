@@ -33,7 +33,7 @@ export function RegisterPage() {
     <form onSubmit={handleSubmit}>
       <ErrorBanner message={error} />
       <div className="mb-3">
-        <label htmlFor="organizationName" className="mb-1 block text-sm font-medium text-slate-700">
+        <label htmlFor="organizationName" className="mb-1 block text-sm font-medium text-fg-soft">
           Organization name
         </label>
         <input
@@ -41,11 +41,11 @@ export function RegisterPage() {
           required
           value={organizationName}
           onChange={(e) => setOrganizationName(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
         />
       </div>
       <div className="mb-3">
-        <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
+        <label htmlFor="email" className="mb-1 block text-sm font-medium text-fg-soft">
           Owner email
         </label>
         <input
@@ -54,11 +54,11 @@ export function RegisterPage() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+          className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
         />
       </div>
       <div className="mb-4">
-        <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-700">
+        <label htmlFor="password" className="mb-1 block text-sm font-medium text-fg-soft">
           Password
         </label>
         <PasswordInput
@@ -70,12 +70,12 @@ export function RegisterPage() {
           onChange={(e) => setPassword(e.target.value)}
           className="px-3 py-2 text-sm"
         />
-        <p className="mt-1 text-xs text-slate-400">At least 8 characters, with a letter and a number.</p>
+        <p className="mt-1 text-xs text-faint">At least 8 characters, with a letter and a number.</p>
       </div>
-      <Button type="submit" disabled={submitting} className="w-full">
+      <Button type="submit" loading={submitting} className="w-full">
         {submitting ? 'Creating organization…' : 'Create organization'}
       </Button>
-      <p className="mt-4 text-center text-sm text-slate-500">
+      <p className="mt-4 text-center text-sm text-muted">
         Already have an account?{' '}
         <Link to="/login" className="font-medium text-brand-600 hover:underline">
           Sign in

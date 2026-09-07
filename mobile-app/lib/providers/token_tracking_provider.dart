@@ -170,7 +170,13 @@ class TokenTrackingProvider extends ChangeNotifier {
     token = current.copyWith(
       position: update.position,
       estimatedWaitMinutes: update.estimatedWaitMinutes,
+      // Cleared explicitly, not merged: an update that carries no estimate
+      // (the queue's last counter just closed) must replace the previous
+      // one rather than leave a stale countdown running.
       estimatedReadyAt: update.estimatedReadyAt,
+      clearEstimatedReadyAt: update.estimatedReadyAt == null,
+      clearEstimatedWaitMinutes: update.estimatedWaitMinutes == null,
+      etaUnavailableReason: update.etaUnavailableReason,
     );
     _maybeAnnounceEtaUpdate(update);
     _maybeShowReminder();

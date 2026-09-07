@@ -39,19 +39,19 @@ function CreateStaffModal({ onClose }: { onClose: () => void }) {
       <ErrorBanner message={error} />
       <div className="mb-3 grid grid-cols-2 gap-2">
         <div>
-          <label className="mb-1 block text-xs text-slate-500">Name</label>
+          <label className="mb-1 block text-xs text-muted">Name</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+            className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-slate-500">Role</label>
+          <label className="mb-1 block text-xs text-muted">Role</label>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as Exclude<StaffRole, 'OWNER'>)}
-            className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+            className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
           >
             {MANAGEABLE_ROLES.map((r) => (
               <option key={r} value={r}>
@@ -62,16 +62,16 @@ function CreateStaffModal({ onClose }: { onClose: () => void }) {
         </div>
       </div>
       <div className="mb-3">
-        <label className="mb-1 block text-xs text-slate-500">Email</label>
+        <label className="mb-1 block text-xs text-muted">Email</label>
         <input
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm"
+          className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
         />
       </div>
       <div className="mb-3">
-        <label className="mb-1 block text-xs text-slate-500">Temporary password</label>
+        <label className="mb-1 block text-xs text-muted">Temporary password</label>
         <PasswordInput
           autoComplete="new-password"
           value={password}
@@ -80,7 +80,7 @@ function CreateStaffModal({ onClose }: { onClose: () => void }) {
           className="px-2 py-1 text-sm"
         />
       </div>
-      <p className="mb-4 text-xs text-slate-400">
+      <p className="mb-4 text-xs text-faint">
         Permissions are determined entirely by the selected role and cannot be customized.
       </p>
       <div className="flex justify-end gap-2">
@@ -104,7 +104,7 @@ function StaffRow({ staff }: { staff: Staff }) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   return (
-    <tr className="border-b border-slate-100">
+    <tr className="border-b border-border transition-colors duration-150 hover:bg-subtle">
       <td className="py-2 pr-4">{staff.name}</td>
       <td className="py-2 pr-4">{staff.email}</td>
       <td className="py-2 pr-4">{staff.role}</td>
@@ -167,7 +167,7 @@ export function StaffPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-900">Staff</h1>
+        <h1 className="text-xl font-semibold text-fg">Staff</h1>
         <PermissionGate permission="manage_staff">
           <Button onClick={() => setShowCreate(true)}>Add Staff Member</Button>
         </PermissionGate>
@@ -192,7 +192,7 @@ export function StaffPage() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs uppercase text-slate-400">
+              <tr className="border-b border-border text-left text-xs uppercase text-faint">
                 <th className="py-2 pr-4">Name</th>
                 <th className="py-2 pr-4">Email</th>
                 <th className="py-2 pr-4">Role</th>

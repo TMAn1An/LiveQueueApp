@@ -126,6 +126,10 @@ describe('token.position_changed — targeted per-token emission', () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
+    // Skipping a WAITING customer now requires the queue to have a free
+    // active counter — the same condition that would let them be called.
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
 
     const first = await createToken({ queueId: queue.id, serviceId: service.id });
     const second = await createToken({ queueId: queue.id, serviceId: service.id });

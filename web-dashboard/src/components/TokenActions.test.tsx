@@ -206,7 +206,66 @@ describe('TokenActions — strict FCFS locking (V2 Checkpoint 3)', () => {
     expect(screen.getByText('Locked')).toBeInTheDocument();
     expect(screen.getByText('Locked')).toBeDisabled();
     expect(screen.queryByText('Call')).not.toBeInTheDocument();
-    // Skip remains available regardless of FCFS eligibility — unaffected by this checkpoint.
+    // Skip locks with Call: a customer who cannot be called yet must not be
+    // removable from the queue ahead of their turn either.
+    expect(screen.queryByText('Skip')).not.toBeInTheDocument();
+  });
+});
+
+describe('TokenActions — Skip unlocks exactly with Call', () => {
+  it('offers both actions on an eligible waiting row', () => {
+    render(
+      <TokenActions
+        tokenId="t1"
+        queueId="q1"
+        status="WAITING"
+        position={1}
+        actionEligibility={{ eligible: true, reason: null }}
+      />,
+    );
+
+    expect(screen.getByText('Call')).toBeInTheDocument();
+    expect(screen.getByText('Skip')).toBeInTheDocument();
+  });
+
+  it('offers neither when no counter is free, and says so', () => {
+    render(
+      <TokenActions
+        tokenId="t1"
+        queueId="q1"
+        status="WAITING"
+        position={1}
+        actionEligibility={{ eligible: false, reason: 'NO_AVAILABLE_COUNTER' }}
+      />,
+    );
+
+    expect(screen.queryByText('Call')).not.toBeInTheDocument();
+    expect(screen.queryByText('Skip')).not.toBeInTheDocument();
+    expect(screen.getByText('Locked')).toHaveAttribute(
+      'title',
+      'Waiting for an available counter.',
+    );
+  });
+
+  it('explains a locked row caused by earlier customers differently', () => {
+    render(
+      <TokenActions
+        tokenId="t1"
+        queueId="q1"
+        status="WAITING"
+        position={3}
+        actionEligibility={{ eligible: false, reason: 'EARLIER_WAITING' }}
+      />,
+    );
+
+    expect(screen.getByText('Locked')).toHaveAttribute(
+      'title',
+      'Earlier customers must be handled first.',
+    );
+  });
+
+  it('still allows skipping a customer already at a counter', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
     expect(screen.getByText('Skip')).toBeInTheDocument();
   });
 });

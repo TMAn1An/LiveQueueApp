@@ -53,18 +53,18 @@ export function OrganizationSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold text-slate-900">Organization Settings</h1>
+      <h1 className="text-xl font-semibold text-fg">Organization Settings</h1>
 
       <Card>
         <ErrorBanner message={error} />
         {editing ? (
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-slate-500">Organization Name</label>
+              <label className="mb-1 block text-xs text-muted">Organization Name</label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full max-w-sm rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="w-full max-w-sm rounded-md border border-border-strong px-2 py-1 text-sm"
               />
             </div>
             <div className="flex gap-2">
@@ -77,8 +77,8 @@ export function OrganizationSettingsPage() {
         ) : (
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-slate-400">Name</p>
-              <p className="text-lg font-medium text-slate-900">{organization.name}</p>
+              <p className="text-xs text-faint">Name</p>
+              <p className="text-lg font-medium text-fg">{organization.name}</p>
             </div>
             {isOwner && (
               <Button
@@ -94,14 +94,14 @@ export function OrganizationSettingsPage() {
           </div>
         )}
         {!isOwner && (
-          <p className="mt-3 text-xs text-slate-400">Only the organization owner can edit these settings.</p>
+          <p className="mt-3 text-xs text-faint">Only the organization owner can edit these settings.</p>
         )}
       </Card>
 
       {isOwner && (
         <Card className="border-red-200">
           <h2 className="mb-2 text-sm font-semibold text-red-700">Delete Organization</h2>
-          <p className="mb-3 text-sm text-slate-500">
+          <p className="mb-3 text-sm text-muted">
             This permanently deletes the organization and all of its staff, queues, services,
             counters, and token history. This action cannot be undone.
           </p>
@@ -111,13 +111,13 @@ export function OrganizationSettingsPage() {
             </Button>
           ) : (
             <div className="space-y-2">
-              <label className="block text-sm text-slate-700">
+              <label className="block text-sm text-fg-soft">
                 Type <strong>{organization.name}</strong> to confirm:
               </label>
               <input
                 value={confirmName}
                 onChange={(e) => setConfirmName(e.target.value)}
-                className="w-full max-w-sm rounded-md border border-slate-300 px-2 py-1 text-sm"
+                className="w-full max-w-sm rounded-md border border-border-strong px-2 py-1 text-sm"
               />
               <div className="flex gap-2">
                 <Button

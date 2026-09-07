@@ -1,7 +1,11 @@
 import type { Prisma, TokenStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { todayRange } from '../utils/dateRange';
-import { listWaitingTokenPositions } from './token.service';
+import {
+  hasFreeActiveCounter,
+  listWaitingTokenPositions,
+  waitingActionEligibilityFrom,
+} from './token.service';
 import { buildDisplayFormFields, fetchFormFieldDefs } from '../utils/formFieldDisplay';
 
 const LIVE_STATUSES: TokenStatus[] = ['WAITING', 'CALLED', 'IN_PROGRESS'];
@@ -104,6 +108,17 @@ export async function getLiveQueueTable(organizationId: string, page: number, pa
     tokens.map((t) => ({ queueId: t.queueId, formVersion: t.formVersion })),
   );
 
+  // One capacity probe per queue on this page, not one per row: whether a
+  // free ACTIVE counter exists is a queue-level fact, and it is half of the
+  // rule that decides whether a waiting row's Call/Skip are unlocked.
+  const queueHasFreeCounter = new Map(
+    await Promise.all(
+      waitingQueueIds.map(
+        async (queueId) => [queueId, await hasFreeActiveCounter(queueId)] as const,
+      ),
+    ),
+  );
+
   const data = tokens.map((token) => {
     const position = positionById.get(token.id);
     return {
@@ -116,6 +131,17 @@ export async function getLiveQueueTable(organizationId: string, page: number, pa
       position: position?.position ?? null,
       estimatedWaitMinutes: position?.estimatedWaitMinutes ?? null,
       estimatedReadyAt: position?.estimatedReadyAt ?? null,
+      // Mirrors the backend rule that actually gates Call and Skip, so the
+      // dashboard never offers an action the API would reject — and never
+      // shows an active Skip on a row whose Call is locked. Null for rows
+      // that are not WAITING, where the concept does not apply.
+      actionEligibility:
+        token.status === 'WAITING'
+          ? waitingActionEligibilityFrom(
+              position?.position ?? null,
+              queueHasFreeCounter.get(token.queueId) ?? false,
+            )
+          : null,
       createdAt: token.createdAt,
       calledAt: token.calledAt,
       startedAt: token.startedAt,
