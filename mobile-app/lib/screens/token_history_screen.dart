@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../models/history_entry.dart';
@@ -8,6 +7,7 @@ import '../providers/history_provider.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/token_tracking_provider.dart';
 import '../repositories/token_repository.dart';
+import '../utils/date_time_format.dart';
 import 'live_tracking_screen.dart';
 import 'token_details_screen.dart';
 
@@ -86,7 +86,7 @@ class _TokenHistoryScreenState extends State<TokenHistoryScreen> {
                         return ListTile(
                           title: Text('${entry.serialNumber} — ${entry.queueName}'),
                           subtitle: Text(
-                            '${entry.serviceName} · ${DateFormat.yMMMd().add_jm().format(entry.createdAt)}',
+                            '${entry.serviceName} · ${formatLocalDateTime(entry.createdAt)}',
                           ),
                           trailing: _FinalStatusLabel(entry: entry),
                           onTap: _resuming ? null : () => _openEntry(entry),
@@ -110,14 +110,8 @@ class _FinalStatusLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = switch (entry.finalStatus.name) {
-      'completed' => 'Completed',
-      'skipped' => 'Skipped',
-      'waiting' => 'Waiting',
-      'called' => 'Called',
-      'inProgress' => 'In Progress',
-      _ => 'Unknown',
-    };
-    return Text(label, style: Theme.of(context).textTheme.bodySmall);
+    // Shared mapping: CANCELLED used to fall through this screen's own
+    // switch to "Unknown" (V2 mobile fix).
+    return Text(tokenStatusLabel(entry.finalStatus), style: Theme.of(context).textTheme.bodySmall);
   }
 }

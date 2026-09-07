@@ -166,3 +166,24 @@ class TokenStatusSnapshot {
     );
   }
 }
+
+/// The user-facing name of a status, for the neutral places that just
+/// report state (token history, token details). Defined once so a status
+/// added to the enum can never quietly render as "Unknown" in one screen
+/// and correctly in another — the switch is exhaustive, so a new value
+/// fails to compile until it is given a label here.
+///
+/// Live Tracking deliberately keeps its own wording via [StatusBadge]
+/// ("Your Turn" rather than "Called") — that is a different, in-the-moment
+/// voice, not a duplicate of this mapping.
+String tokenStatusLabel(TokenStatus status) {
+  return switch (status) {
+    TokenStatus.waiting => 'Waiting',
+    TokenStatus.called => 'Called',
+    TokenStatus.inProgress => 'In Progress',
+    TokenStatus.completed => 'Completed',
+    TokenStatus.skipped => 'Skipped',
+    TokenStatus.cancelled => 'Cancelled',
+    TokenStatus.unknown => 'Unknown',
+  };
+}

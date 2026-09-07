@@ -34,4 +34,9 @@ void main() {
     await pumpBadge(tester, TokenStatus.skipped);
     expect(find.text('Skipped'), findsOneWidget);
   });
+
+  testWidgets('shows "Cancelled" for TokenStatus.cancelled', (tester) async {
+    await pumpBadge(tester, TokenStatus.cancelled);
+    expect(find.text('Cancelled'), findsOneWidget);
+  });
 }

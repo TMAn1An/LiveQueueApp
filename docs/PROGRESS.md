@@ -175,6 +175,17 @@ A dashboard-usability-only checkpoint: the four management lists became searchab
 - **Red, amber and green were deliberately left alone.** The `danger` button variant, error banners, SKIPPED/BLOCKED/SUSPENDED badges, destructive confirmations and the mobile error banner all keep their exact previous colors — brand consistency must not make a destructive action look ordinary. Only decorative/primary blues moved to the brand palette.
 - **Verification:** dashboard 96/96 tests (19 files, 10 new covering the logo component, sidebar branding, and that every favicon path in `index.html` resolves to a shipped file), `tsc --noEmit`/`oxlint`/`npm run build` clean; mobile `flutter analyze` clean (same pre-existing info-level hints), `flutter test` 127/127, `flutter build apk --debug` succeeds with the new icon resources. Backend untouched — no file under `backend/` changed. As in Phase 6, no browser-automation tool exists in this environment, so the visual review was done on the generated assets themselves, rendered at their exact on-screen sizes.
 
+### V2 Mobile fix — history timestamps + CANCELLED status (2026-09-07)
+
+**Status: fixed, tested, committed. Mobile-only — no backend, dashboard, or business-rule change.**
+
+- **History showed UTC, not the customer's own time.** Backend timestamps are ISO-8601 with an explicit `Z` (Prisma `DateTime` → `Date.toJSON()`), so `DateTime.parse` produced a UTC `DateTime` — and `DateFormat` renders a value in whatever zone it already carries. `TokenHistoryScreen` and `TokenDetailsScreen` both formatted it directly, printing the UTC wall clock (6 hours behind in Bangladesh). Fixed with one shared `formatLocalDateTime()` (`lib/utils/date_time_format.dart`) that calls `toLocal()` exactly once — no fixed offset is assumed anywhere, and it is a no-op on an already-local value so it cannot double-shift. Timestamps in the database and API are unchanged and remain authoritative.
+- **What History displays is unchanged:** still the token's join/creation time, per spec section 7.20. Only the timezone of the rendering was wrong. `HistoryEntry` stores no final-action timestamps, so nothing needed to switch to `cancelledAt`.
+- **CANCELLED rendered as "Unknown".** The wire parser was already correct (`parseTokenStatus` maps `CANCELLED`), and `StatusBadge` on Live Tracking already said "Cancelled" — but History had its own private label switch with no cancelled case, and Token Details printed the raw enum name. Both now use one exhaustive `tokenStatusLabel()` beside the enum, so a status added later fails to compile until it is given a label instead of silently reading as "Unknown". The genuine unknown fallback for a future backend status is preserved.
+- **No new color:** cancellation already had its own distinct `Colors.deepOrange` badge — separate from red (error/skipped) and orange (waiting) — so the branding checkpoint's semantic rules stand untouched.
+- **Observed, not changed:** the backend's `toCustomerView` never serializes `cancelledAt`, though the mobile model parses it. No screen reads that field today, so this is latent, not a live defect, and fixing it is outside this checkpoint's scope.
+- **Verification:** `flutter analyze` clean (same 21 pre-existing info-level hints, 0 errors/warnings), `flutter test` 139/139 (12 new), `flutter build apk --debug` succeeds. Both fixes were mutation-tested — reverting each one individually was confirmed to fail the new tests. Backend and dashboard untouched.
+
 ## Status
 
 | Phase | Status |

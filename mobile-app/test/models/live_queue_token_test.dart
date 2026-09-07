@@ -129,6 +129,22 @@ void main() {
       expect(snapshot.estimatedReadyAt, DateTime.parse('2026-08-22T10:08:00.000Z'));
     });
   });
+
+  group('tokenStatusLabel', () {
+    test('gives CANCELLED its own user-facing label, never "Unknown"', () {
+      expect(tokenStatusLabel(TokenStatus.cancelled), 'Cancelled');
+    });
+
+    test('still labels a genuinely unknown future status "Unknown"', () {
+      expect(tokenStatusLabel(parseTokenStatus('SOMETHING_NEW')), 'Unknown');
+    });
+
+    test('labels every status, with no duplicates', () {
+      final labels = TokenStatus.values.map(tokenStatusLabel).toList();
+      expect(labels.every((l) => l.isNotEmpty), isTrue);
+      expect(labels.toSet().length, TokenStatus.values.length);
+    });
+  });
 }
 
 String _wireStatus(TokenStatus status) {

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../models/history_entry.dart';
+import '../models/live_queue_token.dart';
+import '../utils/date_time_format.dart';
 
 class TokenDetailsScreen extends StatelessWidget {
   const TokenDetailsScreen({super.key, required this.entry});
@@ -19,8 +20,8 @@ class TokenDetailsScreen extends StatelessWidget {
           children: [
             _DetailRow(label: 'Queue', value: entry.queueName),
             _DetailRow(label: 'Service', value: entry.serviceName),
-            _DetailRow(label: 'Created', value: DateFormat.yMMMd().add_jm().format(entry.createdAt)),
-            _DetailRow(label: 'Final Status', value: entry.finalStatus.name),
+            _DetailRow(label: 'Created', value: formatLocalDateTime(entry.createdAt)),
+            _DetailRow(label: 'Final Status', value: tokenStatusLabel(entry.finalStatus)),
           ],
         ),
       ),
