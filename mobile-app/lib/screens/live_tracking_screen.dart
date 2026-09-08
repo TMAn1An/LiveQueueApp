@@ -43,6 +43,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
   @override
   void dispose() {
+    // Tears down the live socket session only. The token itself is
+    // untouched — the customer is still in the queue, and
+    // ActiveTokenProvider still remembers how to get back to it (ADR-036).
     _trackingProvider?.stop();
     super.dispose();
   }
@@ -80,8 +83,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        // ADR-036: leaving this screen is navigation, not cancellation. The
+        // token keeps its place in the line, the pointer to it survives, and
+        // the customer can walk back in through the menu or Active Token.
+        //
+        // No drawer here on purpose: this is a detail screen pushed onto the
+        // stack, and a drawer would take the app bar's leading slot — which
+        // is exactly where the Back button the customer needs has to live.
+        // The menu is on the top-level screens they return to.
         title: const Text('Live Tracking'),
-        automaticallyImplyLeading: false,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),

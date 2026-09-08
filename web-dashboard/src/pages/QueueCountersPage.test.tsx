@@ -16,8 +16,11 @@ import {
 import { useStaffList } from '../hooks/useStaff';
 import { ApiError } from '../api/client';
 
+/** ADR-036 gates the staff-assignment control on manage_staff, which
+ * ordinary STAFF do not hold — so the tests need to be able to play both. */
+let grantedPermissions: string[] = [];
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({ hasPermission: (p: string) => grantedPermissions.includes(p) }),
 }));
 vi.mock('../hooks/useQueues');
 vi.mock('../hooks/useCounters');
@@ -37,6 +40,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
+  grantedPermissions = ['manage_counters', 'manage_staff', 'operate_tokens'];
   vi.clearAllMocks();
   vi.mocked(useQueue).mockReturnValue({ data: { id: 'q1', name: 'Front Desk' } } as unknown as ReturnType<
     typeof useQueue
@@ -171,5 +175,38 @@ describe('QueueCountersPage — staff availability', () => {
     renderPage();
 
     expect(screen.getByLabelText('Assigned staff')).toBeDisabled();
+  });
+});
+
+/**
+ * ADR-036: deciding who stands at a counter is a staffing decision. Ordinary
+ * STAFF keep every operational control on this page — including putting a
+ * counter on break — but not that one. The backend refuses it for them
+ * regardless; this keeps the control from appearing at all.
+ */
+describe('QueueCountersPage — who may assign staff', () => {
+  it('offers the assignment dropdown to an owner or admin', () => {
+    renderPage();
+
+    expect(screen.getByLabelText('Assigned staff')).toBeInTheDocument();
+  });
+
+  it('hides it from an ordinary staff member, and keeps their other controls', () => {
+    grantedPermissions = ['manage_counters', 'operate_tokens'];
+
+    renderPage();
+
+    expect(screen.queryByLabelText('Assigned staff')).not.toBeInTheDocument();
+    // Still able to run their own counter.
+    expect(screen.getByLabelText('Counter status')).toBeInTheDocument();
+  });
+
+  it('does not even ask who is available when it cannot assign', () => {
+    grantedPermissions = ['manage_counters', 'operate_tokens'];
+
+    renderPage();
+
+    // The hook is called with enabled=false, so no refused request is fired.
+    expect(useAssignableStaff).toHaveBeenCalledWith(expect.any(String), false);
   });
 });

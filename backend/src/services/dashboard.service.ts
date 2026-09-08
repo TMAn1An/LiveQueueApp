@@ -7,6 +7,7 @@ import {
   waitingActionEligibilityFrom,
 } from './token.service';
 import { buildDisplayFormFields, fetchFormFieldDefs } from '../utils/formFieldDisplay';
+import { requireOwnedQueue } from '../utils/tenantScope';
 
 const LIVE_STATUSES: TokenStatus[] = ['WAITING', 'CALLED', 'IN_PROGRESS'];
 
@@ -72,10 +73,30 @@ export async function getDashboardStats(organizationId: string) {
  * page rather than re-implementing the "position only counts WAITING tokens
  * in the same queue" rule a second time (CLAUDE.md Rule 5).
  */
-export async function getLiveQueueTable(organizationId: string, page: number, pageSize: number) {
+export async function getLiveQueueTable(
+  organizationId: string,
+  page: number,
+  pageSize: number,
+  /**
+   * ADR-036: which queue's line to show. Optional so the organization-wide
+   * view still exists for anyone who wants it, but the dashboard now always
+   * passes one — staff work at a single queue, and a mixed line makes the
+   * positions and locked states on screen impossible to reason about even
+   * though each was computed correctly per queue.
+   *
+   * Verified to belong to this organization before it is used, so a
+   * queueId from another tenant returns that tenant nothing.
+   */
+  queueId?: string,
+) {
+  if (queueId) {
+    await requireOwnedQueue(organizationId, queueId);
+  }
+
   const where: Prisma.TokenWhereInput = {
     organizationId,
     status: { in: LIVE_STATUSES },
+    ...(queueId ? { queueId } : {}),
   };
 
   const [tokens, total] = await Promise.all([

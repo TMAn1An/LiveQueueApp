@@ -329,9 +329,19 @@ class TokenTrackingProvider extends ChangeNotifier {
     }
 
     if (!updated.isActive) {
+      // History keeps the record; the active-token pointer does not. The two
+      // are separate concepts, and a finished visit belongs only to the
+      // first (ADR-036).
       _historyRepository.recordStatusUpdate(updated.id, updated.status);
+      onTokenSettled?.call(updated);
     }
   }
+
+  /// Told when the tracked token reaches a terminal state, so whoever owns
+  /// the active-token pointer can drop it. A callback rather than a direct
+  /// dependency: this provider already owns the socket session and should
+  /// not also reach into app-level navigation state.
+  void Function(LiveQueueToken token)? onTokenSettled;
 
   void _maybeShowReminder() {
     if (_reminderShown) return;

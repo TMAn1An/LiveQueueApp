@@ -16,6 +16,7 @@ import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState, InlineSpinner } from '../components/Spinner';
 import { PermissionGate } from '../components/PermissionGate';
+import { useAuth } from '../context/AuthContext';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { ApiError } from '../api/client';
 import type { Counter, CounterStatus } from '../types/queue';
@@ -35,6 +36,7 @@ function CounterRow({
   counter: Counter;
   onError: (message: string) => void;
 }) {
+  const { hasPermission } = useAuth();
   const updateCounter = useUpdateCounter(queueId);
   const setStatus = useSetCounterStatus(queueId);
   const assignCounter = useAssignCounter(queueId);
@@ -42,7 +44,11 @@ function CounterRow({
   // Only staff who could actually take this counter: free ones, plus whoever
   // currently holds it. The backend decides — a client-side filter over the
   // full staff list would go stale the moment another admin assigned someone.
-  const { data: assignableStaff, isLoading: loadingStaff } = useAssignableStaff(counter.id);
+  const canAssign = hasPermission('manage_staff');
+  const { data: assignableStaff, isLoading: loadingStaff } = useAssignableStaff(
+    counter.id,
+    canAssign,
+  );
   const { data: staffResult } = useStaffList(1, 100);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(counter.name);
@@ -125,42 +131,48 @@ function CounterRow({
                 </option>
               ))}
             </select>
-            <div className="flex items-center gap-1">
-              <select
-                value={counter.staffId ?? ''}
-                aria-label="Assigned staff"
-                // Locked while the request is in flight so a second change
-                // cannot race the first, and while options are still loading
-                // so nobody picks from an empty list.
-                disabled={assignCounter.isPending || loadingStaff}
-                onChange={(e) => {
-                  onError('');
-                  assignCounter.mutate(
-                    { counterId: counter.id, staffId: e.target.value || null },
-                    {
-                      onError: (err) =>
-                        onError(errorMessage(err, 'Failed to assign staff to counter.')),
-                    },
-                  );
-                }}
-                className="rounded-md border border-border-strong px-2 py-1 text-sm"
-              >
-                {/* Selecting this clears the assignment, which is what frees
-                    the person for every other counter. */}
-                <option value="">Unassigned</option>
-                {(assignableStaff ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              {assignCounter.isPending && (
-                <span className="flex items-center gap-1 text-xs text-muted">
-                  <InlineSpinner />
-                  Assigning…
-                </span>
-              )}
-            </div>
+            {/* ADR-036: deciding who stands at a counter is a staffing
+                decision reserved to owners and admins. The backend refuses it
+                for anyone else regardless — this keeps the control from
+                appearing at all rather than failing when used. */}
+            <PermissionGate permission="manage_staff">
+              <div className="flex items-center gap-1">
+                <select
+                  value={counter.staffId ?? ''}
+                  aria-label="Assigned staff"
+                  // Locked while the request is in flight so a second change
+                  // cannot race the first, and while options are still loading
+                  // so nobody picks from an empty list.
+                  disabled={assignCounter.isPending || loadingStaff}
+                  onChange={(e) => {
+                    onError('');
+                    assignCounter.mutate(
+                      { counterId: counter.id, staffId: e.target.value || null },
+                      {
+                        onError: (err) =>
+                          onError(errorMessage(err, 'Failed to assign staff to counter.')),
+                      },
+                    );
+                  }}
+                  className="rounded-md border border-border-strong px-2 py-1 text-sm"
+                >
+                  {/* Selecting this clears the assignment, which is what frees
+                      the person for every other counter. */}
+                  <option value="">Unassigned</option>
+                  {(assignableStaff ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                {assignCounter.isPending && (
+                  <span className="flex items-center gap-1 text-xs text-muted">
+                    <InlineSpinner />
+                    Assigning…
+                  </span>
+                )}
+              </div>
+            </PermissionGate>
             <Button
               variant="danger"
               loading={deleteCounter.isPending}

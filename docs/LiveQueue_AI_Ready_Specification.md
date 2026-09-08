@@ -58,6 +58,29 @@ Only an active queue can accept new tokens.
 
 Pausing a queue does not delete existing tokens.
 
+## 2.2b Queue isolation (ADR-036)
+
+A queue is an independent line. Within one organization, nothing about Queue A may affect Queue B.
+
+- **The customer line is queue-scoped.** Each queue numbers its own customers from its own prefix and sequence. Queue A's `A001` and Queue B's `B001` are unrelated, and no operational view mixes them.
+- **First-come-first-served is queue-scoped.** The earliest waiting customer of each queue is eligible independently. `A001` waiting never locks `B001`; there is no organization-wide ordering.
+- **Counter capacity is queue-scoped.** A queue's ETA and Call/Skip eligibility count only ACTIVE counters belonging to that queue. Three open counters in Queue B create no capacity in Queue A, which correctly reports no estimate and no callable customer.
+- **A counter belongs to exactly one queue.** `Counter.queueId` is its single ownership field; creating a counter inside a queue binds it there, and it appears in no other queue's list.
+- **Actions are double-scoped.** Every operational query and mutation is scoped by organization *and*, where it applies, by queue. Calling a token onto a counter from another queue is refused (`COUNTER_QUEUE_MISMATCH`), and `Next` on an empty queue returns nothing rather than reaching into another.
+
+## 2.5b Staff assignment (ADR-036)
+
+- **Assignment is persistent, not workload-based.** A staff member assigned to a counter in Queue A stays operationally bound to Queue A. Their counter being idle, ON_BREAK or OFFLINE — or the queue being empty — does not make them available anywhere else.
+- **Only an explicit unassignment frees them.** Moving someone to another queue is two deliberate steps: unassign from the old counter, then assign to the new one. Nothing transfers a person implicitly.
+- **One staff member holds at most one counter** across the organization, enforced by a unique index as well as a service check, so two simultaneous assignments in different queues cannot both succeed.
+- **Only OWNER and ADMIN may assign, unassign or reassign staff.** This requires the `manage_staff` permission and is enforced by the backend, not only hidden in the UI. Ordinary STAFF keep every operational capability they had — viewing their queue, Call, Skip, Recall, Start, Complete, and managing counters including their own counter's status — but not the decision about who stands where.
+
+## 4.3b Mobile navigation and the active token (ADR-036)
+
+- **Navigation never controls token lifecycle.** Pressing Back, returning Home, opening History or the menu, closing the tracking screen, or restarting the app never cancels a token, clears ownership, or removes history. A token ends only when staff complete or skip it, or the customer explicitly cancels.
+- **Active token and History are separate concepts.** A running token is reachable through an Active Token entry for as long as it is live; finished visits (completed, skipped, cancelled) live in History. Having a running token never hides or clears history, and an active WAITING token is never treated as history.
+- **The backend is authoritative.** The app persists only a pointer to the active token. Returning to it always resyncs from the server; a stale local status never decides whether a token is still live. A token the server no longer has is forgotten, but a network failure leaves the pointer intact.
+
 ## 2.3 Token states
 
 Use this lifecycle:

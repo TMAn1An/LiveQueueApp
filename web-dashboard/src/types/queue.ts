@@ -57,6 +57,10 @@ export interface Queue {
   services: QueueServiceItem[];
   /** Only present on the queue-list response (GET /api/queues) — not on single-queue reads. */
   counterCount?: number;
+  /** ADR-036 — how this queue alone is doing, for the queue overview. Only
+   * present on the queue-list response. */
+  waitingCount?: number;
+  activeCounterCount?: number;
 }
 
 export interface Counter {

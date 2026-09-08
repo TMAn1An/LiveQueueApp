@@ -14,6 +14,7 @@ import { DashboardPage } from './pages/DashboardPage';
 import { QueuesPage } from './pages/QueuesPage';
 import { QueueDetailsPage } from './pages/QueueDetailsPage';
 import { QueueCountersPage } from './pages/QueueCountersPage';
+import { QueueLivePage } from './pages/QueueLivePage';
 import { StaffPage } from './pages/StaffPage';
 import { BlockedDevicesPage } from './pages/BlockedDevicesPage';
 import { ReportsPage } from './pages/ReportsPage';
@@ -47,6 +48,7 @@ function App() {
                 <Route path="/dashboard" element={<DashboardPage />} />
                 <Route path="/queues" element={<QueuesPage />} />
                 <Route path="/queues/:queueId" element={<QueueDetailsPage />} />
+                <Route path="/queues/:queueId/live" element={<QueueLivePage />} />
                 <Route path="/queues/:queueId/counters" element={<QueueCountersPage />} />
                 <Route element={<PermissionRoute permission="manage_staff" />}>
                   <Route path="/staff" element={<StaffPage />} />

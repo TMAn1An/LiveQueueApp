@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+
+import '../providers/active_token_provider.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/queue_join_provider.dart';
 import '../providers/token_tracking_provider.dart';
@@ -46,6 +50,16 @@ class TokenConfirmationScreen extends StatelessWidget {
                 child: FilledButton(
                   onPressed: () {
                     final preferences = context.read<NotificationPreferencesProvider>().preferences;
+                    // ADR-036: remembered before tracking starts, so the token
+                    // stays reachable from anywhere in the app from this
+                    // moment on — not only while this one screen is open.
+                    unawaited(
+                      context.read<ActiveTokenProvider>().remember(
+                            token,
+                            queueName:
+                                context.read<QueueJoinProvider>().queueConfig?.name ?? '',
+                          ),
+                    );
                     context.read<TokenTrackingProvider>().start(token, preferences);
                     Navigator.of(context).pushReplacement(
                       MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),

@@ -48,9 +48,33 @@ export async function listQueues(organizationId: string) {
     orderBy: { createdAt: 'desc' },
   });
 
+  // ADR-036: each queue is its own line, so the overview has to say how each
+  // one is doing on its own. Two grouped counts rather than a query per
+  // queue — the numbers a supervisor actually scans for are "is anyone
+  // waiting" and "is anyone serving them".
+  const queueIds = queues.map((queue) => queue.id);
+  const [waitingGroups, activeCounterGroups] = await Promise.all([
+    prisma.token.groupBy({
+      by: ['queueId'],
+      where: { organizationId, queueId: { in: queueIds }, status: 'WAITING' },
+      _count: { _all: true },
+    }),
+    prisma.counter.groupBy({
+      by: ['queueId'],
+      where: { queueId: { in: queueIds }, status: 'ACTIVE' },
+      _count: { _all: true },
+    }),
+  ]);
+  const waitingByQueue = new Map(waitingGroups.map((row) => [row.queueId, row._count._all]));
+  const activeCountersByQueue = new Map(
+    activeCounterGroups.map((row) => [row.queueId, row._count._all]),
+  );
+
   return queues.map(({ _count, ...queue }) => ({
     ...serializeQueue(queue),
     counterCount: _count.counters,
+    waitingCount: waitingByQueue.get(queue.id) ?? 0,
+    activeCounterCount: activeCountersByQueue.get(queue.id) ?? 0,
   }));
 }
 

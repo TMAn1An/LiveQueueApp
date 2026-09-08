@@ -7,7 +7,16 @@ export async function stats(req: Request, res: Response) {
 }
 
 export async function liveTokens(req: Request, res: Response) {
-  const { page, pageSize } = req.query as unknown as { page: number; pageSize: number };
-  const result = await dashboardService.getLiveQueueTable(req.auth!.organizationId, page, pageSize);
+  const { page, pageSize, queueId } = req.query as unknown as {
+    page: number;
+    pageSize: number;
+    queueId?: string;
+  };
+  const result = await dashboardService.getLiveQueueTable(
+    req.auth!.organizationId,
+    page,
+    pageSize,
+    queueId,
+  );
   res.status(200).json({ success: true, data: result.data, pagination: result.pagination });
 }

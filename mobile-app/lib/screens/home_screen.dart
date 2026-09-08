@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../providers/active_token_provider.dart';
 import '../providers/queue_join_provider.dart';
+import '../widgets/app_drawer.dart';
+import 'active_token_screen.dart';
 import '../theme/app_colors.dart';
 import 'qr_scanner_screen.dart';
 import 'settings_screen.dart';
@@ -14,7 +17,10 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final activeToken = context.watch<ActiveTokenProvider>().activeToken;
+
     return Scaffold(
+      drawer: const AppDrawer(),
       appBar: AppBar(
         // Symbol + name rather than the full lockup: an app bar is far too
         // short for the wordmark artwork to stay legible.
@@ -41,9 +47,36 @@ class HomeScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 18),
               ),
               const SizedBox(height: 32),
+              // ADR-036: the way back into a queue the customer is already
+              // standing in. Shown above Scan, because returning to a live
+              // token matters more than starting another.
+              if (activeToken != null) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                    icon: const Icon(Icons.confirmation_number),
+                    label: Text('Active Token · ${activeToken.serialNumber}'),
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ActiveTokenScreen()),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
               SizedBox(
                 width: double.infinity,
-                child: FilledButton.icon(
+                child: activeToken != null
+                    ? OutlinedButton.icon(
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scan QR Code'),
+                        onPressed: () {
+                          context.read<QueueJoinProvider>().reset();
+                          Navigator.of(context).push(
+                            MaterialPageRoute(builder: (_) => const QrScannerScreen()),
+                          );
+                        },
+                      )
+                    : FilledButton.icon(
                   icon: const Icon(Icons.qr_code_scanner),
                   label: const Text('Scan QR Code'),
                   onPressed: () {

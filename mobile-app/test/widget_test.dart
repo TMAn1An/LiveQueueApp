@@ -17,6 +17,8 @@ import 'package:mobile_app/screens/qr_scanner_screen.dart';
 import 'package:mobile_app/services/api_client.dart';
 import 'package:mobile_app/services/device_api_service.dart';
 import 'package:mobile_app/services/device_identity_service.dart';
+import 'package:mobile_app/providers/active_token_provider.dart';
+import 'package:mobile_app/services/active_token_storage_service.dart';
 import 'package:mobile_app/services/history_storage_service.dart';
 import 'package:mobile_app/services/phone_verification_api_service.dart';
 import 'package:mobile_app/services/queue_api_service.dart';
@@ -27,8 +29,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 Widget _homeScreenUnderTest() {
   final apiClient = ApiClient(baseUrl: 'http://localhost:4000');
-  return ChangeNotifierProvider<QueueJoinProvider>(
-    create: (_) => QueueJoinProvider(
+  return MultiProvider(
+    providers: [
+      // ADR-036: Home now reads the active-token pointer so it can offer a
+      // way back into a queue the customer is already standing in.
+      ChangeNotifierProvider<ActiveTokenProvider>(
+        create: (_) => ActiveTokenProvider(
+          tokenRepository: TokenRepository(
+            apiService: TokenApiService(apiClient),
+            socketService: SocketService(),
+          ),
+          storage: ActiveTokenStorageService(),
+        ),
+      ),
+      ChangeNotifierProvider<QueueJoinProvider>(
+        create: (_) => QueueJoinProvider(
       queueRepository: QueueRepository(apiService: QueueApiService(apiClient)),
       tokenRepository: TokenRepository(
         apiService: TokenApiService(apiClient),
@@ -39,10 +54,12 @@ Widget _homeScreenUnderTest() {
         apiService: DeviceApiService(apiClient),
       ),
       historyRepository: HistoryRepository(storageService: HistoryStorageService()),
-      phoneVerificationRepository: PhoneVerificationRepository(
-        apiService: PhoneVerificationApiService(apiClient),
+          phoneVerificationRepository: PhoneVerificationRepository(
+            apiService: PhoneVerificationApiService(apiClient),
+          ),
+        ),
       ),
-    ),
+    ],
     child: const MaterialApp(home: HomeScreen()),
   );
 }

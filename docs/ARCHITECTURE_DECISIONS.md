@@ -985,3 +985,49 @@ Creating a staff member now **invites** them: the account is created with no usa
 **One escape hatch, added deliberately.** An administrator setting a password on an invited-but-not-accepted account activates them and cancels the invitation. Without it a broken mailbox would strand a colleague permanently — invited, unable to sign in, with no route to access but resending mail that never arrives. It is scoped to *invited* accounts by requiring `invitationSentAt`: a pending OWNER is mid-email-verification, and must never be activated by a password write, which would skip proving they own the address.
 
 **Verification:** backend 68 files / 667 tests, typecheck/lint/build clean; dashboard 25 files / 141 tests, typecheck/lint/build clean; mobile 190 tests, `flutter analyze` clean (same pre-existing info hints), debug APK builds. `prisma validate` and `migrate status` clean. No production database was accessed and nothing was deployed.
+
+## ADR-036: Queue-scoped operations, persistent active tokens, and assignment as a staffing decision (2026-09-09)
+
+**Status:** Implemented, tested, committed. No migration — the schema already expressed everything this needed.
+
+Three findings, of which only one was a rule that was actually wrong. Recording the other two as "already correct, now proven" matters as much as the fix: the checkpoint asked for queue isolation across the board, and most of it turned out to be there already.
+
+### 1. Queue isolation was real in the engine, missing in the view
+
+Every rule that decides who gets served next was **already** scoped by queue, and this was verified by reading the code rather than trusting a report: `computeQueueEtas(queueId)` filters both counters and waiting tokens by queue; `hasFreeActiveCounter(queueId)` counts only that queue's ACTIVE counters; `getWaitingTokenActionEligibility` asks only about earlier WAITING tokens in the same queue; `nextToken` selects `WHERE queue_id = ?`; `callToken` and `nextToken` both reject a counter from another queue with `COUNTER_QUEUE_MISMATCH`; `Counter.queueId` has existed since the initial schema. Queue A's first customer has never locked Queue B's, and Queue B's counters have never created capacity for Queue A.
+
+What did not exist was a way to *look* at one queue. `getLiveQueueTable` took an organization id and nothing else, so the dashboard rendered every queue interleaved — a table where "position 1" appeared once per queue and no row's Locked state could be explained by the rows above it. Each cell was individually correct and the table as a whole was unreadable.
+
+The fix is therefore a view fix, not a rule fix: `getLiveQueueTable` accepts an optional `queueId` (validated against the caller's organization, so a queue id from another tenant returns nothing), the dashboard opens on queue cards showing each queue's own waiting count and active counters, and clicking one opens that queue's line at `/queues/:id/live`. The organization-wide shape still exists for anyone who wants it; the dashboard simply stopped defaulting to it. `listQueues` gained two grouped counts to feed the cards.
+
+**Twenty-eight tests now hold the isolation down** — independent eligibility per queue, Next never reaching across, Skip decided by the token's own queue, another queue's counters creating no capacity and no ETA, cross-queue and cross-tenant mutation refused. They were written expecting to find gaps; twenty-six passed on the first run, and the two failures were a wrong route path in the test.
+
+### 2. Assignment was an operational permission; it is a staffing decision
+
+The one genuine defect. `PATCH /api/counters/:id/assign` and `GET /api/counters/:id/available-staff` were guarded by `manage_counters` — which `STAFF` holds. Any staff member could therefore move colleagues between counters and between queues, including moving themselves.
+
+Both endpoints now require `manage_staff`, which OWNER and ADMIN hold and STAFF does not. No new permission was invented: §27's condition (use an existing one *only if* ordinary STAFF lacks it) is exactly satisfied by `manage_staff`. Everything else on a counter stays with `manage_counters`, so a staff member can still create a counter, rename it, put their own on break, and delete it — the capability removed is precisely the one that decides where a person stands.
+
+The dashboard hides the assignment dropdown behind the same permission and skips the availability query entirely for anyone who cannot act on it, so an ordinary staff session no longer fires a request that will only be refused. The backend refuses it regardless; the UI change is about not offering what cannot be done.
+
+**Staff binding itself was already right.** `listAssignableStaff` offers only people holding no counter at all — plus the edited counter's own current holder — with no reference to counter status or queue, so an idle, ON_BREAK or OFFLINE counter still holds its person. `assignCounter` rejects anyone already assigned elsewhere, and `Counter.staffId` is `@unique`, so two simultaneous assignments in different queues cannot both succeed. Availability has always been assignment-based rather than workload-based; it is now covered by tests that say so.
+
+### 3. Mobile navigation was ending tokens
+
+The real customer-facing problem. `LiveTrackingScreen` set `automaticallyImplyLeading: false`, so there was no Back button at all; its `dispose()` called `stop()`, which set `token = null` and tore down the socket; and nothing anywhere persisted *which* token this installation was in a queue with. The combination meant that if the screen was ever left — by the Android system back, which was still reachable — the running token became unreachable for good. There was no menu, and Home offered no route back.
+
+Navigation and token lifecycle are now separate concerns:
+
+- **`ActiveTokenStorageService`** persists a pointer (token id, plus serial and queue name for the menu label) in SharedPreferences. Not a status cache — a pointer.
+- **`ActiveTokenProvider`** outlives every screen and owns that pointer. `resync()` re-reads the token from the backend and is the only thing that decides whether it is still live; a stale local status never gets a vote. A **404 clears** the pointer; a network failure deliberately **keeps** it, because an unreachable server says nothing about whether the customer is still in the line, and forgetting their token over a dropped connection would be the worst available reading.
+- **`AppDrawer`** gives Home, Scan, Active Token and History from the top-level screens, with the active entry labelled `A023 · Pharmacy` and hidden entirely when there is nothing to return to.
+- **Live Tracking got its Back button back**, and `dispose()` now only ends the socket session — the pointer survives it.
+- A terminal status clears the pointer through an `onTokenSettled` callback, so the visit leaves the Active Token area and lives on in History, which was never touched by any of this.
+
+**One deliberate trade-off:** the tracking screen has no drawer. A Scaffold's drawer takes the app bar's leading slot, which is exactly where Back has to be — and on a pushed detail screen Back is the affordance that matters. The menu lives on the top-level screens it returns to. A test asserts both halves so this cannot be quietly reversed.
+
+### Rejected
+
+Adding a `queueId` to `Counter` or a queue binding to `Staff`: both already exist in effect. Counter has carried `queueId` since the initial schema, and a staff member's queue is a consequence of the counter they hold — a second stored copy would be a synchronization bug waiting to happen. No migration was needed and none was written.
+
+**Verification:** backend 69 files / 696 tests (29 new), typecheck/lint/build clean; dashboard 26 files / 151 tests (10 new), typecheck/lint/build clean; mobile 207 tests (17 new), `flutter analyze` clean apart from the pre-existing style hints, debug APK builds. No production database was accessed and nothing was deployed.

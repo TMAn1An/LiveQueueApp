@@ -47,10 +47,17 @@ export function useSetCounterStatus(queueId: string) {
  * just taken disappears from the other dropdowns, and one just released
  * reappears, with no page refresh.
  */
-export function useAssignableStaff(counterId: string) {
+/**
+ * ADR-036: who may stand at a counter is staffing information, and the
+ * endpoint now requires manage_staff. The `enabled` flag keeps an ordinary
+ * STAFF session from firing a request it will only ever be refused — the
+ * control it feeds is hidden for them anyway.
+ */
+export function useAssignableStaff(counterId: string, enabled = true) {
   return useQuery({
     queryKey: ['assignableStaff', counterId],
     queryFn: async () => (await counterApi.listAssignableStaff(counterId)).data,
+    enabled,
   });
 }
 

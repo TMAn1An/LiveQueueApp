@@ -95,8 +95,13 @@ function QueueRow({ queue }: { queue: Queue }) {
   return (
     <tr className="border-b border-border transition-colors duration-150 hover:bg-subtle">
       <td className="py-2 pr-4">
-        <Link to={`/queues/${queue.id}`} className="font-medium text-brand-600 hover:underline">
+        {/* ADR-036: the name opens this queue's own line, which is where
+            staff actually work; settings stay one click further in. */}
+        <Link to={`/queues/${queue.id}/live`} className="font-medium text-brand-600 hover:underline">
           {queue.name}
+        </Link>
+        <Link to={`/queues/${queue.id}`} className="ml-2 text-xs text-muted hover:underline">
+          Settings
         </Link>
         {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived)</span>}
       </td>

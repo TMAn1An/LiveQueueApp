@@ -12,10 +12,12 @@ export function useDashboardStats() {
   });
 }
 
-export function useLiveQueueTable(page = 1, pageSize = 20) {
+/** The queue id is part of the cache key, so switching queues never shows
+ * the previous queue's line while the new one loads (ADR-036). */
+export function useLiveQueueTable(page = 1, pageSize = 20, queueId?: string) {
   return useQuery({
-    queryKey: ['dashboard', 'tokens', page, pageSize],
-    queryFn: async () => dashboardApi.getLiveQueueTable(page, pageSize),
+    queryKey: ['dashboard', 'tokens', page, pageSize, queueId ?? 'all'],
+    queryFn: async () => dashboardApi.getLiveQueueTable(page, pageSize, queueId),
     refetchInterval: 30_000,
   });
 }

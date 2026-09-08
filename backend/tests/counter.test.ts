@@ -232,7 +232,7 @@ describe('Counter permissions', () => {
     expect(deleteRes.status).toBe(401);
   });
 
-  it('allows STAFF to create, update, change status, assign, and delete counters (frozen RBAC policy)', async () => {
+  it('allows STAFF to create, update, change status, and delete counters (frozen RBAC policy)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const accountant = await createRestrictedStaff(ctx.organizationId);
@@ -256,16 +256,35 @@ describe('Counter permissions', () => {
       .send({ status: 'ON_BREAK' });
     expect(statusRes.status).toBe(200);
 
-    const assignRes = await api()
-      .patch(`/api/counters/${counterId}/assign`)
-      .set('Authorization', `Bearer ${accountant.accessToken}`)
-      .send({ staffId: ctx.staffId });
-    expect(assignRes.status).toBe(200);
-
     const deleteRes = await api()
       .delete(`/api/counters/${counterId}`)
       .set('Authorization', `Bearer ${accountant.accessToken}`);
     expect(deleteRes.status).toBe(204);
+  });
+
+  /**
+   * ADR-036 narrowed exactly one capability. Deciding who stands at a
+   * counter is a staffing decision, not an operational one — a staff member
+   * could previously move colleagues (including themselves) between counters
+   * and queues, because assignment was guarded by manage_counters, which
+   * STAFF holds. It now requires manage_staff, which STAFF does not.
+   */
+  it('does not let STAFF decide who stands at a counter', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    const operator = await createRestrictedStaff(ctx.organizationId);
+
+    const assignRes = await api()
+      .patch(`/api/counters/${counter.id}/assign`)
+      .set('Authorization', `Bearer ${operator.accessToken}`)
+      .send({ staffId: operator.staffId });
+    const availableRes = await api()
+      .get(`/api/counters/${counter.id}/available-staff`)
+      .set('Authorization', `Bearer ${operator.accessToken}`);
+
+    expect(assignRes.status).toBe(403);
+    expect(availableRes.status).toBe(403);
   });
 });
 

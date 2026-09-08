@@ -9,6 +9,7 @@ import 'services/fcm_service.dart';
 
 import 'providers/history_provider.dart';
 import 'providers/notification_preferences_provider.dart';
+import 'providers/active_token_provider.dart';
 import 'providers/queue_join_provider.dart';
 import 'providers/token_tracking_provider.dart';
 import 'repositories/app_version_repository.dart';
@@ -19,6 +20,7 @@ import 'repositories/phone_verification_repository.dart';
 import 'repositories/queue_repository.dart';
 import 'repositories/token_repository.dart';
 import 'screens/splash_screen.dart';
+import 'services/active_token_storage_service.dart';
 import 'services/api_client.dart';
 import 'services/app_version_api_service.dart';
 import 'services/device_api_service.dart';
@@ -80,6 +82,7 @@ class LiveQueueApp extends StatelessWidget {
           dispose: (_, s) => s.dispose(),
         ),
         Provider<HistoryStorageService>(create: (_) => HistoryStorageService()),
+        Provider<ActiveTokenStorageService>(create: (_) => ActiveTokenStorageService()),
         Provider<PreferencesStorageService>(
           create: (_) => PreferencesStorageService(),
         ),
@@ -149,6 +152,14 @@ class LiveQueueApp extends StatelessWidget {
             phoneVerificationRepository: context.read<PhoneVerificationRepository>(),
           ),
         ),
+        // ADR-036: outlives every screen, so a running token stays reachable
+        // however the customer moves around the app.
+        ChangeNotifierProvider<ActiveTokenProvider>(
+          create: (context) => ActiveTokenProvider(
+            tokenRepository: context.read<TokenRepository>(),
+            storage: context.read<ActiveTokenStorageService>(),
+          )..restore(),
+        ),
         ChangeNotifierProvider<TokenTrackingProvider>(
           create: (context) => TokenTrackingProvider(
             tokenRepository: context.read<TokenRepository>(),
@@ -156,7 +167,12 @@ class LiveQueueApp extends StatelessWidget {
             historyRepository: context.read<HistoryRepository>(),
             notificationService: context.read<NotificationService>(),
             fcmService: context.read<FcmService>(),
-          ),
+          )
+            // ADR-036: a finished visit stops being the active token and
+            // becomes history. Nothing about navigation triggers this — only
+            // the token actually reaching a terminal state does.
+            ..onTokenSettled = (token) =>
+                context.read<ActiveTokenProvider>().syncFromTracked(token),
         ),
         ChangeNotifierProvider<HistoryProvider>(
           create: (context) => HistoryProvider(

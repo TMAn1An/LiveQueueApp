@@ -40,11 +40,15 @@ router.patch(
   validate(updateCounterStatusSchema),
   counterController.updateStatus,
 );
+// Who may operate a counter is a counter concern; who *stands* at it is a
+// staffing decision, and ordinary STAFF must not be able to make it — they
+// hold manage_counters (so they can put their own counter on break) but not
+// manage_staff. Reusing that existing permission rather than inventing one.
 router.get(
   '/:counterId/available-staff',
   authenticate,
   requireVerified,
-  requirePermission('manage_counters'),
+  requirePermission('manage_staff'),
   validate(assignableStaffSchema),
   counterController.assignableStaff,
 );
@@ -52,7 +56,7 @@ router.patch(
   '/:counterId/assign',
   authenticate,
   requireVerified,
-  requirePermission('manage_counters'),
+  requirePermission('manage_staff'),
   validate(assignCounterSchema),
   counterController.assign,
 );

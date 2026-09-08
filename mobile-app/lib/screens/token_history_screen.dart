@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../widgets/app_drawer.dart';
 import '../models/history_entry.dart';
 import '../models/live_queue_token.dart';
 import '../providers/history_provider.dart';
@@ -72,6 +73,7 @@ class _TokenHistoryScreenState extends State<TokenHistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Token History')),
+      drawer: const AppDrawer(),
       body: Stack(
         children: [
           provider.isLoading
