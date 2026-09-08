@@ -1,0 +1,13 @@
+-- A staff member may hold at most one counter at a time. The service layer
+-- already rejected a conflicting assignment, but a read-then-write check
+-- cannot stop two admins assigning the same free person concurrently — this
+-- makes it a database invariant.
+--
+-- PostgreSQL treats NULLs as distinct in a unique index, so any number of
+-- counters may remain unassigned; only real staff ids are constrained.
+--
+-- Backward-safe: additive, no data is rewritten. It will fail to apply if the
+-- target database already contains two counters sharing one staff_id, which
+-- is precisely the state this forbids — see the deployment note in
+-- docs/PROGRESS.md for the pre-deploy check.
+CREATE UNIQUE INDEX "counters_staff_id_key" ON "counters"("staff_id");

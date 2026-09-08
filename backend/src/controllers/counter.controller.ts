@@ -106,3 +106,17 @@ export async function assign(req: Request, res: Response) {
   // specification's 12-event list (recommended mapping, readiness review §9).
   await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
 }
+
+/**
+ * The staff this counter may be given to right now — everyone active and
+ * unassigned, plus whoever currently holds it. Backend-authoritative rather
+ * than a client-side filter over the full staff list, so a stale dashboard
+ * cannot offer someone who is no longer free.
+ */
+export async function assignableStaff(req: Request, res: Response) {
+  const staff = await counterService.listAssignableStaff(
+    req.auth!.organizationId,
+    req.params.counterId as string,
+  );
+  res.status(200).json({ success: true, data: staff });
+}

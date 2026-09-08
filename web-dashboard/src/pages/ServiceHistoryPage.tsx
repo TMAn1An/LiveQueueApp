@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useServiceHistory } from '../hooks/useServiceHistory';
 import { useQueues } from '../hooks/useQueues';
 import { Card } from '../components/Card';
-import { Spinner, EmptyState } from '../components/Spinner';
+import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
 import { Pagination } from '../components/Pagination';
 import { SearchInput } from '../components/SearchInput';
@@ -33,7 +33,7 @@ export function ServiceHistoryPage() {
   // ever serves, so filtering only the loaded page would hide most matches.
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: queues } = useQueues();
-  const { data: result, isLoading } = useServiceHistory({
+  const { data: result, isLoading, isFetching } = useServiceHistory({
     page,
     pageSize: 20,
     search: debouncedSearch,
@@ -109,6 +109,13 @@ export function ServiceHistoryPage() {
         />
       </div>
 
+      {/* Rows already on screen stay put while a new search loads —
+          blanking them on every keystroke would be worse than the wait. */}
+      {isFetching && !isLoading && (
+        <div className="mb-2 flex justify-end">
+          <RefreshIndicator />
+        </div>
+      )}
       <Card>
         {isLoading ? (
           <Spinner />

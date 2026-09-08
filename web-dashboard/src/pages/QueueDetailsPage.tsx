@@ -106,14 +106,23 @@ export function QueueDetailsPage() {
             </div>
             <div className="flex gap-2">
               <Button
-                onClick={() => {
-                  updateQueue.mutate({ name, description, allowRepeatVisits, allowMultipleServices });
-                  setEditing(false);
-                }}
+                loading={updateQueue.isPending}
+                onClick={() =>
+                  updateQueue.mutate(
+                    { name, description, allowRepeatVisits, allowMultipleServices },
+                    // Closed only once the change lands, so a rejected save
+                    // never looks like it succeeded.
+                    { onSuccess: () => setEditing(false) },
+                  )
+                }
               >
-                Save
+                {updateQueue.isPending ? 'Saving…' : 'Save'}
               </Button>
-              <Button variant="ghost" onClick={() => setEditing(false)}>
+              <Button
+                variant="ghost"
+                disabled={updateQueue.isPending}
+                onClick={() => setEditing(false)}
+              >
                 Cancel
               </Button>
             </div>

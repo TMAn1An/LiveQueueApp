@@ -35,8 +35,14 @@ export const updateCounterStatusSchema = {
 export const assignCounterSchema = {
   params: counterIdParams,
   body: z.object({
-    staffId: z.string().uuid('staffId must be a valid id.'),
+    // Null clears the assignment — the same endpoint both assigns and
+    // unassigns, so the dashboard's one dropdown maps to one call.
+    staffId: z.string().uuid('staffId must be a valid id.').nullable(),
   }),
+};
+
+export const assignableStaffSchema = {
+  params: counterIdParams,
 };
 
 export const counterIdOnlySchema = {

@@ -3,7 +3,7 @@ import { useDevices, useBlockDevice, useUnblockDevice } from '../hooks/useDevice
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
-import { Spinner, EmptyState } from '../components/Spinner';
+import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
 import { SearchInput } from '../components/SearchInput';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -65,10 +65,13 @@ function DeviceRow({
   device,
   onBlock,
   onUnblock,
+  isPending,
 }: {
   device: Device;
   onBlock: (deviceId: string) => void;
   onUnblock: (deviceId: string) => void;
+  /** True while this specific device's block state is being changed. */
+  isPending: boolean;
 }) {
   return (
     <div className="border-b border-border py-4 last:border-b-0">
@@ -79,9 +82,16 @@ function DeviceRow({
         </div>
         <Button
           variant={device.status === 'ACTIVE' ? 'danger' : 'secondary'}
+          loading={isPending}
           onClick={() => (device.status === 'ACTIVE' ? onBlock(device.id) : onUnblock(device.id))}
         >
-          {device.status === 'ACTIVE' ? 'Block Device' : 'Unblock Device'}
+          {isPending
+            ? device.status === 'ACTIVE'
+              ? 'Blocking…'
+              : 'Unblocking…'
+            : device.status === 'ACTIVE'
+              ? 'Block Device'
+              : 'Unblock Device'}
         </Button>
       </div>
 
@@ -101,7 +111,7 @@ export function BlockedDevicesPage() {
   // narrows it server-side, so search has to work the same way to stay
   // consistent across pages.
   const debouncedSearch = useDebouncedValue(search.trim());
-  const { data: result, isLoading } = useDevices(page, 20, statusFilter, debouncedSearch);
+  const { data: result, isLoading, isFetching } = useDevices(page, 20, statusFilter, debouncedSearch);
   const blockDevice = useBlockDevice();
   const unblockDevice = useUnblockDevice();
 
@@ -139,6 +149,13 @@ export function BlockedDevicesPage() {
         </select>
       </div>
 
+      {/* Rows already on screen stay put while a new search loads —
+          blanking them on every keystroke would be worse than the wait. */}
+      {isFetching && !isLoading && (
+        <div className="mb-2 flex justify-end">
+          <RefreshIndicator />
+        </div>
+      )}
       <Card>
         {isLoading ? (
           <Spinner />
@@ -154,6 +171,12 @@ export function BlockedDevicesPage() {
                 device={device}
                 onBlock={(deviceId) => blockDevice.mutate(deviceId)}
                 onUnblock={(deviceId) => unblockDevice.mutate(deviceId)}
+                // Scoped to the row actually being changed, so one block
+                // does not freeze the buttons on every other device.
+                isPending={
+                  (blockDevice.isPending && blockDevice.variables === device.id) ||
+                  (unblockDevice.isPending && unblockDevice.variables === device.id)
+                }
               />
             ))}
           </div>

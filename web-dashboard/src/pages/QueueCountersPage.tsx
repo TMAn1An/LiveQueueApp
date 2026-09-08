@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQueue } from '../hooks/useQueues';
 import {
   useAssignCounter,
+  useAssignableStaff,
   useCounters,
   useCreateCounter,
   useDeleteCounter,
@@ -13,7 +14,7 @@ import { useStaffList } from '../hooks/useStaff';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
-import { Spinner, EmptyState } from '../components/Spinner';
+import { Spinner, EmptyState, InlineSpinner } from '../components/Spinner';
 import { PermissionGate } from '../components/PermissionGate';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { ApiError } from '../api/client';
@@ -38,10 +39,16 @@ function CounterRow({
   const setStatus = useSetCounterStatus(queueId);
   const assignCounter = useAssignCounter(queueId);
   const deleteCounter = useDeleteCounter(queueId);
+  // Only staff who could actually take this counter: free ones, plus whoever
+  // currently holds it. The backend decides — a client-side filter over the
+  // full staff list would go stale the moment another admin assigned someone.
+  const { data: assignableStaff, isLoading: loadingStaff } = useAssignableStaff(counter.id);
   const { data: staffResult } = useStaffList(1, 100);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(counter.name);
 
+  // Resolved from the full staff list rather than the assignable one, so the
+  // name still shows if this person somehow falls out of availability.
   const staffName = staffResult?.data.find((s) => s.id === counter.staffId)?.name ?? '—';
 
   return (
@@ -67,17 +74,30 @@ function CounterRow({
             {editing ? (
               <>
                 <Button
+                  loading={updateCounter.isPending}
                   onClick={() => {
+                    onError('');
                     updateCounter.mutate(
                       { counterId: counter.id, name },
-                      { onError: (err) => onError(errorMessage(err, 'Failed to rename counter.')) },
+                      {
+                        // The editor stays open until the rename actually
+                        // lands, so a rejected save does not look accepted.
+                        onSuccess: () => setEditing(false),
+                        onError: (err) => onError(errorMessage(err, 'Failed to rename counter.')),
+                      },
                     );
+                  }}
+                >
+                  {updateCounter.isPending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={updateCounter.isPending}
+                  onClick={() => {
+                    setName(counter.name);
                     setEditing(false);
                   }}
                 >
-                  Save
-                </Button>
-                <Button variant="ghost" onClick={() => setEditing(false)}>
                   Cancel
                 </Button>
               </>
@@ -88,12 +108,15 @@ function CounterRow({
             )}
             <select
               value={counter.status}
-              onChange={(e) =>
+              aria-label="Counter status"
+              disabled={setStatus.isPending}
+              onChange={(e) => {
+                onError('');
                 setStatus.mutate(
                   { counterId: counter.id, status: e.target.value as CounterStatus },
                   { onError: (err) => onError(errorMessage(err, 'Failed to change counter status.')) },
-                )
-              }
+                );
+              }}
               className="rounded-md border border-border-strong px-2 py-1 text-sm"
             >
               {COUNTER_STATUSES.map((s) => (
@@ -102,35 +125,53 @@ function CounterRow({
                 </option>
               ))}
             </select>
-            <select
-              value={counter.staffId ?? ''}
-              onChange={(e) =>
-                e.target.value &&
-                assignCounter.mutate(
-                  { counterId: counter.id, staffId: e.target.value },
-                  { onError: (err) => onError(errorMessage(err, 'Failed to assign staff to counter.')) },
-                )
-              }
-              className="rounded-md border border-border-strong px-2 py-1 text-sm"
-            >
-              <option value="" disabled>
-                Assign staff…
-              </option>
-              {(staffResult?.data ?? []).map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center gap-1">
+              <select
+                value={counter.staffId ?? ''}
+                aria-label="Assigned staff"
+                // Locked while the request is in flight so a second change
+                // cannot race the first, and while options are still loading
+                // so nobody picks from an empty list.
+                disabled={assignCounter.isPending || loadingStaff}
+                onChange={(e) => {
+                  onError('');
+                  assignCounter.mutate(
+                    { counterId: counter.id, staffId: e.target.value || null },
+                    {
+                      onError: (err) =>
+                        onError(errorMessage(err, 'Failed to assign staff to counter.')),
+                    },
+                  );
+                }}
+                className="rounded-md border border-border-strong px-2 py-1 text-sm"
+              >
+                {/* Selecting this clears the assignment, which is what frees
+                    the person for every other counter. */}
+                <option value="">Unassigned</option>
+                {(assignableStaff ?? []).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              {assignCounter.isPending && (
+                <span className="flex items-center gap-1 text-xs text-muted">
+                  <InlineSpinner />
+                  Assigning…
+                </span>
+              )}
+            </div>
             <Button
               variant="danger"
-              onClick={() =>
+              loading={deleteCounter.isPending}
+              onClick={() => {
+                onError('');
                 deleteCounter.mutate(counter.id, {
                   onError: (err) => onError(errorMessage(err, 'Failed to delete counter.')),
-                })
-              }
+                });
+              }}
             >
-              Delete
+              {deleteCounter.isPending ? 'Deleting…' : 'Delete'}
             </Button>
           </div>
         </PermissionGate>
@@ -194,16 +235,19 @@ export function QueueCountersPage() {
               />
             </div>
             <Button
-              disabled={!name || createCounter.isPending}
+              disabled={!name}
+              loading={createCounter.isPending}
               onClick={() => {
                 setError(null);
                 createCounter.mutate(name, {
+                  // Cleared only once the counter exists — a failed create
+                  // must not silently discard what was typed.
+                  onSuccess: () => setName(''),
                   onError: (err) => setError(errorMessage(err, 'Failed to create counter.')),
                 });
-                setName('');
               }}
             >
-              Add Counter
+              {createCounter.isPending ? 'Adding…' : 'Add Counter'}
             </Button>
           </div>
         </PermissionGate>

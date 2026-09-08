@@ -67,3 +67,15 @@ export interface QueueFormField {
   sortOrder: number;
   version: number;
 }
+
+/**
+ * A staff member this counter may be assigned to right now — the backend's
+ * own availability answer (active, holding no other counter, plus whoever
+ * currently holds this one), never a client-side filter over all staff.
+ */
+export interface AssignableStaff {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+}

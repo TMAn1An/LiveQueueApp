@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { Counter, CounterStatus } from '../types/queue';
+import type { AssignableStaff, Counter, CounterStatus } from '../types/queue';
 
 export function listCounters(queueId: string) {
   return apiFetch<Counter[]>(`/api/queues/${queueId}/counters`);
@@ -17,11 +17,17 @@ export function setCounterStatus(counterId: string, status: CounterStatus) {
   return apiFetch<Counter>(`/api/counters/${counterId}/status`, { method: 'PATCH', body: { status } });
 }
 
-export function assignCounter(counterId: string, staffId: string) {
+/** `staffId: null` clears the assignment, freeing that person for any counter. */
+export function assignCounter(counterId: string, staffId: string | null) {
   return apiFetch<Counter>(`/api/counters/${counterId}/assign`, {
     method: 'PATCH',
     body: { staffId },
   });
+}
+
+/** Active staff who hold no counter, plus this counter's current holder. */
+export function listAssignableStaff(counterId: string) {
+  return apiFetch<AssignableStaff[]>(`/api/counters/${counterId}/available-staff`);
 }
 
 export function deleteCounter(counterId: string) {

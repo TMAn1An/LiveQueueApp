@@ -43,15 +43,15 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
         </td>
         <td className="py-2 pr-4 flex gap-2">
           <Button
-            onClick={() => {
-              updateService.mutate({
-                serviceId: service.id,
-                input: { serviceName: name, durationMinutes: duration },
-              });
-              setEditing(false);
-            }}
+            loading={updateService.isPending}
+            onClick={() =>
+              updateService.mutate(
+                { serviceId: service.id, input: { serviceName: name, durationMinutes: duration } },
+                { onSuccess: () => setEditing(false) },
+              )
+            }
           >
-            Save
+            {updateService.isPending ? 'Saving…' : 'Save'}
           </Button>
           <Button variant="ghost" onClick={() => setEditing(false)}>
             Cancel
@@ -74,11 +74,19 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             <Button variant="secondary" onClick={() => setEditing(true)}>
               Edit
             </Button>
-            <Button variant="secondary" onClick={() => setStatus.mutate({ serviceId: service.id, isActive: !service.isActive })}>
-              {service.isActive ? 'Deactivate' : 'Activate'}
+            <Button
+              variant="secondary"
+              loading={setStatus.isPending}
+              onClick={() => setStatus.mutate({ serviceId: service.id, isActive: !service.isActive })}
+            >
+              {setStatus.isPending ? 'Updating…' : service.isActive ? 'Deactivate' : 'Activate'}
             </Button>
-            <Button variant="danger" onClick={() => deleteService.mutate(service.id)}>
-              Delete
+            <Button
+              variant="danger"
+              loading={deleteService.isPending}
+              onClick={() => deleteService.mutate(service.id)}
+            >
+              {deleteService.isPending ? 'Deleting…' : 'Delete'}
             </Button>
           </div>
         </PermissionGate>
@@ -141,13 +149,18 @@ export function ServicesManager({
             />
           </div>
           <Button
-            disabled={!name || createService.isPending}
-            onClick={() => {
-              createService.mutate({ serviceName: name, durationMinutes: duration });
-              setName('');
-            }}
+            disabled={!name}
+            loading={createService.isPending}
+            onClick={() =>
+              createService.mutate(
+                { serviceName: name, durationMinutes: duration },
+                // Cleared only on success, so a rejected create keeps what
+                // was typed.
+                { onSuccess: () => setName('') },
+              )
+            }
           >
-            Add Service
+            {createService.isPending ? 'Adding…' : 'Add Service'}
           </Button>
         </div>
       </PermissionGate>

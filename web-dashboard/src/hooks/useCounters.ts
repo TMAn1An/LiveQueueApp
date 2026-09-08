@@ -41,12 +41,29 @@ export function useSetCounterStatus(queueId: string) {
   });
 }
 
+/**
+ * Availability changes the moment any counter is assigned, so every row's
+ * option list is invalidated alongside the counters themselves — the person
+ * just taken disappears from the other dropdowns, and one just released
+ * reappears, with no page refresh.
+ */
+export function useAssignableStaff(counterId: string) {
+  return useQuery({
+    queryKey: ['assignableStaff', counterId],
+    queryFn: async () => (await counterApi.listAssignableStaff(counterId)).data,
+  });
+}
+
 export function useAssignCounter(queueId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ counterId, staffId }: { counterId: string; staffId: string }) =>
+    mutationFn: ({ counterId, staffId }: { counterId: string; staffId: string | null }) =>
       counterApi.assignCounter(counterId, staffId),
-    onSuccess: () => invalidateCounters(queryClient, queueId),
+    onSuccess: () => {
+      invalidateCounters(queryClient, queueId);
+      void queryClient.invalidateQueries({ queryKey: ['assignableStaff'] });
+      void queryClient.invalidateQueries({ queryKey: ['staff'] });
+    },
   });
 }
 

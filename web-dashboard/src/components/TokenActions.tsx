@@ -147,6 +147,7 @@ export function TokenActions({
               }
               setPickingCounter(false);
             }}
+            disabled={callToken.isPending}
           >
             <option value="" disabled>
               Select counter…
@@ -180,8 +181,8 @@ export function TokenActions({
               onChange={(e) => setVerificationCodeInput(e.target.value)}
               className="w-36 rounded-md border border-border-strong px-2 py-1 text-sm"
             />
-            <Button type="submit" variant="primary" disabled={startToken.isPending}>
-              Confirm
+            <Button type="submit" variant="primary" loading={startToken.isPending}>
+              {startToken.isPending ? 'Starting…' : 'Confirm'}
             </Button>
             <Button
               type="button"
@@ -197,8 +198,12 @@ export function TokenActions({
           </form>
         )}
         {status === 'IN_PROGRESS' && (
-          <Button variant="primary" onClick={() => completeToken.mutate(tokenId)}>
-            Complete
+          <Button
+            variant="primary"
+            loading={completeToken.isPending}
+            onClick={() => completeToken.mutate(tokenId)}
+          >
+            {completeToken.isPending ? 'Completing…' : 'Complete'}
           </Button>
         )}
         {(status === 'CALLED' || status === 'IN_PROGRESS') && !adjustingDuration && (
@@ -224,8 +229,8 @@ export function TokenActions({
               onChange={(e) => setDurationInput(e.target.value)}
               className="w-20 rounded-md border border-border-strong px-2 py-1 text-sm"
             />
-            <Button type="submit" variant="primary" disabled={setRequiredDuration.isPending}>
-              Set
+            <Button type="submit" variant="primary" loading={setRequiredDuration.isPending}>
+              {setRequiredDuration.isPending ? 'Updating…' : 'Set'}
             </Button>
             <Button
               type="button"
@@ -246,8 +251,12 @@ export function TokenActions({
         {((status === 'WAITING' && isFcfsEligible) ||
           status === 'CALLED' ||
           status === 'IN_PROGRESS') && (
-          <Button variant="outline" onClick={() => skipToken.mutate(tokenId)}>
-            Skip
+          <Button
+            variant="outline"
+            loading={skipToken.isPending}
+            onClick={() => skipToken.mutate(tokenId)}
+          >
+            {skipToken.isPending ? 'Skipping…' : 'Skip'}
           </Button>
         )}
         {status === 'SKIPPED' && !pickingRecallCounter && (
@@ -261,6 +270,7 @@ export function TokenActions({
             className="rounded-md border border-border-strong px-2 py-1 text-sm"
             defaultValue=""
             onBlur={() => setPickingRecallCounter(false)}
+            disabled={recallToken.isPending}
             onChange={(e) => {
               if (e.target.value) {
                 setRecallError(null);

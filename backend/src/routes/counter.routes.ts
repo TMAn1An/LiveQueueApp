@@ -5,6 +5,7 @@ import { requirePermission } from '../middleware/requirePermission';
 import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
+  assignableStaffSchema,
   assignCounterSchema,
   counterIdOnlySchema,
   updateCounterSchema,
@@ -38,6 +39,14 @@ router.patch(
   requirePermission('manage_counters'),
   validate(updateCounterStatusSchema),
   counterController.updateStatus,
+);
+router.get(
+  '/:counterId/available-staff',
+  authenticate,
+  requireVerified,
+  requirePermission('manage_counters'),
+  validate(assignableStaffSchema),
+  counterController.assignableStaff,
 );
 router.patch(
   '/:counterId/assign',

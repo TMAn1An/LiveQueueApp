@@ -354,7 +354,18 @@ class _VerificationCodeSectionState extends State<_VerificationCodeSection> {
               onPressed: tracking.isLoadingVerificationCode
                   ? null
                   : () => tracking.reissueVerificationCode(),
-              child: const Text('Get a new code'),
+              // Reissuing is a network round-trip; without this the button
+              // just greys out with no explanation.
+              child: tracking.isLoadingVerificationCode
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                        SizedBox(width: 10),
+                        Text('Getting a new code…'),
+                      ],
+                    )
+                  : const Text('Get a new code'),
             ),
           ],
         ),

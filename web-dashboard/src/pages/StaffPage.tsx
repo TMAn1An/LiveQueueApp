@@ -3,7 +3,7 @@ import { useCreateStaff, useDeleteStaff, useStaffList, useUpdateStaff } from '..
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
-import { Spinner, EmptyState } from '../components/Spinner';
+import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Modal } from '../components/Modal';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
@@ -117,6 +117,7 @@ function StaffRow({ staff }: { staff: Staff }) {
             <div className="flex gap-2">
               <Button
                 variant="secondary"
+                loading={updateStaff.isPending}
                 onClick={() =>
                   updateStaff.mutate({
                     staffId: staff.id,
@@ -124,7 +125,11 @@ function StaffRow({ staff }: { staff: Staff }) {
                   })
                 }
               >
-                {staff.status === 'ACTIVE' ? 'Suspend' : 'Reactivate'}
+                {updateStaff.isPending
+                  ? 'Updating…'
+                  : staff.status === 'ACTIVE'
+                    ? 'Suspend'
+                    : 'Reactivate'}
               </Button>
               {!confirmingDelete ? (
                 <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
@@ -132,8 +137,12 @@ function StaffRow({ staff }: { staff: Staff }) {
                 </Button>
               ) : (
                 <>
-                  <Button variant="danger" onClick={() => deleteStaff.mutate(staff.id)}>
-                    Confirm
+                  <Button
+                    variant="danger"
+                    loading={deleteStaff.isPending}
+                    onClick={() => deleteStaff.mutate(staff.id)}
+                  >
+                    {deleteStaff.isPending ? 'Deleting…' : 'Confirm'}
                   </Button>
                   <Button variant="ghost" onClick={() => setConfirmingDelete(false)}>
                     Cancel
@@ -154,7 +163,7 @@ export function StaffPage() {
   // Server-side search: this list is paginated, so filtering only the loaded
   // page would hide matches sitting on other pages.
   const debouncedSearch = useDebouncedValue(search.trim());
-  const { data: result, isLoading } = useStaffList(page, 20, debouncedSearch);
+  const { data: result, isLoading, isFetching } = useStaffList(page, 20, debouncedSearch);
   const [showCreate, setShowCreate] = useState(false);
 
   function handleSearchChange(value: string) {
@@ -182,6 +191,13 @@ export function StaffPage() {
         />
       </div>
 
+      {/* Rows already on screen stay put while a new search loads —
+          blanking them on every keystroke would be worse than the wait. */}
+      {isFetching && !isLoading && (
+        <div className="mb-2 flex justify-end">
+          <RefreshIndicator />
+        </div>
+      )}
       <Card>
         {isLoading ? (
           <Spinner />

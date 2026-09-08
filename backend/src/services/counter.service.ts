@@ -80,9 +80,63 @@ export async function deleteCounter(organizationId: string, counterId: string) {
  * time — physically they can only be at one counter — so any existing
  * assignment elsewhere is rejected rather than silently reassigned.
  */
-export async function assignCounter(organizationId: string, counterId: string, staffId: string) {
+const STAFF_ALREADY_ASSIGNED = new AppError(
+  409,
+  'STAFF_ALREADY_ASSIGNED',
+  'This staff member is already assigned to another counter.',
+);
+
+/**
+ * Staff who may be put on this counter right now: everyone in the
+ * organization who is operationally active and holds no counter, plus this
+ * counter's own current assignee (who must stay selectable while editing the
+ * counter they already hold).
+ *
+ * "Free" means no counter row references them — deliberately *not* a
+ * presence/session concept, and deliberately unaffected by the holding
+ * counter's status: an ON_BREAK or OFFLINE counter still has its person, and
+ * they become free only by being explicitly unassigned or reassigned.
+ */
+export async function listAssignableStaff(organizationId: string, counterId: string) {
+  const counter = await findCounterScoped(organizationId, counterId);
+
+  return prisma.staff.findMany({
+    where: {
+      organizationId,
+      // SUSPENDED and PENDING_EMAIL_VERIFICATION accounts cannot operate a
+      // counter, so they are not offered as options.
+      status: 'ACTIVE',
+      OR: [
+        { counters: { none: {} } },
+        ...(counter.staffId ? [{ id: counter.staffId }] : []),
+      ],
+    },
+    orderBy: { name: 'asc' },
+    select: { id: true, name: true, email: true, role: true },
+  });
+}
+
+/**
+ * Assigns a staff member to this counter, or clears the assignment when
+ * `staffId` is null.
+ *
+ * The pre-check below gives a clean 409 for the ordinary case; the unique
+ * index on `Counter.staffId` is what actually makes the rule hold, since two
+ * admins assigning the same free person concurrently would both pass a
+ * read-then-write check. Both paths surface the identical error, so a caller
+ * cannot tell (and does not need to) which one caught it.
+ */
+export async function assignCounter(
+  organizationId: string,
+  counterId: string,
+  staffId: string | null,
+) {
   const counter = await findCounterScoped(organizationId, counterId);
   assertQueueMutable(counter.queue);
+
+  if (staffId === null) {
+    return prisma.counter.update({ where: { id: counterId }, data: { staffId: null } });
+  }
 
   const staff = await prisma.staff.findUnique({ where: { id: staffId } });
   if (!staff) {
@@ -95,17 +149,40 @@ export async function assignCounter(organizationId: string, counterId: string, s
       'Staff member does not belong to this organization.',
     );
   }
+  if (staff.status !== 'ACTIVE') {
+    throw new AppError(
+      409,
+      'STAFF_NOT_ASSIGNABLE',
+      'Only an active staff member can be assigned to a counter.',
+    );
+  }
 
   const existingAssignment = await prisma.counter.findFirst({
     where: { staffId, id: { not: counterId } },
   });
   if (existingAssignment) {
-    throw new AppError(
-      409,
-      'STAFF_ALREADY_ASSIGNED',
-      'This staff member is already assigned to another counter.',
-    );
+    throw STAFF_ALREADY_ASSIGNED;
   }
 
-  return prisma.counter.update({ where: { id: counterId }, data: { staffId } });
+  try {
+    return await prisma.counter.update({ where: { id: counterId }, data: { staffId } });
+  } catch (err) {
+    // P2002 on counters_staff_id_key: another transaction claimed this staff
+    // member between the check above and this write.
+    if (isUniqueViolation(err, 'staffId')) {
+      throw STAFF_ALREADY_ASSIGNED;
+    }
+    throw err;
+  }
+}
+
+function isUniqueViolation(err: unknown, field: string): boolean {
+  if (typeof err !== 'object' || err === null || !('code' in err)) {
+    return false;
+  }
+  if ((err as { code?: unknown }).code !== 'P2002') {
+    return false;
+  }
+  const target = (err as { meta?: { target?: unknown } }).meta?.target;
+  return Array.isArray(target) ? target.includes(field) : true;
 }

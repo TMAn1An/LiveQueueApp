@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuditLogs } from '../hooks/useAuditLogs';
 import { Card } from '../components/Card';
-import { Spinner, EmptyState } from '../components/Spinner';
+import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
 import { SearchInput } from '../components/SearchInput';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -20,7 +20,7 @@ export function AuditLogsPage() {
   // Server-side search: this table grows without bound, so filtering only
   // the loaded page would hide most matches.
   const debouncedSearch = useDebouncedValue(search.trim());
-  const { data: result, isLoading } = useAuditLogs(page, 20, debouncedSearch);
+  const { data: result, isLoading, isFetching } = useAuditLogs(page, 20, debouncedSearch);
 
   function handleSearchChange(value: string) {
     setSearch(value);
@@ -43,6 +43,13 @@ export function AuditLogsPage() {
         />
       </div>
 
+      {/* Rows already on screen stay put while a new search loads —
+          blanking them on every keystroke would be worse than the wait. */}
+      {isFetching && !isLoading && (
+        <div className="mb-2 flex justify-end">
+          <RefreshIndicator />
+        </div>
+      )}
       <Card>
         {isLoading ? (
           <Spinner />

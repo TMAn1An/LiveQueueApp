@@ -121,8 +121,16 @@ function QueueRow({ queue }: { queue: Queue }) {
         <PermissionGate permission="manage_queues">
           {!queue.deletedAt && (
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => updateStatus.mutate(nextStatus)}>
-                {queue.status === 'ACTIVE' ? 'Pause' : 'Resume'}
+              <Button
+                variant="secondary"
+                loading={updateStatus.isPending}
+                onClick={() => updateStatus.mutate(nextStatus)}
+              >
+                {updateStatus.isPending
+                  ? 'Updating…'
+                  : queue.status === 'ACTIVE'
+                    ? 'Pause'
+                    : 'Resume'}
               </Button>
               {!confirmingDelete ? (
                 <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
@@ -133,8 +141,12 @@ function QueueRow({ queue }: { queue: Queue }) {
                   <span className="self-center text-xs text-red-600">
                     {queue.services.length > 0 ? 'Has services — confirm?' : 'Confirm?'}
                   </span>
-                  <Button variant="danger" onClick={() => deleteQueue.mutate(queue.id)}>
-                    Yes, delete
+                  <Button
+                    variant="danger"
+                    loading={deleteQueue.isPending}
+                    onClick={() => deleteQueue.mutate(queue.id)}
+                  >
+                    {deleteQueue.isPending ? 'Deleting…' : 'Yes, delete'}
                   </Button>
                   <Button variant="ghost" onClick={() => setConfirmingDelete(false)}>
                     Cancel

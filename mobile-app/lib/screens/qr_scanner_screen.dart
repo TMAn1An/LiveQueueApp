@@ -103,8 +103,23 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               );
             },
           ),
+          // A scan that resolves slowly (a cold backend, a poor connection)
+          // otherwise looks like a frozen camera — the label says what the
+          // wait is for, over a scrim so it reads against the preview.
           if (context.watch<QueueJoinProvider>().isLoadingQueue)
-            const Center(child: CircularProgressIndicator()),
+            ColoredBox(
+              color: Colors.black54,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 12),
+                    Text('Loading queue…', style: TextStyle(color: Colors.white)),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );

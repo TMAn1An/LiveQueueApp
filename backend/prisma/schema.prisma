@@ -230,7 +230,13 @@ model Counter {
 
   name    String
   status  CounterStatus @default(OFFLINE)
-  staffId String?       @map("staff_id")
+  /// A staff member may hold at most one counter at a time — physically they
+  /// can only stand at one. Enforced at the database level rather than by the
+  /// service's pre-check alone: two admins assigning the same free person
+  /// concurrently would both pass a read-then-write check. PostgreSQL treats
+  /// NULLs as distinct in a unique index, so any number of counters may sit
+  /// unassigned.
+  staffId String?       @unique @map("staff_id")
   staff   Staff?        @relation(fields: [staffId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now()) @map("created_at")

@@ -53,11 +53,21 @@ class DynamicFormScreen extends StatelessWidget {
               width: double.infinity,
               child: FilledButton(
                 onPressed: provider.isSubmitting ? null : () => _submit(context),
+                // Spinner *and* wording: the label alone leaves the customer
+                // guessing whether the tap registered, and the spinner alone
+                // does not say what is happening.
                 child: provider.isSubmitting
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    ? const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          ),
+                          SizedBox(width: 10),
+                          Text('Joining queue…'),
+                        ],
                       )
                     : const Text('Join Queue'),
               ),
