@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
+import { assertIdentityFieldSurvives } from './queueIdentityPolicy.service';
 import { requireOwnedQueue, assertQueueMutable } from '../utils/tenantScope';
 import type { replaceFormFieldsSchema } from '../validators/formField.validators';
 
@@ -36,6 +37,10 @@ export async function replaceFormFields(
 ) {
   const queue = await requireOwnedQueue(organizationId, queueId);
   assertQueueMutable(queue);
+  // A queue that identifies customers by one of these questions cannot lose
+  // it, or have it turned into something that identifies nobody, while that
+  // restriction is still on (ADR-034).
+  await assertIdentityFieldSurvives(queue, input.fields);
   const newVersion = queue.formVersion + 1;
 
   const fields = await prisma.$transaction(async (tx) => {

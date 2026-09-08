@@ -15,6 +15,7 @@ import 'repositories/app_version_repository.dart';
 import 'repositories/device_repository.dart';
 import 'repositories/history_repository.dart';
 import 'repositories/notification_preferences_repository.dart';
+import 'repositories/phone_verification_repository.dart';
 import 'repositories/queue_repository.dart';
 import 'repositories/token_repository.dart';
 import 'screens/splash_screen.dart';
@@ -24,6 +25,7 @@ import 'services/device_api_service.dart';
 import 'services/device_identity_service.dart';
 import 'services/history_storage_service.dart';
 import 'services/notification_service.dart';
+import 'services/phone_verification_api_service.dart';
 import 'services/preferences_storage_service.dart';
 import 'services/queue_api_service.dart';
 import 'services/socket_service.dart';
@@ -84,6 +86,9 @@ class LiveQueueApp extends StatelessWidget {
         Provider<QueueApiService>(
           create: (context) => QueueApiService(context.read<ApiClient>()),
         ),
+        Provider<PhoneVerificationApiService>(
+          create: (context) => PhoneVerificationApiService(context.read<ApiClient>()),
+        ),
         Provider<DeviceApiService>(
           create: (context) => DeviceApiService(context.read<ApiClient>()),
         ),
@@ -98,6 +103,11 @@ class LiveQueueApp extends StatelessWidget {
         Provider<QueueRepository>(
           create: (context) =>
               QueueRepository(apiService: context.read<QueueApiService>()),
+        ),
+        Provider<PhoneVerificationRepository>(
+          create: (context) => PhoneVerificationRepository(
+            apiService: context.read<PhoneVerificationApiService>(),
+          ),
         ),
         Provider<DeviceRepository>(
           create: (context) => DeviceRepository(
@@ -136,6 +146,7 @@ class LiveQueueApp extends StatelessWidget {
             tokenRepository: context.read<TokenRepository>(),
             deviceRepository: context.read<DeviceRepository>(),
             historyRepository: context.read<HistoryRepository>(),
+            phoneVerificationRepository: context.read<PhoneVerificationRepository>(),
           ),
         ),
         ChangeNotifierProvider<TokenTrackingProvider>(

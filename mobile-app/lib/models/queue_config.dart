@@ -1,4 +1,5 @@
 import 'dynamic_form_field.dart';
+import 'queue_identity_requirements.dart';
 import 'service_option.dart';
 
 /// The public, unauthenticated queue configuration
@@ -20,6 +21,7 @@ class QueueConfig {
     this.description,
     this.clientTerminology,
     this.allowMultipleServices = true,
+    this.identity = const QueueIdentityRequirements(),
   });
 
   final String id;
@@ -35,6 +37,11 @@ class QueueConfig {
   /// UI shows — this only drives which widget renders.
   final bool allowMultipleServices;
 
+  /// ADR-034 — what this queue needs to recognise the customer, if it limits
+  /// repeat visits. Drives whether the join flow asks for a verified phone
+  /// number, and whether it should refuse to start at all.
+  final QueueIdentityRequirements identity;
+
   bool get isAcceptingCustomers => status == 'ACTIVE';
 
   factory QueueConfig.fromJson(Map<String, dynamic> json) {
@@ -45,6 +52,9 @@ class QueueConfig {
       status: json['status'] as String,
       clientTerminology: json['clientTerminology'] as String?,
       allowMultipleServices: json['allowMultipleServices'] as bool? ?? true,
+      identity: QueueIdentityRequirements.fromJson(
+        (json['identity'] as Map<String, dynamic>?) ?? const {},
+      ),
       services: (json['services'] as List<dynamic>? ?? const [])
           .map((e) => ServiceOption.fromJson(e as Map<String, dynamic>))
           .toList(),

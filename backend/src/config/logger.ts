@@ -42,6 +42,19 @@ const SENSITIVE_REDACT_PATHS = [
   'req.query.deviceIdentifier',
   'req.query.token',
   'req.url',
+  // ADR-034 — customer identity. A phone number and a verification code are
+  // both sensitive personal data, and the proof is a bearer credential for
+  // an identity claim. The custom identity answer (a national ID, student
+  // number and so on) arrives inside req.body.formData under an
+  // operator-chosen key, so it cannot be named here — formData is redacted
+  // wholesale instead, which also covers every other answer a customer gives.
+  'req.body.phone',
+  'req.body.code',
+  'req.body.verificationProof',
+  'req.body.phoneVerificationProof',
+  'req.body.formData',
+  '*.phoneVerificationProof',
+  '*.verificationProof',
   'res.headers["set-cookie"]',
   '*.password',
   '*.passwordHash',

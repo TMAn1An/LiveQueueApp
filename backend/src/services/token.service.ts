@@ -1,4 +1,13 @@
-import type { Counter, Prisma, QueueFormField, Token, TokenStatus } from '@prisma/client';
+import type {
+  Counter,
+  Prisma,
+  Queue,
+  QueueFormField,
+  RepeatIdentityMode,
+  RepeatRestrictionPeriod,
+  Token,
+  TokenStatus,
+} from '@prisma/client';
 import { z, type ZodTypeAny } from 'zod';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
@@ -6,6 +15,13 @@ import { assertValidTransition } from '../utils/tokenStateMachine';
 import { findCounterScoped } from './counter.service';
 import { requireOwnedQueue } from '../utils/tenantScope';
 import { registerDevice } from './device.service';
+import {
+  computeIdentityFingerprint,
+  computePeriodKey,
+  normalizeCustomIdentity,
+  verifyPhoneVerificationProof,
+} from '../utils/customerIdentity';
+import { describeJoinRequirements, repeatPolicyHelpers } from './queueIdentityPolicy.service';
 import type { AuthContext } from '../utils/authContext';
 import {
   decryptOtpCode,
@@ -27,14 +43,120 @@ import {
 const QUEUE_ARCHIVED_MSG = 'This queue has been archived and can no longer accept new tokens.';
 const QUEUE_NOT_ACTIVE_MSG = 'This queue is currently not accepting new customers.';
 
+/**
+ * What a restricted queue will match this joiner against, or null when the
+ * queue allows repeats and therefore needs no identity at all.
+ *
+ * The fingerprint is always computed here from the customer's own answers
+ * and a server-issued phone proof — a client-supplied fingerprint is never
+ * accepted, since that would let anyone claim to be anyone.
+ */
+interface ResolvedCustomerIdentity {
+  fingerprint: string;
+  mode: RepeatIdentityMode;
+  period: RepeatRestrictionPeriod;
+  periodKey: string;
+}
+
+function resolveCustomerIdentity(
+  queue: Pick<
+    Queue,
+    | 'id'
+    | 'allowRepeatVisits'
+    | 'repeatRestrictionPeriod'
+    | 'repeatIdentityMode'
+    | 'repeatIdentityFieldKey'
+    | 'timezone'
+  >,
+  input: CreateTokenInput,
+  formData: Record<string, unknown>,
+): ResolvedCustomerIdentity | null {
+  const requirements = describeJoinRequirements(queue);
+  if (!requirements.repeatRestricted) {
+    return null;
+  }
+
+  // A queue restricted before this feature existed has no identity method.
+  // It refuses joins until an admin configures one, rather than silently
+  // enforcing the old per-installation rule that a reinstall bypassed.
+  if (requirements.configurationRequired) {
+    throw new AppError(
+      409,
+      'QUEUE_IDENTITY_CONFIGURATION_REQUIRED',
+      'This queue limits repeat visits but has not been set up to identify customers yet. Please contact the organization.',
+    );
+  }
+
+  const mode = requirements.identityMode!;
+  const period = requirements.restrictionPeriod!;
+
+  let normalizedPhone: string | null = null;
+  if (repeatPolicyHelpers.needsVerifiedPhone(mode)) {
+    const proof = input.phoneVerificationProof?.trim();
+    if (!proof) {
+      throw new AppError(
+        422,
+        'PHONE_VERIFICATION_REQUIRED',
+        'This queue requires a verified phone number.',
+      );
+    }
+    const provenFingerprint = verifyPhoneVerificationProof(proof, queue.id);
+    if (!provenFingerprint) {
+      throw new AppError(
+        401,
+        'PHONE_VERIFICATION_INVALID',
+        'Your phone verification has expired. Please verify your number again.',
+      );
+    }
+    // Carried through as the already-proven fingerprint rather than a raw
+    // number: the server never has to trust a phone value from this request.
+    normalizedPhone = provenFingerprint;
+  }
+
+  let normalizedCustomValue: string | null = null;
+  if (repeatPolicyHelpers.needsCustomField(mode)) {
+    const key = queue.repeatIdentityFieldKey!;
+    const raw = formData[key];
+    const asText = typeof raw === 'string' ? raw : typeof raw === 'number' ? String(raw) : '';
+    normalizedCustomValue = normalizeCustomIdentity(asText);
+    if (!normalizedCustomValue) {
+      throw new AppError(
+        422,
+        'IDENTITY_VALUE_REQUIRED',
+        'Please answer the question that identifies you for this queue.',
+      );
+    }
+  }
+
+  return {
+    fingerprint: computeIdentityFingerprint({
+      queueId: queue.id,
+      mode,
+      normalizedPhone,
+      normalizedCustomValue,
+    }),
+    mode,
+    period,
+    periodKey: computePeriodKey(period, queue.timezone),
+  };
+}
+
 export interface CreateTokenInput {
   queueId: string;
   /// V2 Checkpoint 5 (ADR-027): the validator canonicalizes both the legacy
   /// `serviceId` and the new `serviceIds` request shapes into this one array
   /// (already deduplicated, length >= 1) before this ever runs.
   serviceIds: string[];
+  /// Identifies the *installation*, never the person (ADR-034). Still used
+  /// for FCM registration, "my current token" lookups and installation
+  /// blocking — but a queue's repeat restriction is enforced against the
+  /// customer identity below, which a reinstall cannot reset.
   deviceIdentifier: string;
   formData: Record<string, unknown>;
+  /// Present only when the queue identifies customers by verified phone: the
+  /// server-signed proof returned by the phone-verification flow. Never a
+  /// client-asserted "verified" flag.
+  phoneVerificationProof?: string;
 }
 
 /** The shape every idempotency comparison needs — the existing token's full
@@ -269,6 +391,11 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   });
   const formData = validateFormData(formFields, input.formData);
 
+  // Resolved before the transaction: this is pure computation over the
+  // request plus the queue's stored policy, and doing it here keeps the
+  // queue lock below as short as it already was.
+  const identity = resolveCustomerIdentity(queue, input, formData);
+
   // Fast pre-lock idempotency check — a pure optimization to avoid
   // contending for the queue lock on a known-duplicate request. The
   // authoritative check happens again below, inside the transaction.
@@ -341,35 +468,14 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
       );
     }
 
-    // V2 Checkpoint 6: a separate, independent rule from the active-token
-    // check above — one device may complete a queue's service at most once
-    // when allowRepeatVisits is false. SKIPPED deliberately does NOT count
-    // (only COMPLETED does): a device with just a SKIPPED token has never
-    // actually been served and must still be allowed to (re)join. Recall
-    // (SKIPPED -> CALLED) reuses the same token row rather than creating a
-    // new one, so it is entirely unaffected by this check — only a later
-    // createToken call is. Scoped by (deviceId, queueId) only, exactly like
-    // the active-token check — queueId already determines organizationId,
-    // so there is no client-supplied tenant boundary to trust here. Checked
-    // under the same queue-row lock acquired above (reusing the existing
-    // mechanism, not a new one) — sufficient because this only ever reads
-    // already-committed COMPLETED rows from an earlier, already-finished
-    // transaction; it never races against another createToken call writing
-    // that COMPLETED status concurrently, since a CALLED/IN_PROGRESS token
-    // for this device would already have been caught by existingActive
-    // above.
-    if (!lockedQueue.allowRepeatVisits) {
-      const existingCompleted = await tx.token.findFirst({
-        where: { deviceId: device.id, queueId: input.queueId, status: 'COMPLETED' },
-      });
-      if (existingCompleted) {
-        throw new AppError(
-          409,
-          'REPEAT_VISIT_NOT_ALLOWED',
-          'This device has already completed a visit to this queue and repeat visits are not allowed.',
-        );
-      }
-    }
+    // The repeat-visit rule used to live here, as a second (deviceId,
+    // queueId) lookup for a COMPLETED token — which a reinstall reset, since
+    // a fresh install is simply a different device row. ADR-034 moves it
+    // onto the customer's own identity: the claim created alongside the
+    // token below is the enforcement point now, and its unique constraint is
+    // what makes it hold. The device rule above is unchanged and still
+    // separate — stopping one installation from queueing twice at once is an
+    // installation-scoped concern, and correctly stays one.
 
     const sequenceNumber = lockedQueue.nextTokenNumber;
     await tx.queue.update({
@@ -383,7 +489,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     // updated mobile app parsing this same token's future responses) keeps
     // working. tokenServices is the authoritative full set, created
     // atomically with the token itself in this same transaction/statement.
-    return tx.token.create({
+    const token = await tx.token.create({
       data: {
         organizationId: lockedQueue.organizationId,
         queueId: input.queueId,
@@ -398,6 +504,42 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         tokenServices: { create: input.serviceIds.map((serviceId) => ({ serviceId })) },
       },
     });
+
+    if (identity) {
+      // The claim, not a preceding SELECT, is the enforcement point. Its
+      // unique (queue, fingerprint, period) constraint rejects both a repeat
+      // visit within the period and a second simultaneous join by the same
+      // person from another installation — the two cases a read-then-write
+      // check cannot separate reliably. The whole transaction rolls back on
+      // conflict, so no token or sequence number is consumed.
+      try {
+        await tx.queueIdentityClaim.create({
+          data: {
+            organizationId: lockedQueue.organizationId,
+            queueId: input.queueId,
+            identityFingerprint: identity.fingerprint,
+            periodKey: identity.periodKey,
+            mode: identity.mode,
+            status: 'RESERVED',
+            tokenId: token.id,
+          },
+        });
+      } catch (err) {
+        if (isIdentityClaimConflict(err)) {
+          throw new AppError(
+            409,
+            'REPEAT_VISIT_NOT_ALLOWED',
+            repeatRejectionMessage(identity.period),
+            // Safe context only — the period, never the other visit's
+            // identity, form answers or token.
+            { restrictionPeriod: identity.period },
+          );
+        }
+        throw err;
+      }
+    }
+
+    return token;
   });
 
   return getTokenCustomerView(created.id);
@@ -1036,6 +1178,11 @@ async function transitionToken(
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
     }
 
+    // COMPLETED spends the customer's repeat entitlement, SKIPPED releases
+    // it — both settled here so the claim can never disagree with the status
+    // that caused it (ADR-034).
+    await settleIdentityClaim(tx, tokenId, targetStatus);
+
     const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
     return { token: omitOtpFields(updated), previousStatus };
   });
@@ -1216,24 +1363,32 @@ export async function cancelToken(tokenId: string, deviceIdentifier: string) {
   // case, which needs no special-cased semantics of its own).
   assertValidTransition(token.status, 'CANCELLED');
 
-  const result = await prisma.token.updateMany({
-    where: { id: tokenId, status: token.status },
-    data: {
-      status: 'CANCELLED',
-      cancelledAt: new Date(),
-      // Checkpoint section 19: a cancelled token's verification material
-      // must never remain usable.
-      serviceStartOtpCipher: null,
-      serviceStartOtpExpiresAt: null,
-      serviceStartOtpFailedAttempts: 0,
-    },
-  });
-  if (result.count === 0) {
-    throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
-  }
+  // Transactional as of ADR-034: the compare-and-swap and the release of the
+  // customer's identity claim have to succeed or fail together, or a
+  // cancelled customer could be left holding a reservation for a visit that
+  // never happened.
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.token.updateMany({
+      where: { id: tokenId, status: token.status },
+      data: {
+        status: 'CANCELLED',
+        cancelledAt: new Date(),
+        // Checkpoint section 19: a cancelled token's verification material
+        // must never remain usable.
+        serviceStartOtpCipher: null,
+        serviceStartOtpExpiresAt: null,
+        serviceStartOtpFailedAttempts: 0,
+      },
+    });
+    if (result.count === 0) {
+      throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+    }
 
-  const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
-  return { token: omitOtpFields(updated), previousStatus: token.status };
+    await settleIdentityClaim(tx, tokenId, 'CANCELLED');
+
+    const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
+    return { token: omitOtpFields(updated), previousStatus: token.status };
+  });
 }
 
 /**
@@ -1421,4 +1576,64 @@ export async function setRequiredDuration(
     data: { requiredDurationMinutes },
   });
   return omitOtpFields(updated);
+}
+
+/** Prisma reports a violated unique constraint as P2002; on the claim table
+ * that can only mean the (queue, fingerprint, period) index, i.e. this
+ * customer already holds this queue for this window. */
+function isIdentityClaimConflict(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'P2002'
+  );
+}
+
+/** Wording a customer can act on, without implying their phone or device is
+ * blocked — it is the visit that is spent, not the equipment. */
+function repeatRejectionMessage(period: RepeatRestrictionPeriod): string {
+  switch (period) {
+    case 'DAILY':
+      return 'You have already used this queue today. Please come back tomorrow.';
+    case 'WEEKLY':
+      return 'You have already used this queue this week.';
+    case 'MONTHLY':
+      return 'You have already used this queue during the current month.';
+    default:
+      return 'You have already used this queue, and it can only be used once.';
+  }
+}
+
+/**
+ * Moves a token's identity claim as its visit resolves.
+ *
+ *  - COMPLETED  → CONSUMED: the visit happened, so the entitlement for this
+ *    period is spent and the customer cannot rejoin until the next one.
+ *  - CANCELLED / SKIPPED → released: neither is a delivered service, and the
+ *    pre-existing product rule (V2 Checkpoint 6) is that only COMPLETED
+ *    consumes the allowance. Deleting the row frees the person to rejoin
+ *    immediately, which is what made the reservation safe to take at join
+ *    time in the first place.
+ *
+ * Runs inside the caller's transaction, alongside the status change itself,
+ * rather than after the response like the audit and realtime work: a claim
+ * left RESERVED because the process died mid-flight would lock a cancelled
+ * customer out of a queue they never actually used, and only an operator
+ * could unstick them. A token that never had a claim (an unrestricted queue)
+ * simply matches nothing — updateMany/deleteMany make that a no-op rather
+ * than an error.
+ */
+async function settleIdentityClaim(
+  tx: Prisma.TransactionClient,
+  tokenId: string,
+  status: TokenStatus,
+): Promise<void> {
+  if (status === 'COMPLETED') {
+    await tx.queueIdentityClaim.updateMany({ where: { tokenId }, data: { status: 'CONSUMED' } });
+    return;
+  }
+  if (status === 'CANCELLED' || status === 'SKIPPED') {
+    await tx.queueIdentityClaim.deleteMany({ where: { tokenId } });
+  }
 }

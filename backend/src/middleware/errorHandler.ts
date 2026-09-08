@@ -14,7 +14,10 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     }
     res.status(err.statusCode).json({
       success: false,
-      error: { code: err.code, message: err.message },
+      // `details` is only ever set with safe, non-identifying context (see
+      // AppError) — omitted entirely when absent, so no response shape
+      // changes for the errors that do not use it.
+      error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) },
     });
     return;
   }

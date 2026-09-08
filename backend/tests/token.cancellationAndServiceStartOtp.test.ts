@@ -95,15 +95,19 @@ describe('V2 Checkpoint 7 — customer cancellation', () => {
     expect(row.status).toBe('WAITING');
   });
 
-  it('Test 5/6: CANCELLED frees the active-token slot and does NOT consume the allowRepeatVisits allowance', async () => {
-    const org = await setupOrgQueue({ allowRepeatVisits: false });
+  it('Test 5/6: CANCELLED frees the active-token slot so the same device may rejoin', async () => {
+    const org = await setupOrgQueue();
     const deviceIdentifier = 'device-cancel-rejoin';
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     const cancelRes = await cancelTokenRequest(first.id, deviceIdentifier);
     expect(cancelRes.status).toBe(200);
 
-    // Same device, same queue, allowRepeatVisits=false — a COMPLETED token
-    // would be blocked here (Checkpoint 6), but CANCELLED must not be.
+    // This half of the original test used allowRepeatVisits=false to show a
+    // cancellation does not spend the repeat allowance. That allowance is no
+    // longer device-based (ADR-034), so it is asserted against a real
+    // customer identity in customerIdentity.test.ts instead. What remains
+    // here — and is still this file's subject — is that cancelling releases
+    // the one-active-token-per-installation slot.
     const second = await api()
       .post('/api/tokens')
       .set('Idempotency-Key', `idem-${Math.random().toString(36).slice(2, 10)}`)

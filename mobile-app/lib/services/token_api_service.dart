@@ -20,6 +20,7 @@ class TokenApiService {
     required String deviceIdentifier,
     required Map<String, dynamic> formData,
     required String idempotencyKey,
+    String? phoneVerificationProof,
   }) async {
     final data = await _client.post(
       '/api/tokens',
@@ -29,6 +30,10 @@ class TokenApiService {
         'serviceIds': serviceIds,
         'deviceIdentifier': deviceIdentifier,
         'formData': formData,
+        // ADR-034: only sent when the queue identifies customers by a
+        // verified phone. The server signed this; the app never asserts
+        // that a number is verified on its own.
+        'phoneVerificationProof': ?phoneVerificationProof,
       },
     );
     return LiveQueueToken.fromJson(data);

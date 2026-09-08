@@ -8,11 +8,19 @@ class ApiException implements Exception {
     required this.statusCode,
     required this.code,
     required this.message,
+    this.details = const {},
   });
 
   final int statusCode;
   final String code;
   final String message;
+
+  /// Optional machine-readable context the backend attaches to some errors
+  /// (ADR-034 added the first, `restrictionPeriod` on
+  /// REPEAT_VISIT_NOT_ALLOWED, so the app can say "come back tomorrow"
+  /// rather than a generic refusal). Deliberately never carries anyone's
+  /// identity — the backend only puts safe context here.
+  final Map<String, dynamic> details;
 
   @override
   String toString() => 'ApiException($statusCode, $code): $message';

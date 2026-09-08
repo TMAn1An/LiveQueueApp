@@ -22,6 +22,9 @@ export const createTokenSchema = {
         .min(1, 'Select at least one service.')
         .optional(),
       deviceIdentifier: z.string().trim().min(1, 'deviceIdentifier is required.').max(200),
+      // ADR-034: opaque server-signed proof, only present for queues that
+      // identify customers by verified phone. Never a "verified: true" flag.
+      phoneVerificationProof: z.string().trim().min(1).max(4096).optional(),
       formData: z.record(z.string(), z.unknown()).default({}),
     })
     .refine((data) => Boolean(data.serviceId) !== Boolean(data.serviceIds), {
@@ -35,6 +38,7 @@ export const createTokenSchema = {
     .transform((data) => ({
       queueId: data.queueId,
       deviceIdentifier: data.deviceIdentifier,
+      phoneVerificationProof: data.phoneVerificationProof,
       formData: data.formData,
       serviceIds: data.serviceIds ?? [data.serviceId!],
     })),

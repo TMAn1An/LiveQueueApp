@@ -55,6 +55,7 @@ class ApiClient {
       statusCode: response.statusCode,
       code: (error?['code'] as String?) ?? 'UNKNOWN_ERROR',
       message: (error?['message'] as String?) ?? 'Something went wrong. Please try again.',
+      details: (error?['details'] as Map<String, dynamic>?) ?? const {},
     );
   }
 

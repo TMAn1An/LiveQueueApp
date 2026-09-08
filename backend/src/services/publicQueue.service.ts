@@ -1,5 +1,6 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
+import { describeJoinRequirements } from './queueIdentityPolicy.service';
 
 /**
  * Public, unauthenticated endpoint consumed by the mobile app before token
@@ -38,6 +39,12 @@ export async function getPublicQueueConfig(queueId: string) {
     // creation (REPEAT_VISIT_NOT_ALLOWED) is the only point that actually
     // knows.
     allowMultipleServices: queue.allowMultipleServices,
+    // ADR-034: unlike the old device-based rule — which the app could not
+    // usefully anticipate — the app now has to know *before* joining whether
+    // to ask for a verified phone and which question identifies the
+    // customer. This exposes only the shape of the requirement, never any
+    // customer's identity or whether a given person has already visited.
+    identity: describeJoinRequirements(queue),
     services: services.map((service) => ({
       id: service.id,
       serviceName: service.serviceName,

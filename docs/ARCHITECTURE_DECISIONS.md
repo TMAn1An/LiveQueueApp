@@ -840,3 +840,55 @@ Capacity is deliberately included. Skip is *not* an administrative bypass around
 **Decision 2 — a counter status change recomputes and broadcasts waiting ETAs.** `PATCH /api/counters/:id/status` emitted `counter.status_changed` to the staff organization room and nothing else. Since ETA has no honest value with zero active counters (ADR-026, unchanged), a customer who joined while nothing was open kept seeing no estimate *after* staff opened a counter — until some unrelated token event happened to trigger a recompute. Both that endpoint and counter deletion now call the existing `broadcastQueueEtaUpdate(queueId)`; counter creation does not, because counters are created OFFLINE and change no capacity.
 
 **Decision 3 — the customer is told *why* there is no estimate.** `etaUnavailableReason: 'NO_ACTIVE_COUNTER' | null` is now part of the computed token fields, the customer view, and the `token.position_changed` payload. No value is ever fabricated — the mobile app still shows no number — but it now says "Waiting for an active counter" when that is the reason, and "Estimated time unavailable" otherwise. The field names a queue-level operational state; it carries nothing about staff or other customers.
+
+## ADR-034: A repeat-visit limit identifies the customer, not the installation (2026-09-08)
+
+**Status:** Implemented, tested, committed. One additive migration (`20260908120000_add_customer_identity_repeat_policy`).
+
+### The defect
+
+`allowRepeatVisits = false` was enforced by asking whether *this device* had a COMPLETED token in this queue. The device is `Device.deviceIdentifier` — a UUID the app generates on first run and stores locally (ADR-011). Reinstalling the app, clearing its data, or using a second phone produces a new identifier and therefore a new person as far as the backend was concerned. For a queue whose whole purpose is "one relief packet per household" or "one appointment per citizen", the rule did not hold at all. Nothing was wrong with the code; the identity it was built on was the wrong identity.
+
+### Decision 1 — the device identifier is demoted to an *installation* identifier
+
+It stays exactly where it is useful and honest: FCM registration, active-token convenience, realtime association, temporary installation blocking, abuse telemetry, and the one-active-token-per-installation rule (which is genuinely installation-scoped and is unchanged). It is no longer the basis of any person-level rule.
+
+Deliberately **not** used as a replacement: IMEI, hardware serial, MAC address, advertising ID, or any device fingerprint. Those are privacy-invasive, restricted on modern Android, and — being device properties — would reproduce the same class of bug with worse consequences.
+
+### Decision 2 — a restricted queue must say how it recognises a customer
+
+Four nullable columns on `Queue`: `repeatRestrictionPeriod` (`ONCE_EVER | DAILY | WEEKLY | MONTHLY`), `repeatIdentityMode` (`VERIFIED_PHONE | CUSTOM_FIELD | VERIFIED_PHONE_AND_CUSTOM_FIELD`), `repeatIdentityFieldKey`, and `timezone`. Restricting without an identity mode is rejected (`IDENTITY_POLICY_REQUIRED`); allowing repeats clears all four, so a later re-enable can never inherit a stale rule. Historical claims are never deleted by a policy change — turning a limit off must not destroy the record of who already visited.
+
+An identity field must be a **required** `text`/`number`/`email`/`phone` question. `checkbox` is a boolean and `dropdown`/`radio` are low-cardinality, so either would collapse unrelated people into one identity; `date` alone identifies nobody. Requiredness is **rejected rather than silently flipped** — quietly editing a form the admin is looking at is worse than telling them what to fix. The form builder refuses to delete that question or make it incompatible while the restriction is on (`IDENTITY_FIELD_IN_USE`).
+
+### Decision 3 — the fingerprint is computed by the server, and stored instead of the answer
+
+`HMAC-SHA256(CUSTOMER_IDENTITY_SECRET, purpose ‖ queueId ‖ mode ‖ normalizedPhone ‖ normalizedCustom)`, with length-prefixed parts and a domain-separation purpose string. Queue-scoped, so the same national ID at two organizations is two unrelated identities and no cross-tenant correlation is possible. A client-supplied fingerprint is never accepted — that would let anyone claim to be anyone. The raw answer is never written to the claim row; a test asserts it.
+
+Normalization decides who counts as the same person: NFKC, trim, collapse whitespace, uppercase for custom identifiers (so `ab-123` and `AB-123` match, while `AB-123` and `AB123` stay different); international format only for phones, with no country ever guessed.
+
+`CUSTOMER_IDENTITY_SECRET` is a **third** secret, separate from `JWT_SECRET` and `OTP_SECRET`, startup-fatal, minimum 32 characters. Rotating it invalidates every stored fingerprint, which is precisely why it must be rotatable on its own schedule.
+
+### Decision 4 — the database enforces the rule, not a read-then-write check
+
+`QueueIdentityClaim` is unique on `(queueId, identityFingerprint, periodKey)`. The claim is inserted inside the join transaction, and a conflict becomes `409 REPEAT_VISIT_NOT_ALLOWED` carrying the period as safe context and nothing else — never the other visit's identity, form answers, or token. A `SELECT` followed by an `INSERT` cannot stop two phones joining at the same instant; the constraint can. The whole transaction rolls back, so a rejected join consumes no sequence number.
+
+A claim is `RESERVED` while the token is active and `CONSUMED` on COMPLETED; CANCELLED and SKIPPED **delete** it, preserving the pre-existing product rule that only a delivered service spends the allowance. That settlement was first written in the controller after the response, alongside the audit and realtime calls; it was moved **inside the transition transaction** because a crash in that window would leave a cancelled customer holding a reservation for a visit that never happened, recoverable only by an operator. `cancelToken` became transactional for the same reason.
+
+Period keys (`EVER`, `2026-09-08`, `2026-W37`, `2026-09`) are computed in the queue's own IANA timezone via `Intl.DateTimeFormat` — no date library, no manual offset arithmetic. Timezone is required only for a recurring period, and has **no default**: the server does not guess when a customer's day ends.
+
+### Decision 5 — phone verification exists, but no SMS provider is invented
+
+`SmsVerificationProvider` has two implementations: `none` (the default, unavailable) and `log` (development; logs the last four digits, never the code). With `none`, VERIFIED_PHONE **cannot be configured** — the dashboard's save is refused with `PHONE_VERIFICATION_UNAVAILABLE` — so a queue can never demand a code this server cannot send. A real provider is a deliberate code change. **Verified-phone queues are not production-ready until one exists, and this ADR does not claim otherwise.**
+
+The flow: `start` (6-digit `randomInt` code, HMAC-hashed; the row stores a phone *fingerprint*, not the number) → `confirm` (constant-time compare, atomic failure increment, one generic error for missing/expired/consumed) → a short-lived signed proof carrying `{queueId, phoneFingerprint, exp}`. The proof, not any client flag, is what makes a phone verified; it is queue-scoped, so a proof issued for one queue is refused by another. A resend reuses the same row, so the cooldown and attempt budget cannot be reset by asking again. No code appears in any response, log, socket event, FCM payload or audit row; `logger.ts` redacts `phone`, `code`, both proof fields, and `formData` wholesale — the identity answer arrives under an operator-chosen key, so it cannot be named individually.
+
+### Decision 6 — an already-restricted queue reports that it needs configuring, and refuses joins
+
+The alternative — keeping the device rule alive for legacy queues to preserve old behaviour — would mean knowingly continuing to run a rule that a reinstall defeats. Instead `describeJoinRequirements()` returns `configurationRequired: true`, the public config exposes it, `createToken` throws `QUEUE_IDENTITY_CONFIGURATION_REQUIRED`, and both the dashboard and the app say so plainly. DEPLOYMENT.md §3a carries the query that finds these queues before deploying.
+
+### Clients
+
+The public queue config now carries an `identity` block — the *shape* of the requirement only, never who has already visited. The dashboard moves repeat visits out of the Details checkbox (a lone toggle cannot express a policy that depends on a form question) into its own section with a config-required banner; the create-queue modal no longer offers the restriction, since no form questions exist yet at creation time. The mobile app asks for and verifies a phone before enabling Join, marks the identifying question so the answer is given accurately, states the limit before the customer fills anything in, and words the rejection from the period the backend sends — never suggesting the phone or device is blocked.
+
+**Verification:** backend `typecheck`/`lint`/`build` clean, `npm test` 67 files / 635 tests (43 new; the Checkpoint 6 device-rule tests were rewritten to the new contract rather than deleted). Dashboard `tsc -b`/`oxlint`/`build` clean, `vitest` 130/130. Mobile `flutter analyze` clean (same pre-existing info hints), `flutter test` 182/182, `flutter build apk --debug` succeeds. `prisma format`/`validate` clean; the migration was reviewed as SQL before being applied — 3 `CREATE TYPE`, 4 nullable columns, 2 tables, 5 indexes, 4 foreign keys, no `DROP`/`DELETE`/`TRUNCATE`. No production database was touched and nothing was deployed.

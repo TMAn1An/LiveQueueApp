@@ -65,6 +65,7 @@ class TokenRepository {
     required String deviceIdentifier,
     required Map<String, dynamic> formData,
     required String idempotencyKey,
+    String? phoneVerificationProof,
   }) {
     return _apiService.createToken(
       queueId: queueId,
@@ -72,6 +73,7 @@ class TokenRepository {
       deviceIdentifier: deviceIdentifier,
       formData: formData,
       idempotencyKey: idempotencyKey,
+      phoneVerificationProof: phoneVerificationProof,
     );
   }
 

@@ -77,3 +77,16 @@ export const reportRateLimiter = createLimiter(
  * either existing category.
  */
 export const emailRateLimiter = createLimiter(env.RATE_LIMIT_EMAIL_WINDOW_MS, env.RATE_LIMIT_EMAIL_MAX);
+
+/**
+ * Phone verification start/confirm. Its own category for the same reason
+ * emailRateLimiter has one: a start request costs a real SMS, which is both
+ * money and a way to harass a stranger's phone. Deliberately the tightest
+ * default in the app. The per-number resend cooldown in
+ * phoneVerification.service.ts is a separate, complementary limit — this one
+ * bounds a single caller, that one bounds a single phone number.
+ */
+export const phoneVerificationRateLimiter = createLimiter(
+  env.RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS,
+  env.RATE_LIMIT_PHONE_VERIFICATION_MAX,
+);

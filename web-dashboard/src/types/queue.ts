@@ -34,6 +34,16 @@ export interface Queue {
   baseTimeMinutes: number;
   defaultNotificationMinutes: number;
   allowRepeatVisits: boolean;
+  /** All four are null while repeat visits are allowed. A restricted queue
+   * created before ADR-034 also has them null — that is the state the UI
+   * flags as needing configuration, since the old device-based rule it was
+   * saved under is no longer enforced. */
+  repeatRestrictionPeriod: RepeatRestrictionPeriod | null;
+  repeatIdentityMode: RepeatIdentityMode | null;
+  repeatIdentityFieldKey: string | null;
+  /** IANA name. Decides when a day, week or month actually ends for this
+   * queue's customers; only required for a recurring period. */
+  timezone: string | null;
   allowMultipleServices: boolean;
   formVersion: number;
   qrCodeUri: string;
@@ -79,3 +89,19 @@ export interface AssignableStaff {
   email: string;
   role: string;
 }
+
+/**
+ * ADR-034 — how a queue that limits repeat visits recognises the customer.
+ * Never the app installation: a reinstall must not hand someone a second
+ * visit, so the rule is keyed on something the person carries.
+ */
+export type RepeatRestrictionPeriod = 'ONCE_EVER' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
+export type RepeatIdentityMode =
+  | 'VERIFIED_PHONE'
+  | 'CUSTOM_FIELD'
+  | 'VERIFIED_PHONE_AND_CUSTOM_FIELD';
+
+/** Form-field types that can actually hold an identifier — mirrors the
+ * backend's IDENTITY_FIELD_TYPES. A checkbox or a dropdown would collapse
+ * everyone who picked the same option into one identity. */
+export const IDENTITY_FIELD_TYPES: FormFieldType[] = ['text', 'number', 'email', 'phone'];

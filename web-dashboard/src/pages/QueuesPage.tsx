@@ -16,14 +16,13 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
   const createQueue = useCreateQueue();
   const [name, setName] = useState('');
   const [tokenPrefix, setTokenPrefix] = useState('A');
-  const [allowRepeatVisits, setAllowRepeatVisits] = useState(true);
   const [allowMultipleServices, setAllowMultipleServices] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit() {
     setError(null);
     try {
-      await createQueue.mutateAsync({ name, tokenPrefix, allowRepeatVisits, allowMultipleServices });
+      await createQueue.mutateAsync({ name, tokenPrefix, allowMultipleServices });
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create queue.');
@@ -54,20 +53,6 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
         <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"
-            checked={allowRepeatVisits}
-            onChange={(e) => setAllowRepeatVisits(e.target.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="block font-medium text-fg-soft">Allow repeat visits</span>
-            <span className="block text-xs text-muted">
-              Customers can join this queue again after completing service.
-            </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
             checked={allowMultipleServices}
             onChange={(e) => setAllowMultipleServices(e.target.checked)}
             className="mt-0.5"
@@ -80,6 +65,14 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
           </span>
         </label>
       </div>
+      {/* ADR-034: limiting repeat visits now requires choosing what
+          identifies a customer — usually one of this queue's form questions,
+          which do not exist yet at creation time. So the new queue starts
+          unrestricted and the limit is set up on the queue's own page. */}
+      <p className="mb-4 text-xs text-muted">
+        Customers may join as often as they like. To limit repeat visits, open the queue after
+        creating it and set up how customers are identified.
+      </p>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose}>
           Cancel

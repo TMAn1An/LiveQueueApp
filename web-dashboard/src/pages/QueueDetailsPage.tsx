@@ -10,6 +10,7 @@ import { PermissionGate } from '../components/PermissionGate';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { ServicesManager } from '../components/ServicesManager';
 import { FormBuilder } from '../components/FormBuilder';
+import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
 
 export function QueueDetailsPage() {
   const { queueId } = useParams<{ queueId: string }>();
@@ -19,7 +20,6 @@ export function QueueDetailsPage() {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [allowRepeatVisits, setAllowRepeatVisits] = useState(true);
   const [allowMultipleServices, setAllowMultipleServices] = useState(true);
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
@@ -27,7 +27,6 @@ export function QueueDetailsPage() {
   function startEditing() {
     setName(queue!.name);
     setDescription(queue!.description ?? '');
-    setAllowRepeatVisits(queue!.allowRepeatVisits);
     setAllowMultipleServices(queue!.allowMultipleServices);
     setEditing(true);
   }
@@ -75,20 +74,9 @@ export function QueueDetailsPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={allowRepeatVisits}
-                  onChange={(e) => setAllowRepeatVisits(e.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="block font-medium text-fg-soft">Allow repeat visits</span>
-                  <span className="block text-xs text-muted">
-                    Customers can join this queue again after completing service.
-                  </span>
-                </span>
-              </label>
+              {/* Repeat visits moved out to its own section (ADR-034): the
+                  limit now depends on which form question identifies the
+                  customer, which a lone checkbox cannot express. */}
               <label className="flex items-start gap-2 text-sm">
                 <input
                   type="checkbox"
@@ -109,7 +97,7 @@ export function QueueDetailsPage() {
                 loading={updateQueue.isPending}
                 onClick={() =>
                   updateQueue.mutate(
-                    { name, description, allowRepeatVisits, allowMultipleServices },
+                    { name, description, allowMultipleServices },
                     // Closed only once the change lands, so a rejected save
                     // never looks like it succeeded.
                     { onSuccess: () => setEditing(false) },
@@ -153,6 +141,13 @@ export function QueueDetailsPage() {
             )}
           </dl>
         )}
+      </Card>
+
+      {/* Directly under Details so a queue that has stopped accepting
+          customers says so where an operator will actually see it. */}
+      <Card>
+        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Repeat Visits</h2>
+        <RepeatVisitPolicy queue={queue} />
       </Card>
 
       <Card>

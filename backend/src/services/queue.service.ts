@@ -1,6 +1,7 @@
 import type { Queue, QueueService, QueueStatus } from '@prisma/client';
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
+import { resolveRepeatPolicy } from './queueIdentityPolicy.service';
 import { AppError } from '../utils/AppError';
 import { assertQueueMutable } from '../utils/tenantScope';
 import type { createQueueSchema, updateQueueSchema } from '../validators/queue.validators';
@@ -59,6 +60,10 @@ export async function getQueue(organizationId: string, queueId: string) {
 }
 
 export async function createQueue(organizationId: string, input: CreateQueueInput) {
+  // A brand-new queue has no form fields yet, so a policy naming a custom
+  // identity field is rejected here and configured after the form exists.
+  const policy = await resolveRepeatPolicy(null, null, input);
+
   const queue = await prisma.queue.create({
     data: {
       organizationId,
@@ -71,8 +76,8 @@ export async function createQueue(organizationId: string, input: CreateQueueInpu
       baseTimeMinutes: input.baseTimeMinutes,
       defaultNotificationMinutes: input.defaultNotificationMinutes,
       status: input.status,
-      allowRepeatVisits: input.allowRepeatVisits,
       allowMultipleServices: input.allowMultipleServices,
+      ...policy,
     },
     include: { services: true },
   });
@@ -88,9 +93,33 @@ export async function updateQueue(
   const existing = await findQueueOrThrow(organizationId, queueId);
   assertQueueMutable(existing);
 
+  // Merged against what is already stored: a request that only renames the
+  // queue must not be read as clearing its identity policy.
+  const policy = await resolveRepeatPolicy(
+    queueId,
+    { queueId, version: existing.formVersion },
+    {
+      allowRepeatVisits: input.allowRepeatVisits ?? existing.allowRepeatVisits,
+      repeatRestrictionPeriod:
+        input.repeatRestrictionPeriod === undefined
+          ? existing.repeatRestrictionPeriod
+          : input.repeatRestrictionPeriod,
+      repeatIdentityMode:
+        input.repeatIdentityMode === undefined ? existing.repeatIdentityMode : input.repeatIdentityMode,
+      repeatIdentityFieldKey:
+        input.repeatIdentityFieldKey === undefined
+          ? existing.repeatIdentityFieldKey
+          : input.repeatIdentityFieldKey,
+      timezone: input.timezone === undefined ? existing.timezone : input.timezone,
+    },
+  );
+
   const queue = await prisma.queue.update({
     where: { id: queueId },
-    data: input,
+    data: {
+      ...input,
+      ...policy,
+    },
     include: { services: true },
   });
 

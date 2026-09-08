@@ -6,6 +6,7 @@ import 'package:mobile_app/models/service_option.dart';
 import 'package:mobile_app/providers/queue_join_provider.dart';
 import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
+import 'package:mobile_app/repositories/phone_verification_repository.dart';
 import 'package:mobile_app/repositories/queue_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
 import 'package:mobile_app/screens/dynamic_form_screen.dart';
@@ -13,6 +14,7 @@ import 'package:mobile_app/services/api_client.dart';
 import 'package:mobile_app/services/device_api_service.dart';
 import 'package:mobile_app/services/device_identity_service.dart';
 import 'package:mobile_app/services/history_storage_service.dart';
+import 'package:mobile_app/services/phone_verification_api_service.dart';
 import 'package:mobile_app/services/queue_api_service.dart';
 import 'package:mobile_app/services/socket_service.dart';
 import 'package:mobile_app/services/token_api_service.dart';
@@ -36,6 +38,9 @@ class _FakeQueueJoinProvider extends QueueJoinProvider {
           apiService: DeviceApiService(ApiClient(baseUrl: 'http://localhost:4000')),
         ),
         historyRepository: HistoryRepository(storageService: HistoryStorageService()),
+        phoneVerificationRepository: PhoneVerificationRepository(
+          apiService: PhoneVerificationApiService(ApiClient(baseUrl: 'http://localhost:4000')),
+        ),
       );
 
   void setSubmitting(bool value) {

@@ -260,8 +260,11 @@ Customer sees queue details
 Customer selects one or more services (checkbox, or single-select when the
 queue disallows multiple services — V2 Checkpoint 5/6, ADR-027/ADR-028)
         ↓
-Backend rejects the join if the queue disallows repeat visits and this
-device already completed a token here (V2 Checkpoint 6, ADR-028)
+Customer verifies a phone number, when the queue identifies people that
+way (ADR-034)
+        ↓
+Backend rejects the join if this *customer* has already used their visit
+for the current period (ADR-034 — no longer a per-device rule)
         ↓
 Customer fills dynamic form
         ↓
@@ -277,7 +280,11 @@ Live tracking starts
 
 As of V2 Checkpoint 5, a customer may select multiple services in one join — the token's required duration is the sum of every selected service's own `durationMinutes`, computed and validated server-side. See ADR-027 for the full design, including the production-safe migration and the backward-compatible request contract (`serviceId` singular is still accepted from an older client; `serviceIds` array is the current shape).
 
-As of V2 Checkpoint 6, each queue carries two independent settings, both defaulting to `true` for every existing queue: `allowRepeatVisits` (when `false`, a device that already holds a `COMPLETED` token in this queue cannot create another — a `SKIPPED` token never counts, and this is checked separately from the pre-existing "one active token per device per queue" rule) and `allowMultipleServices` (when `false`, exactly one service must be selected). The repeat-visit rule is keyed on the existing device identifier only — there is no customer account, phone/email verification, or fingerprinting in this system, so a customer using two devices is not caught by it; this is a documented, accepted limitation, not a gap to silently work around. See ADR-028 for the full design, including the concurrency analysis and why this is deliberately not a stronger identity system.
+As of V2 Checkpoint 6, each queue carries two independent settings, both defaulting to `true` for every existing queue: `allowRepeatVisits` and `allowMultipleServices` (when `false`, exactly one service must be selected).
+
+**ADR-034 replaced how `allowRepeatVisits = false` is enforced.** It was keyed on the device identifier, which meant reinstalling the app reset the limit — the documented "accepted limitation" of Checkpoint 6 turned out to defeat the feature's actual purpose, so it was fixed rather than kept. A queue that limits repeat visits must now say **how often** a customer may return (`ONCE_EVER`, `DAILY`, `WEEKLY`, `MONTHLY`, evaluated in the queue's own timezone) and **how a customer is recognised**: a phone number verified by SMS, a required form question they answer (a national ID, student number and so on), or both. The server computes a queue-scoped HMAC fingerprint of the normalized value — it never stores the raw answer, never accepts a fingerprint from a client, and never correlates identities across organizations. The limit is held by a unique constraint on `(queue, fingerprint, period)`, so two simultaneous joins from two phones cannot both succeed. Only a `COMPLETED` visit spends the allowance; `CANCELLED` and `SKIPPED` release it, exactly as before.
+
+The one-active-token-per-installation rule is unchanged and still keyed on the device identifier, which is the right identity for that particular question. A queue restricted before ADR-034 has no identity method and refuses joins until an admin configures one — it does not silently keep running the old rule. Verified-phone queues additionally require an SMS provider, which this repository does not ship; until one is configured that identity mode cannot be selected at all. See ADR-034 and ADR-028 for the full design.
 
 ## 4.4 Staff calls a token
 
@@ -321,7 +328,7 @@ Token becomes CANCELLED (device+queue slot freed
 immediately; any occupied counter freed immediately)
 ```
 
-As of V2 Checkpoint 7 (ADR-029), a customer may cancel their own token at any point before service actually begins — while `WAITING` or `CALLED`, never once `IN_PROGRESS`. `CANCELLED` is a distinct status from staff-initiated `SKIPPED` (a customer choosing to leave vs. staff moving past a no-show), with its own `cancelledAt` timestamp. A cancelled token is never recallable, and — unlike `COMPLETED` — never counts against a queue's `allowRepeatVisits=false` restriction (V2 Checkpoint 6, ADR-028): a customer who cancels may always rejoin.
+As of V2 Checkpoint 7 (ADR-029), a customer may cancel their own token at any point before service actually begins — while `WAITING` or `CALLED`, never once `IN_PROGRESS`. `CANCELLED` is a distinct status from staff-initiated `SKIPPED` (a customer choosing to leave vs. staff moving past a no-show), with its own `cancelledAt` timestamp. A cancelled token is never recallable, and — unlike `COMPLETED` — never counts against a queue's `allowRepeatVisits=false` restriction (V2 Checkpoint 6, ADR-028; ADR-034 keeps this rule while moving the restriction onto the customer's own identity): a customer who cancels may always rejoin.
 
 ---
 

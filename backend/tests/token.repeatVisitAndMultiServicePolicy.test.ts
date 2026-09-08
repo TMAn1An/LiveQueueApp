@@ -75,52 +75,30 @@ describe('V2 Checkpoint 6 — queue repeat-visit policy', () => {
     expect(second.status).toBe(201);
   });
 
-  it('Test 2: allowRepeatVisits=false blocks rejoining the same queue after COMPLETED', async () => {
-    const org = await setupOrgQueue({ allowRepeatVisits: false });
-    const deviceIdentifier = 'device-no-repeat';
-    await completeAJourney({ ...org, deviceIdentifier });
+  /**
+   * Tests 2–5 and 7 originally pinned the repeat rule to the device: the
+   * same installation was blocked after COMPLETED, and a fresh installation
+   * was let straight back in. That second half was the bug — a reinstall
+   * bypassed the restriction — so ADR-034 moved the rule onto the customer's
+   * own identity, and those scenarios are asserted there instead
+   * (customerIdentity.test.ts). What stays here is this file's own subject:
+   * the queue-level policy flags, and the device rule that legitimately
+   * remains device-scoped.
+   */
+  it('Test 2: a queue cannot restrict repeat visits without saying how customers are identified', async () => {
+    const ctx = await registerOwner();
 
-    const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    expect(second.status).toBe(409);
-    expect(second.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
+    const res = await api()
+      .post('/api/queues')
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ name: 'Restricted', tokenPrefix: 'R', allowRepeatVisits: false });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('IDENTITY_POLICY_REQUIRED');
   });
 
-  it('Test 3: allowRepeatVisits=false does NOT block rejoining when the only prior token was SKIPPED', async () => {
-    const org = await setupOrgQueue({ allowRepeatVisits: false });
-    const deviceIdentifier = 'device-skipped-only';
-    const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    const skipRes = await skipToken(org.accessToken, first.body.data.id);
-    expect(skipRes.status).toBe(200);
-
-    const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    expect(second.status).toBe(201);
-  });
-
-  it('Test 4: a different device may still join after another device completed a visit', async () => {
-    const org = await setupOrgQueue({ allowRepeatVisits: false });
-    await completeAJourney({ ...org, deviceIdentifier: 'device-completed-1' });
-
-    const other = await createTokenRequest({
-      queueId: org.queue.id,
-      serviceId: org.service.id,
-      deviceIdentifier: 'device-fresh',
-    });
-    expect(other.status).toBe(201);
-  });
-
-  it('Test 5: the same device may join a different queue after completing this one', async () => {
-    const org = await setupOrgQueue({ allowRepeatVisits: false });
-    const deviceIdentifier = 'device-cross-queue-repeat';
-    await completeAJourney({ ...org, deviceIdentifier });
-
-    const queueB = await createQueue(org.accessToken, { allowRepeatVisits: false });
-    const serviceB = await createService(org.accessToken, queueB.id);
-    const res = await createTokenRequest({ queueId: queueB.id, serviceId: serviceB.id, deviceIdentifier });
-    expect(res.status).toBe(201);
-  });
-
-  it('Test 6: the existing active-token rule still independently blocks a duplicate active token (no COMPLETED token yet)', async () => {
-    const org = await setupOrgQueue({ allowRepeatVisits: false });
+  it('Test 6: the active-token rule still independently blocks a duplicate active token from one installation', async () => {
+    const org = await setupOrgQueue();
     const deviceIdentifier = 'device-active-still-blocks';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     expect(first.status).toBe(201);
@@ -130,20 +108,15 @@ describe('V2 Checkpoint 6 — queue repeat-visit policy', () => {
     expect(second.body.error.code).toBe('DEVICE_ALREADY_IN_QUEUE');
   });
 
-  it('Test 7: concurrent join attempts by a device with a COMPLETED token cannot bypass the policy', async () => {
-    const org = await setupOrgQueue({ allowRepeatVisits: false });
-    const deviceIdentifier = 'device-concurrent-repeat';
-    await completeAJourney({ ...org, deviceIdentifier });
+  it('Test 6b: a completed visit does not block the same installation when repeats are allowed', async () => {
+    const org = await setupOrgQueue();
+    const deviceIdentifier = 'device-skip-then-rejoin';
+    const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
+    const skipRes = await skipToken(org.accessToken, first.body.data.id);
+    expect(skipRes.status).toBe(200);
 
-    const [a, b] = await Promise.all([
-      createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier }),
-      createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier }),
-    ]);
-
-    expect(a.status).toBe(409);
-    expect(a.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
-    expect(b.status).toBe(409);
-    expect(b.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
+    const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
+    expect(second.status).toBe(201);
   });
 
   it('Test 11: existing queue rows read allowRepeatVisits=true / allowMultipleServices=true after migration', async () => {

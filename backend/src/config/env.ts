@@ -18,6 +18,28 @@ const envSchema = z.object({
   // in-flight OTP, and vice versa.
   OTP_SECRET: z.string().min(32, 'OTP_SECRET must be at least 32 characters'),
 
+  // Keys the customer-identity fingerprints, the phone verification codes and
+  // the phone verification proofs (utils/customerIdentity.ts). A third
+  // separate secret for the same reason OTP_SECRET is separate from
+  // JWT_SECRET — and because rotating this one silently invalidates every
+  // stored repeat-visit fingerprint, so it must be able to be managed on its
+  // own. Startup-fatal: a queue that restricts repeat visits cannot enforce
+  // anything without it.
+  CUSTOMER_IDENTITY_SECRET: z
+    .string()
+    .min(32, 'CUSTOMER_IDENTITY_SECRET must be at least 32 characters'),
+
+  // Phone verification. No SMS provider ships with this repository, so the
+  // default provider is 'none': queues cannot be configured to require a
+  // verified phone until a real provider is set (see sms.service.ts).
+  SMS_PROVIDER: z.enum(['none', 'log']).default('none'),
+  PHONE_VERIFICATION_CODE_TTL_MINUTES: z.coerce.number().int().positive().default(5),
+  PHONE_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  PHONE_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
+  /// How long a confirmed verification stays usable for joining. Short: it
+  /// only has to survive the rest of one join flow.
+  PHONE_VERIFICATION_PROOF_TTL_MINUTES: z.coerce.number().int().positive().default(15),
+
   CORS_ORIGINS: z.string().default(''),
 
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
@@ -75,6 +97,11 @@ const envSchema = z.object({
 
   RATE_LIMIT_EMAIL_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_EMAIL_MAX: z.coerce.number().int().positive().default(3),
+
+  // Phone verification: a start request costs a real SMS, so this is the
+  // tightest bucket in the app.
+  RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
+  RATE_LIMIT_PHONE_VERIFICATION_MAX: z.coerce.number().int().positive().default(10),
 
   // Pending-registration cleanup (V2 Checkpoint 2). Every 5 minutes is far
   // more granular than the 1-hour deadline it's checking needs — matches

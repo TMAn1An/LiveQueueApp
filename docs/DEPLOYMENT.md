@@ -83,7 +83,7 @@ without it. **Optional** = has a default or is genuinely optional.
 
 ### 3a. Startup-fatal — the process exits immediately without these
 
-There are exactly **three**. `env.ts` validates them with Zod and calls
+There are exactly **four**. `env.ts` validates them with Zod and calls
 `process.exit(1)` if any is missing or malformed.
 
 | Variable | Purpose |
@@ -91,11 +91,36 @@ There are exactly **three**. `env.ts` validates them with Zod and calls
 | `DATABASE_URL` | `postgresql://user:pass@host:port/db`. |
 | `JWT_SECRET` | ≥32 chars. Generate with `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`. |
 | `OTP_SECRET` | ≥32 chars, generated the same way. Keys the service-start verification-code cipher (V2 Checkpoint 7, ADR-029/ADR-031). **A separate secret from `JWT_SECRET` — never reuse the same value.** |
+| `CUSTOMER_IDENTITY_SECRET` | ≥32 chars, generated the same way. Keys the customer-identity fingerprints, the phone verification codes and the verification proofs (ADR-034). **A third separate secret — never reuse `JWT_SECRET` or `OTP_SECRET`.** Rotating it invalidates every stored repeat-visit fingerprint, so every customer of a restricted queue is treated as new; it must be able to be rotated on its own schedule, which is exactly why it is not shared. Never log the value. |
 
 > **`OTP_SECRET` was added in V2 Checkpoint 7 and is startup-fatal.** A
 > deployment that carries forward a pre-V2 environment without it will
 > **fail to boot** — this has already happened once in production. Set it
 > before deploying any build at or after commit `4c3c20b`.
+
+> **`CUSTOMER_IDENTITY_SECRET` (ADR-034) is startup-fatal for the same
+> reason and will break a deploy the same way.** Generate and set it
+> *before* deploying the identity checkpoint. A queue that limits repeat
+> visits cannot enforce anything without it, so the server refuses to start
+> rather than run with the limit silently unenforceable.
+
+#### Queues that limited repeat visits before ADR-034
+
+A queue saved with `allowRepeatVisits = false` **before** this release has
+no identity method, because none existed. Its old rule recognised the
+customer's app installation, which a reinstall replaced — so it never
+actually held. After deploying, such a queue **refuses every join**
+(`QUEUE_IDENTITY_CONFIGURATION_REQUIRED`) until an admin opens it in the
+dashboard and chooses how customers are identified. This is deliberate: the
+alternative was to keep running a rule that does not work.
+
+Find them before deploying, so you know who to tell:
+
+```sql
+SELECT id, name FROM queues
+WHERE allow_repeat_visits = false AND repeat_identity_mode IS NULL
+  AND deleted_at IS NULL;
+```
 
 ### 3b. Optional to *start*, but required for a feature to actually work
 
@@ -151,6 +176,12 @@ break signup end to end.
 | `RATE_LIMIT_SENSITIVE_WINDOW_MS` / `RATE_LIMIT_SENSITIVE_MAX` | `900000` / `30` | Sensitive authenticated mutations (incl. OTP-gated `/start`). |
 | `RATE_LIMIT_REPORT_WINDOW_MS` / `RATE_LIMIT_REPORT_MAX` | `900000` / `10` | Reports/export. |
 | `RATE_LIMIT_EMAIL_WINDOW_MS` / `RATE_LIMIT_EMAIL_MAX` | `900000` / `3` | Verification-email resend (deliberately tighter — a real email is sent). |
+| `RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS` / `RATE_LIMIT_PHONE_VERIFICATION_MAX` | `900000` / `10` | Phone-verification start/confirm. The tightest bucket in the app — a start request costs a real SMS. |
+| `SMS_PROVIDER` | `none` | **`none` means the VERIFIED_PHONE identity mode cannot be configured at all** (the dashboard's save is refused with `PHONE_VERIFICATION_UNAVAILABLE`), so a queue can never demand a code this server cannot send. `log` is development only — it writes the last four digits of the number and *never* the code. A real provider is a code change: implement `SmsVerificationProvider` in `backend/src/services/sms.service.ts`. Until then, do not tell an operator that verified-phone queues are available. |
+| `PHONE_VERIFICATION_CODE_TTL_MINUTES` | `5` | How long a sent code stays usable. |
+| `PHONE_VERIFICATION_MAX_ATTEMPTS` | `5` | Wrong guesses allowed per code. Not resettable by re-asking — a resend reuses the same challenge row. |
+| `PHONE_VERIFICATION_RESEND_COOLDOWN_SECONDS` | `60` | Minimum gap between codes to one number on one queue. |
+| `PHONE_VERIFICATION_PROOF_TTL_MINUTES` | `15` | How long a confirmed verification stays usable for joining. Short by design: it only has to survive the rest of one join. |
 | `REMINDER_DISPATCH_CRON` | `*/1 * * * *` | See §5. |
 | `PENDING_REGISTRATION_CLEANUP_CRON` | `*/5 * * * *` | See §5. |
 | `MOBILE_ANDROID_MIN_VERSION` | `1.0.0` | Below this, the mobile app hard-blocks itself. See §11. |

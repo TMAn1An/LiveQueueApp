@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+/**
+ * The repeat-visit identity policy (ADR-034). Every field is optional here
+ * and cross-validated in queueIdentityPolicy.service — the coherence rules
+ * ("a restricted queue needs a period and a mode", "a recurring period needs
+ * a timezone") are business rules, not shape rules, and belong with the
+ * service that also has to read the queue's form fields.
+ */
+const repeatPolicyFields = {
+  repeatRestrictionPeriod: z.enum(['ONCE_EVER', 'DAILY', 'WEEKLY', 'MONTHLY']).nullable().optional(),
+  repeatIdentityMode: z
+    .enum(['VERIFIED_PHONE', 'CUSTOM_FIELD', 'VERIFIED_PHONE_AND_CUSTOM_FIELD'])
+    .nullable()
+    .optional(),
+  repeatIdentityFieldKey: z.string().trim().min(1).max(120).nullable().optional(),
+  timezone: z.string().trim().min(1).max(64).nullable().optional(),
+};
+
 const queueStatus = z.enum(['ACTIVE', 'PAUSED', 'INACTIVE']);
 
 export const queueIdParams = z.object({
@@ -18,6 +35,7 @@ export const createQueueSchema = {
     status: queueStatus.default('ACTIVE'),
     allowRepeatVisits: z.boolean().default(true),
     allowMultipleServices: z.boolean().default(true),
+    ...repeatPolicyFields,
   }),
 };
 
@@ -33,6 +51,7 @@ export const updateQueueSchema = {
     defaultNotificationMinutes: z.number().int().positive().optional(),
     allowRepeatVisits: z.boolean().optional(),
     allowMultipleServices: z.boolean().optional(),
+    ...repeatPolicyFields,
   }),
 };
 
