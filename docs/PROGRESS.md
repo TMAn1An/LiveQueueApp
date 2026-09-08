@@ -223,6 +223,17 @@ A dashboard-usability-only checkpoint: the four management lists became searchab
 - **Mobile got the three places that still looked frozen:** the QR screen now shows "Loading queue…" over a scrim while the scanned queue resolves, Join shows a spinner beside "Joining queue…" instead of replacing the label, and OTP reissue reports "Getting a new code…" instead of silently greying out. Cancel and history already had proper feedback and were left alone; the startup sequence was not touched.
 - **Verification:** backend 595/595 tests (66 files, 14 new), typecheck/lint/build clean, `prisma migrate status` up to date; dashboard 122/122 (24 files, 10 new), typecheck/lint/build clean; mobile 164/164 (2 new), `flutter analyze` clean, debug APK builds.
 
+### V2 Identity follow-up — a recalled customer's visit is now recorded (2026-09-08)
+
+**Status: implemented and verified. One additive migration. Found by a post-deployment review of the shipped code, not by a production report.**
+
+- **Recall bypassed the repeat limit.** Skipping a token deletes its identity claim, which is right on its own terms — a skipped customer was never served and must be free to rejoin. But SKIPPED is not terminal: Recall brings that same token back to be served, and nothing re-established the claim. So *skip the no-show, recall them when they walk in, serve them* — an ordinary shift pattern — completed a real visit that no claim recorded, and the customer could join again immediately. Reproduced with a failing test before anything was changed.
+- **The token now remembers the identity it was admitted under.** Three nullable columns on `tokens` holding the same keyed HMAC the claim stores (never a raw national ID or phone number) plus the period key resolved at join time, so a visit spanning midnight belongs to the period it was reserved in. Recall re-reserves the hold inside the existing transaction; completion records a CONSUMED claim whatever route the token took to get there.
+- **A recall that would serve someone twice is refused.** If the skipped customer already rejoined from another installation, the recall fails with `IDENTITY_ALREADY_CLAIMED` and the newer token stands.
+- **The snapshot never leaves the backend.** It is stripped by the same mechanism ADR-029 built for the OTP cipher (`omitOtpFields`, renamed `omitInternalFields`), so it reaches no staff response and no socket payload. A test asserts it.
+- **One flaky test diagnosed rather than re-run.** The concurrent-recall case failed intermittently under load because `callToken` re-reads the token before opening its transaction: the losing request gets `TOKEN_STATE_CHANGED` if it read early and `INVALID_TOKEN_TRANSITION` if it read late. Both are correct refusals; the test pinned one interleaving and now asserts the invariant — exactly one recall wins.
+- **Verification:** backend 641/641 (7 new), typecheck/lint/build clean, `prisma migrate status` up to date; dashboard 130/130 and mobile 182/182 unchanged and re-verified. No production database was accessed and nothing was deployed.
+
 ### V2 Verified customer identity — repeat visits stop trusting the device (2026-09-08)
 
 **Status: implemented and verified. One additive migration, plus a new startup-fatal secret — see the deployment notes below.**

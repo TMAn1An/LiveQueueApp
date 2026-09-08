@@ -189,10 +189,18 @@ async function findTokenScoped(organizationId: string, tokenId: string): Promise
   return token;
 }
 
-const OTP_FIELD_NAMES = [
+const INTERNAL_FIELD_NAMES = [
   'serviceStartOtpCipher',
   'serviceStartOtpExpiresAt',
   'serviceStartOtpFailedAttempts',
+  // ADR-034 follow-up: the identity snapshot is internal enforcement state.
+  // The fingerprint is a keyed HMAC and cannot be reversed, but it is derived
+  // from the customer-identity secret and nothing outside this service has
+  // any use for it — so it leaves the same way the OTP cipher does, rather
+  // than riding along in every staff token response.
+  'identityFingerprint',
+  'identityPeriodKey',
+  'identityMode',
 ] as const;
 
 /**
@@ -205,11 +213,15 @@ const OTP_FIELD_NAMES = [
  * individually — centralizing this once here is what makes the "search
  * every serialization path" security review in ADR-029 actually verifiable.
  */
-function omitOtpFields<T extends Record<string, unknown>>(
+/** A token row with every internal field stripped — what staff-facing
+ * responses actually carry. */
+export type SafeToken = Omit<Token, (typeof INTERNAL_FIELD_NAMES)[number]>;
+
+function omitInternalFields<T extends Record<string, unknown>>(
   token: T,
-): Omit<T, (typeof OTP_FIELD_NAMES)[number]> {
+): Omit<T, (typeof INTERNAL_FIELD_NAMES)[number]> {
   const safe = { ...token };
-  for (const field of OTP_FIELD_NAMES) {
+  for (const field of INTERNAL_FIELD_NAMES) {
     delete safe[field];
   }
   return safe;
@@ -501,6 +513,13 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         formData: formData as Prisma.InputJsonValue,
         formVersion: lockedQueue.formVersion,
         idempotencyKey,
+        // Snapshot of the identity this token was admitted under. The claim
+        // below is the live enforcement, but it is deleted on skip/cancel —
+        // and a skipped token can be recalled and served, so the token has to
+        // remember who it belongs to (ADR-034 follow-up).
+        identityFingerprint: identity?.fingerprint ?? null,
+        identityPeriodKey: identity?.periodKey ?? null,
+        identityMode: identity?.mode ?? null,
         tokenServices: { create: input.serviceIds.map((serviceId) => ({ serviceId })) },
       },
     });
@@ -776,10 +795,10 @@ function toStaffView(
   computed: ComputedFields,
 ) {
   // V2 Checkpoint 7: stripped even from the full staff shape — see
-  // omitOtpFields's doc comment. This is the shape realtime/emit.ts reuses
+  // omitInternalFields's doc comment. This is the shape realtime/emit.ts reuses
   // directly for the organization-room socket payload, so this is also
   // where a leak into Socket.io would happen if this were skipped.
-  return omitOtpFields({ ...token, services: toSelectedServices(token), ...computed });
+  return omitInternalFields({ ...token, services: toSelectedServices(token), ...computed });
 }
 
 /**
@@ -1006,6 +1025,15 @@ export async function callToken(
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
     }
 
+    // Recall is the one path back out of a released state, so it is where the
+    // customer's hold has to be taken again (ADR-034 follow-up). Skipping
+    // deleted the claim — correctly, since a skipped customer was never
+    // served and must be free to rejoin — but this token is now going to be
+    // served, so it must hold the identity again for as long as it is active.
+    if (requireSourceStatus === 'SKIPPED') {
+      await reserveIdentityClaimForRecall(tx, token);
+    }
+
     // otpCode itself is deliberately discarded here, never returned — this
     // function's caller is staff (the one clicking Call/Recall), who must
     // never be able to read the code (checkpoint section 20). The customer
@@ -1013,7 +1041,7 @@ export async function callToken(
     // getServiceStartVerificationCode, ownership-checked against their own
     // device.
     const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
-    return omitOtpFields(updated);
+    return omitInternalFields(updated);
   });
 }
 
@@ -1157,7 +1185,7 @@ async function transitionToken(
   targetStatus: TokenStatus,
   timestampField: TimestampField,
   guard?: (tx: Prisma.TransactionClient, token: Token) => Promise<void>,
-): Promise<{ token: Omit<Token, 'serviceStartOtpCipher' | 'serviceStartOtpExpiresAt' | 'serviceStartOtpFailedAttempts'>; previousStatus: TokenStatus }> {
+): Promise<{ token: SafeToken; previousStatus: TokenStatus }> {
   const token = await findTokenScoped(organizationId, tokenId);
   assertValidTransition(token.status, targetStatus);
   const previousStatus = token.status;
@@ -1184,7 +1212,7 @@ async function transitionToken(
     await settleIdentityClaim(tx, tokenId, targetStatus);
 
     const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
-    return { token: omitOtpFields(updated), previousStatus };
+    return { token: omitInternalFields(updated), previousStatus };
   });
 }
 
@@ -1325,7 +1353,7 @@ export async function startTokenWithOtp(
   }
 
   const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
-  return { token: omitOtpFields(updated), previousStatus: token.status };
+  return { token: omitInternalFields(updated), previousStatus: token.status };
 }
 
 /**
@@ -1387,7 +1415,7 @@ export async function cancelToken(tokenId: string, deviceIdentifier: string) {
     await settleIdentityClaim(tx, tokenId, 'CANCELLED');
 
     const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
-    return { token: omitOtpFields(updated), previousStatus: token.status };
+    return { token: omitInternalFields(updated), previousStatus: token.status };
   });
 }
 
@@ -1575,7 +1603,7 @@ export async function setRequiredDuration(
     where: { id: tokenId },
     data: { requiredDurationMinutes },
   });
-  return omitOtpFields(updated);
+  return omitInternalFields(updated);
 }
 
 /** Prisma reports a violated unique constraint as P2002; on the claim table
@@ -1630,10 +1658,125 @@ async function settleIdentityClaim(
   status: TokenStatus,
 ): Promise<void> {
   if (status === 'COMPLETED') {
-    await tx.queueIdentityClaim.updateMany({ where: { tokenId }, data: { status: 'CONSUMED' } });
+    const updated = await tx.queueIdentityClaim.updateMany({
+      where: { tokenId },
+      data: { status: 'CONSUMED' },
+    });
+    if (updated.count > 0) {
+      return;
+    }
+    // No claim to consume. For an unrestricted queue that is simply correct.
+    // For a restricted one it means the claim was released earlier and the
+    // token came back — a skip followed by a Recall. The visit has now
+    // actually been delivered, so it must be recorded whatever route the
+    // token took to get here; this is the invariant that matters, and it is
+    // asserted directly rather than inferred from the recall path having run.
+    const token = await tx.token.findUniqueOrThrow({
+      where: { id: tokenId },
+      select: { organizationId: true, queueId: true, ...IDENTITY_SNAPSHOT_SELECT },
+    });
+    const snapshot = identitySnapshotOf(token);
+    if (!snapshot) {
+      return;
+    }
+    await tx.queueIdentityClaim.create({
+      data: {
+        organizationId: token.organizationId,
+        queueId: token.queueId,
+        identityFingerprint: snapshot.fingerprint,
+        periodKey: snapshot.periodKey,
+        mode: snapshot.mode,
+        status: 'CONSUMED',
+        tokenId,
+      },
+    });
     return;
   }
   if (status === 'CANCELLED' || status === 'SKIPPED') {
     await tx.queueIdentityClaim.deleteMany({ where: { tokenId } });
+  }
+}
+
+const IDENTITY_SNAPSHOT_SELECT = {
+  identityFingerprint: true,
+  identityPeriodKey: true,
+  identityMode: true,
+} as const;
+
+interface TokenIdentitySnapshot {
+  fingerprint: string;
+  periodKey: string;
+  mode: RepeatIdentityMode;
+}
+
+/** The identity a token was admitted under, or null for a token on an
+ * unrestricted queue. All three columns are written together at join time, so
+ * a partial snapshot is not a state this can produce — it is treated as
+ * "no identity" rather than guessed at. */
+function identitySnapshotOf(token: {
+  identityFingerprint: string | null;
+  identityPeriodKey: string | null;
+  identityMode: RepeatIdentityMode | null;
+}): TokenIdentitySnapshot | null {
+  if (!token.identityFingerprint || !token.identityPeriodKey || !token.identityMode) {
+    return null;
+  }
+  return {
+    fingerprint: token.identityFingerprint,
+    periodKey: token.identityPeriodKey,
+    mode: token.identityMode,
+  };
+}
+
+/**
+ * Takes the customer's hold again as a skipped token is recalled.
+ *
+ * A conflict here is meaningful rather than exceptional: it means this
+ * person's identity is already claimed for this period — they rejoined from
+ * another installation after being skipped, or already completed a visit.
+ * Recalling would put them at a counter for a visit they are no longer
+ * entitled to, so the recall is refused and the newer token stands. Staff get
+ * a reason they can act on, not a raw constraint error.
+ */
+async function reserveIdentityClaimForRecall(
+  tx: Prisma.TransactionClient,
+  token: Token,
+): Promise<void> {
+  const snapshot = identitySnapshotOf(token);
+  if (!snapshot) {
+    return;
+  }
+  // A claim may already exist if this token was recalled once before without
+  // an intervening skip; re-reserving it is then all that is needed.
+  const existing = await tx.queueIdentityClaim.findUnique({ where: { tokenId: token.id } });
+  if (existing) {
+    await tx.queueIdentityClaim.update({
+      where: { tokenId: token.id },
+      data: { status: 'RESERVED' },
+    });
+    return;
+  }
+
+  try {
+    await tx.queueIdentityClaim.create({
+      data: {
+        organizationId: token.organizationId,
+        queueId: token.queueId,
+        identityFingerprint: snapshot.fingerprint,
+        periodKey: snapshot.periodKey,
+        mode: snapshot.mode,
+        status: 'RESERVED',
+        tokenId: token.id,
+      },
+    });
+  } catch (err) {
+    if (isIdentityClaimConflict(err)) {
+      throw new AppError(
+        409,
+        'IDENTITY_ALREADY_CLAIMED',
+        'This customer has already used or rejoined this queue since being skipped, so this token can no longer be recalled.',
+      );
+    }
+    throw err;
   }
 }

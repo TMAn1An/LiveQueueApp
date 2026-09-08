@@ -419,6 +419,21 @@ model Token {
   /// an in-memory Set).
   reminderSentAt DateTime? @map("reminder_sent_at")
 
+  /// ADR-034: the identity this token was admitted under, kept on the token
+  /// itself because the claim row does not survive the whole lifecycle — a
+  /// skip deletes it (the customer was not served, so they may rejoin), and
+  /// a Recall brings that same token back to be served. Without this, a
+  /// recalled-then-completed visit left no claim at all and the restriction
+  /// was silently bypassed. Null for any token on an unrestricted queue.
+  ///
+  /// The fingerprint is the same HMAC stored on the claim — never the raw
+  /// national ID or phone number. The period key is the one resolved at join
+  /// time, so a visit that straddles midnight still belongs to the period it
+  /// was reserved in rather than burning the next one.
+  identityFingerprint String?             @map("identity_fingerprint")
+  identityPeriodKey   String?             @map("identity_period_key")
+  identityMode        RepeatIdentityMode? @map("identity_mode")
+
   notificationPreferences NotificationPreference[]
   /// At most one — this token's hold on a restricted queue (ADR-034).
   identityClaim           QueueIdentityClaim?

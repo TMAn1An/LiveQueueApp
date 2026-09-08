@@ -122,6 +122,29 @@ WHERE allow_repeat_visits = false AND repeat_identity_mode IS NULL
   AND deleted_at IS NULL;
 ```
 
+#### Second identity migration (`20260908160000_add_token_identity_snapshot`)
+
+Adds three nullable columns to `tokens` so a recalled token can re-establish
+the customer's hold — without them, skipping a no-show and later recalling
+and serving them completed a visit that no claim recorded, and the customer
+could join again inside the same period. Additive and safe to apply while the
+service is running; no backfill is needed, because tokens created before it
+belong to the period that has already passed or to unrestricted queues.
+
+Tokens that were already active when this migration is applied carry no
+snapshot, so if one of them is skipped and later recalled its visit will not
+be recorded. The window is one restriction period on already-in-flight
+tokens only. To see whether any are affected:
+
+```sql
+SELECT COUNT(*) FROM tokens t
+JOIN queues q ON q.id = t.queue_id
+WHERE t.status IN ('WAITING','CALLED','IN_PROGRESS','SKIPPED')
+  AND q.allow_repeat_visits = false
+  AND q.repeat_identity_mode IS NOT NULL
+  AND t.identity_fingerprint IS NULL;
+```
+
 ### 3b. Optional to *start*, but required for a feature to actually work
 
 These never block startup, so a misconfiguration here is silent — the

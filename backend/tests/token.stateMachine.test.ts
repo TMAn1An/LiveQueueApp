@@ -285,10 +285,21 @@ describe('Token recall — SKIPPED -> CALLED', () => {
       recall(ctx.accessToken, token.id, counter.id),
     ]);
 
-    const statuses = [a.status, b.status].sort();
-    expect(statuses).toEqual([200, 409]);
-    const failed = a.status === 409 ? a : b;
-    expect(failed.body.error.code).toBe('TOKEN_STATE_CHANGED');
+    // Exactly one recall wins. Which refusal the loser gets depends on where
+    // it was when the winner committed: callToken re-reads the token before
+    // opening its transaction, so a loser that read early reaches the
+    // compare-and-swap and is refused there (409 TOKEN_STATE_CHANGED), while
+    // one that read late already sees CALLED and is refused by the transition
+    // table (422 INVALID_TOKEN_TRANSITION). Both are correct; asserting only
+    // the first made this test fail intermittently under load. The invariant
+    // worth pinning is that the token is called exactly once.
+    const succeeded = [a, b].filter((res) => res.status === 200);
+    const refused = [a, b].filter((res) => res.status !== 200);
+    expect(succeeded).toHaveLength(1);
+    expect(refused).toHaveLength(1);
+    expect(['TOKEN_STATE_CHANGED', 'INVALID_TOKEN_TRANSITION']).toContain(
+      refused[0]!.body.error.code,
+    );
   });
 });
 
