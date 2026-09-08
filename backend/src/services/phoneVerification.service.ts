@@ -37,7 +37,7 @@ function phoneFingerprintFor(queueId: string, normalizedPhone: string): string {
   return computeIdentityFingerprint({
     queueId,
     mode: 'VERIFIED_PHONE',
-    normalizedPhone,
+    normalizedVerifiedContact: normalizedPhone,
   });
 }
 

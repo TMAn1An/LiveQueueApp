@@ -5,7 +5,7 @@ import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { ApiError } from '../api/client';
-import { IDENTITY_FIELD_TYPES } from '../types/queue';
+import { IDENTITY_FIELD_TYPES, SELECTABLE_IDENTITY_MODES } from '../types/queue';
 import type {
   Queue,
   RepeatIdentityMode,
@@ -48,18 +48,35 @@ function describeUnit(amount: number, unit: RepeatRestrictionUnit): string {
   return `${amount} ${amount === 1 ? one : many}`;
 }
 
+/** One sentence each, so an administrator can tell them apart without
+ * guessing what the product means by "identity" (ADR-037). */
+const MODE_HELP: Partial<Record<RepeatIdentityMode, string>> = {
+  VERIFIED_EMAIL: 'Customer verifies access to an email address before joining.',
+  CUSTOM_FIELD: 'Use a required form question such as NID, Student ID or Membership ID.',
+  VERIFIED_EMAIL_AND_CUSTOM_FIELD:
+    'Use both verified email and a required form question. Useful when several people may share one email address.',
+};
+
 const MODE_LABELS: Record<RepeatIdentityMode, string> = {
-  CUSTOM_FIELD: 'An identifier they enter (for example a national ID)',
-  VERIFIED_PHONE: 'A phone number they verify by SMS',
-  VERIFIED_PHONE_AND_CUSTOM_FIELD: 'Both a verified phone number and an identifier',
+  VERIFIED_EMAIL: 'Verified email',
+  CUSTOM_FIELD: 'Custom unique field',
+  VERIFIED_EMAIL_AND_CUSTOM_FIELD: 'Verified email + custom unique field',
+  // Never offered (ADR-037), but a queue configured before the change can
+  // still be holding one, and the summary has to be able to name it.
+  VERIFIED_PHONE: 'Verified phone (no longer available)',
+  VERIFIED_PHONE_AND_CUSTOM_FIELD: 'Verified phone + custom field (no longer available)',
 };
 
 function needsField(mode: RepeatIdentityMode): boolean {
-  return mode === 'CUSTOM_FIELD' || mode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD';
+  return (
+    mode === 'CUSTOM_FIELD' ||
+    mode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD' ||
+    mode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD'
+  );
 }
 
-function needsPhone(mode: RepeatIdentityMode): boolean {
-  return mode === 'VERIFIED_PHONE' || mode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD';
+function needsEmail(mode: RepeatIdentityMode): boolean {
+  return mode === 'VERIFIED_EMAIL' || mode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD';
 }
 
 const inputClass = 'w-full rounded-md border border-border-strong px-2 py-1.5 text-sm';
@@ -110,7 +127,12 @@ export function RepeatVisitPolicy({
   const [until, setUntil] = useState(
     toQueueLocalInput(queue.repeatRestrictionUntil, effectiveTimezone),
   );
-  const [mode, setMode] = useState<RepeatIdentityMode>(queue.repeatIdentityMode ?? 'CUSTOM_FIELD');
+  // A queue still holding a deferred phone mode starts the editor on the
+  // default rather than on a value the selector cannot show (ADR-037).
+  const storedMode = queue.repeatIdentityMode;
+  const initialMode: RepeatIdentityMode =
+    storedMode && SELECTABLE_IDENTITY_MODES.includes(storedMode) ? storedMode : 'VERIFIED_EMAIL';
+  const [mode, setMode] = useState<RepeatIdentityMode>(initialMode);
   const [fieldKey, setFieldKey] = useState(queue.repeatIdentityFieldKey ?? '');
   const [error, setError] = useState<string | null>(null);
 
@@ -125,11 +147,16 @@ export function RepeatVisitPolicy({
     (field) => field.key === queue.repeatIdentityFieldKey,
   );
 
-  // A queue restricted before this feature existed: the limit is on, but
-  // nothing identifies the customer, so joins are refused until someone
-  // chooses how. Saying so plainly is the whole point — the old rule it was
-  // configured under is not silently still running.
-  const configurationRequired = !queue.allowRepeatVisits && !queue.repeatIdentityMode;
+  // Two ways a restricted queue can be unusable, and both are reported the
+  // same way because they have the same consequence — joins are refused until
+  // an administrator picks a method that works:
+  //   * no identity method at all (a queue predating ADR-034);
+  //   * a phone method, deferred by ADR-037 with no SMS provider ever built.
+  // Neither is silently reinterpreted as something else. Mirrors the
+  // backend's own describeJoinRequirements, which is what actually decides.
+  const configurationRequired =
+    !queue.allowRepeatVisits &&
+    (!storedMode || !SELECTABLE_IDENTITY_MODES.includes(storedMode));
 
   function startEditing() {
     setRestricted(!queue.allowRepeatVisits);
@@ -137,7 +164,7 @@ export function RepeatVisitPolicy({
     setAmount(String(queue.repeatRestrictionAmount ?? 1));
     setUnit(queue.repeatRestrictionUnit ?? 'MONTH');
     setUntil(toQueueLocalInput(queue.repeatRestrictionUntil, effectiveTimezone));
-    setMode(queue.repeatIdentityMode ?? 'CUSTOM_FIELD');
+    setMode(initialMode);
     setFieldKey(queue.repeatIdentityFieldKey ?? eligibleFields[0]?.key ?? '');
     setError(null);
     setEditing(true);
@@ -188,9 +215,9 @@ export function RepeatVisitPolicy({
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
             <p className="font-medium">This queue is not accepting customers.</p>
             <p className="mt-1">
-              It limits repeat visits but does not yet say how customers are identified. Until you
-              choose an identity method below, joins are refused — the previous rule recognised the
-              customer's phone app, which meant reinstalling the app got around the limit.
+              {storedMode
+                ? 'It identifies customers by a verified phone number, which is no longer available — SMS is not integrated. Choose verified email or a custom unique field below, and joins will work again.'
+                : "It limits repeat visits but does not yet say how customers are identified. Until you choose an identity method below, joins are refused — the previous rule recognised the customer's phone app, which meant reinstalling the app got around the limit."}
             </p>
           </div>
         )}
@@ -206,8 +233,8 @@ export function RepeatVisitPolicy({
               </p>
               <p className="text-xs text-muted">
                 Customers are recognised by{' '}
-                {needsPhone(queue.repeatIdentityMode) && 'a phone number they verify by SMS'}
-                {queue.repeatIdentityMode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD' && ' and '}
+                {needsEmail(queue.repeatIdentityMode) && 'an email address they verify'}
+                {queue.repeatIdentityMode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD' && ' and '}
                 {needsField(queue.repeatIdentityMode) &&
                   `their answer to “${identityField?.label ?? queue.repeatIdentityFieldKey}”`}
                 .
@@ -368,20 +395,20 @@ export function RepeatVisitPolicy({
               onChange={(e) => setMode(e.target.value as RepeatIdentityMode)}
               className={inputClass}
             >
-              {(Object.keys(MODE_LABELS) as RepeatIdentityMode[]).map((value) => (
+              {SELECTABLE_IDENTITY_MODES.map((value) => (
                 <option key={value} value={value}>
                   {MODE_LABELS[value]}
                 </option>
               ))}
             </select>
-            {needsPhone(mode) && (
-              // Whether SMS can actually be sent is a server capability, so
-              // the server is what answers it — saving surfaces its refusal
-              // rather than this page guessing and promising something the
-              // backend cannot deliver.
+            <p className="mt-1 text-xs text-muted">{MODE_HELP[mode]}</p>
+            {mode === 'VERIFIED_EMAIL' && (
+              // Worth stating plainly rather than letting an operator discover
+              // it from a support ticket: with email alone, one mailbox is one
+              // entitlement, however many people read it.
               <p className="mt-1 text-xs text-muted">
-                Requires an SMS provider on the server. If none is configured, saving will tell you
-                so and nothing changes.
+                People who share one mailbox share one visit. If that matters here, use verified
+                email + a custom unique field instead.
               </p>
             )}
           </div>

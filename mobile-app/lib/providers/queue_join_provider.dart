@@ -6,7 +6,7 @@ import '../models/queue_config.dart';
 import '../models/service_option.dart';
 import '../repositories/device_repository.dart';
 import '../repositories/history_repository.dart';
-import '../repositories/phone_verification_repository.dart';
+import '../repositories/email_verification_repository.dart';
 import '../repositories/queue_repository.dart';
 import '../repositories/token_repository.dart';
 import '../services/api_exception.dart';
@@ -25,18 +25,18 @@ class QueueJoinProvider extends ChangeNotifier {
     required TokenRepository tokenRepository,
     required DeviceRepository deviceRepository,
     required HistoryRepository historyRepository,
-    required PhoneVerificationRepository phoneVerificationRepository,
+    required EmailVerificationRepository emailVerificationRepository,
   })  : _queueRepository = queueRepository,
         _tokenRepository = tokenRepository,
         _deviceRepository = deviceRepository,
         _historyRepository = historyRepository,
-        _phoneVerificationRepository = phoneVerificationRepository;
+        _emailVerificationRepository = emailVerificationRepository;
 
   final QueueRepository _queueRepository;
   final TokenRepository _tokenRepository;
   final DeviceRepository _deviceRepository;
   final HistoryRepository _historyRepository;
-  final PhoneVerificationRepository _phoneVerificationRepository;
+  final EmailVerificationRepository _emailVerificationRepository;
 
   bool isLoadingQueue = false;
   bool isSubmitting = false;
@@ -56,21 +56,21 @@ class QueueJoinProvider extends ChangeNotifier {
   /// Null when there is none (a once-ever queue), or nothing was refused.
   DateTime? restrictionEndsAt;
 
-  /* ---- Phone verification (ADR-034) ------------------------------------
-     Only used by queues that recognise customers by a verified number. The
+  /* ---- Email verification (ADR-037) ------------------------------------
+     Only used by queues that recognise customers by a verified email. The
      app holds a server-issued proof, never a "verified" flag of its own:
      claiming verification locally would be worth exactly nothing, since the
      backend re-checks the signature on every join. */
 
-  /// What the customer typed, in international format. Kept so a resend or a
-  /// confirm sends the same number the code went to.
-  String phoneNumber = '';
+  /// What the customer typed. Kept so a resend or a confirm addresses the
+  /// same mailbox the code went to.
+  String emailAddress = '';
   String? _verificationId;
   String? _verificationProof;
   bool isSendingCode = false;
   bool isConfirmingCode = false;
 
-  /// Shown under the phone/code fields, separate from [errorMessage] so a
+  /// Shown under the email/code fields, separate from [errorMessage] so a
   /// verification problem does not look like a join failure.
   String? verificationError;
 
@@ -79,11 +79,11 @@ class QueueJoinProvider extends ChangeNotifier {
   DateTime? resendAvailableAt;
 
   bool get isAwaitingCode => _verificationId != null && _verificationProof == null;
-  bool get isPhoneVerified => _verificationProof != null;
+  bool get isEmailVerified => _verificationProof != null;
 
-  /// Whether this queue will refuse the join until a number is verified.
-  bool get requiresPhoneVerification =>
-      queueConfig?.identity.requiresVerifiedPhone ?? false;
+  /// Whether this queue will refuse the join until an address is verified.
+  bool get requiresEmailVerification =>
+      queueConfig?.identity.requiresVerifiedEmail ?? false;
 
   /// The queue limits repeat visits but has not been told how to recognise
   /// customers — the backend refuses every join, so there is no point
@@ -95,7 +95,7 @@ class QueueJoinProvider extends ChangeNotifier {
   /// form screen highlights it so the answer is given accurately.
   String? get identityFieldKey => queueConfig?.identity.identityFieldKey;
 
-  bool get canSubmitJoin => !requiresPhoneVerification || isPhoneVerified;
+  bool get canSubmitJoin => !requiresEmailVerification || isEmailVerified;
 
   List<ServiceOption> get selectedServices {
     final config = queueConfig;
@@ -175,12 +175,12 @@ class QueueJoinProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Typing a different number invalidates whatever was verified before —
+  /// Typing a different address invalidates whatever was verified before —
   /// otherwise someone could verify one number and join with another shown
   /// on screen.
-  void updatePhoneNumber(String value) {
-    if (value == phoneNumber) return;
-    phoneNumber = value;
+  void updateEmailAddress(String value) {
+    if (value == emailAddress) return;
+    emailAddress = value;
     _verificationId = null;
     _verificationProof = null;
     verificationError = null;
@@ -194,8 +194,8 @@ class QueueJoinProvider extends ChangeNotifier {
   Future<bool> sendVerificationCode() async {
     final config = queueConfig;
     if (config == null) return false;
-    if (phoneNumber.trim().isEmpty) {
-      verificationError = 'Enter your phone number in international format, for example +8801712345678.';
+    if (emailAddress.trim().isEmpty) {
+      verificationError = 'Enter your email address.';
       notifyListeners();
       return false;
     }
@@ -205,9 +205,9 @@ class QueueJoinProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final challenge = await _phoneVerificationRepository.start(
+      final challenge = await _emailVerificationRepository.start(
         queueId: config.id,
-        phone: phoneNumber.trim(),
+        email: emailAddress.trim(),
       );
       _verificationId = challenge.verificationId;
       _verificationProof = null;
@@ -237,10 +237,10 @@ class QueueJoinProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final proof = await _phoneVerificationRepository.confirm(
+      final proof = await _emailVerificationRepository.confirm(
         verificationId: verificationId,
         code: code.trim(),
-        phone: phoneNumber.trim(),
+        email: emailAddress.trim(),
       );
       _verificationProof = proof.value;
       return true;
@@ -258,22 +258,26 @@ class QueueJoinProvider extends ChangeNotifier {
 
   String _messageForVerificationError(ApiException e) {
     switch (e.code) {
-      case 'INVALID_PHONE_NUMBER':
-        return 'Enter your phone number in international format, for example +8801712345678.';
+      case 'INVALID_EMAIL_ADDRESS':
+        return 'Enter a valid email address.';
       case 'VERIFICATION_CODE_INCORRECT':
         return 'That code is not correct. Please check and try again.';
       case 'VERIFICATION_INVALID_OR_EXPIRED':
         return 'That code has expired. Please request a new one.';
       case 'VERIFICATION_ATTEMPTS_EXCEEDED':
         return 'Too many incorrect attempts. Please request a new code.';
+      case 'VERIFICATION_SEND_FAILED':
+        // Provider-neutral on purpose: the customer cannot act on which
+        // service failed, and the server never tells us anyway.
+        return 'We could not send the verification code. Please try again.';
       case 'VERIFICATION_RESEND_TOO_SOON':
         return e.message;
-      case 'VERIFICATION_PHONE_MISMATCH':
-        return 'That code was sent to a different number. Please request a new one.';
-      case 'PHONE_VERIFICATION_UNAVAILABLE':
-        return 'Phone verification is unavailable right now. Please try again later.';
-      case 'PHONE_VERIFICATION_NOT_REQUIRED':
-        return 'This queue does not ask for a verified phone number.';
+      case 'VERIFICATION_EMAIL_MISMATCH':
+        return 'That code was sent to a different address. Please request a new one.';
+      case 'EMAIL_VERIFICATION_UNAVAILABLE':
+        return 'Email verification is unavailable right now. Please try again later.';
+      case 'EMAIL_VERIFICATION_NOT_REQUIRED':
+        return 'This queue does not ask for a verified email address.';
       default:
         return e.message;
     }
@@ -309,8 +313,8 @@ class QueueJoinProvider extends ChangeNotifier {
     // Checked here as well as in the UI: the backend rejects an unverified
     // join anyway, and saying so before the request is a better experience
     // than a round trip that can only fail.
-    if (requiresPhoneVerification && !isPhoneVerified) {
-      errorMessage = 'Please verify your phone number before joining.';
+    if (requiresEmailVerification && !isEmailVerified) {
+      errorMessage = 'Please verify your email address before joining.';
       notifyListeners();
       return false;
     }
@@ -329,7 +333,7 @@ class QueueJoinProvider extends ChangeNotifier {
         deviceIdentifier: deviceIdentifier,
         formData: formData,
         idempotencyKey: _pendingIdempotencyKey!,
-        phoneVerificationProof: _verificationProof,
+        emailVerificationProof: _verificationProof,
       );
 
       await _historyRepository.recordJoin(
@@ -379,10 +383,10 @@ class QueueJoinProvider extends ChangeNotifier {
         return _repeatVisitMessage(e);
       case 'QUEUE_IDENTITY_CONFIGURATION_REQUIRED':
         return 'This queue is not accepting customers yet. Please contact staff.';
-      case 'PHONE_VERIFICATION_REQUIRED':
-        return 'Please verify your phone number before joining.';
-      case 'PHONE_VERIFICATION_INVALID':
-        return 'Your phone verification has expired. Please verify your number again.';
+      case 'EMAIL_VERIFICATION_REQUIRED':
+        return 'Please verify your email address before joining.';
+      case 'EMAIL_VERIFICATION_INVALID':
+        return 'Your email verification has expired. Please verify your address again.';
       case 'IDENTITY_VALUE_REQUIRED':
         return 'Please answer the question that identifies you for this queue.';
       case 'MULTIPLE_SERVICES_NOT_ALLOWED':
@@ -392,7 +396,7 @@ class QueueJoinProvider extends ChangeNotifier {
     }
   }
 
-  /// The refusal is about the *person*, not this phone, so it must never
+  /// The refusal is about the *person*, not this device, so it must never
   /// suggest the device is blocked — and it says when they may come back
   /// where the queue's period makes that knowable (ADR-034; the backend
   /// sends the period, never anything identifying).
@@ -423,7 +427,7 @@ class QueueJoinProvider extends ChangeNotifier {
     formErrors = {};
     createdToken = null;
     _pendingIdempotencyKey = null;
-    phoneNumber = '';
+    emailAddress = '';
     _verificationId = null;
     _verificationProof = null;
     isSendingCode = false;

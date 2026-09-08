@@ -223,6 +223,19 @@ A dashboard-usability-only checkpoint: the four management lists became searchab
 - **Mobile got the three places that still looked frozen:** the QR screen now shows "Loading queue…" over a scrim while the scanned queue resolves, Join shows a spinner beside "Joining queue…" instead of replacing the label, and OTP reissue reports "Getting a new code…" instead of silently greying out. Cancel and history already had proper feedback and were left alone; the startup sequence was not touched.
 - **Verification:** backend 595/595 tests (66 files, 14 new), typecheck/lint/build clean, `prisma migrate status` up to date; dashboard 122/122 (24 files, 10 new), typecheck/lint/build clean; mobile 164/164 (2 new), `flutter analyze` clean, debug APK builds.
 
+### V2 Verified email identity — the verified channel that actually works (2026-09-10)
+
+**Status: implemented and verified. One additive migration; nothing dropped.**
+
+- **The identity feature was half-usable.** ADR-034 built repeat-visit identity around a verified phone and shipped the whole mechanism behind an SMS provider that was never integrated — so the only method any real queue could use was a form question, which is something a customer types rather than proves. Meanwhile the product has been sending real email in production since account verification shipped. Verified email replaces the planned phone identity; SMS is deferred, not claimed.
+- **Three selectable modes now:** verified email, custom unique field, or both together. The phone modes stay in the database (removing a PostgreSQL enum value is destructive and buys nothing) but are refused by the request validator, by the policy resolver, and by the join path — a queue still holding one reports configuration-required and refuses joins until an admin picks a workable method. A phone fingerprint is never reinterpreted as an email one.
+- **Verification is a six-digit code to the mailbox**, generated with a secure RNG, stored only as an HMAC, compared in constant time, with a five-minute expiry, a five-attempt budget and a sixty-second resend cooldown. A resend reuses the same challenge, so neither budget can be reset by asking again. Confirming returns a short-lived, queue-scoped proof carrying a fingerprint rather than the address — and that proof, never a client-asserted flag, is what the join trusts.
+- **Normalization is deliberately conservative.** Case is folded, because nobody should get two entitlements for pressing shift. Gmail-style dot and `+tag` tricks are deliberately *not* applied: they are true at one provider and false at others, and merging addresses that are genuinely different would deny somebody a service they are entitled to.
+- **Shared mailboxes are a stated trade-off, not an oversight.** With email alone, everyone reading one inbox shares one visit — the dashboard says so where an admin will read it. Email + custom field is the answer when that matters: the same mailbox with two different national IDs is two distinct identities.
+- **Privacy is unchanged in shape.** Neither the claim row nor the verification row holds an address — both hold fingerprints. The logger redacts the address, the code and the proof; nothing reaches Socket.io, FCM or audit metadata.
+- **A defect the new tests found:** the mobile resend countdown stopped rebuilding at zero, so the Resend button stayed disabled reading "Resend in 1s" for as long as the screen was open. Fixed.
+- **Verification:** backend 716/716 (69 files, 31 new), typecheck/lint/build clean, `prisma migrate status` up to date; dashboard 160/160 (26 files, 9 new), typecheck/lint/build clean; mobile 210/210, `flutter analyze` clean, debug APK builds. No production database was accessed and nothing was deployed.
+
 ### V2 Queue isolation, mobile navigation, staff binding (2026-09-09)
 
 **Status: implemented and verified. No migration — the schema already expressed everything this needed.**

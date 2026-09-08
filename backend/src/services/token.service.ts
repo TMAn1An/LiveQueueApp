@@ -20,6 +20,7 @@ import {
   computeEligibleAgainAt,
   computeIdentityFingerprint,
   normalizeCustomIdentity,
+  verifyEmailVerificationProof,
   verifyPhoneVerificationProof,
   type RepeatWindow,
 } from '../utils/customerIdentity';
@@ -98,8 +99,34 @@ function resolveCustomerIdentity(
 
   const mode = requirements.identityMode!;
 
-  let normalizedPhone: string | null = null;
-  if (repeatPolicyHelpers.needsVerifiedPhone(mode)) {
+  // The verified contact this identity rests on, always carried through as
+  // the already-proven fingerprint rather than a raw address or number: the
+  // server never has to trust a contact value from this request.
+  let normalizedVerifiedContact: string | null = null;
+
+  if (repeatPolicyHelpers.needsVerifiedEmail(mode)) {
+    const proof = input.emailVerificationProof?.trim();
+    if (!proof) {
+      throw new AppError(
+        422,
+        'EMAIL_VERIFICATION_REQUIRED',
+        'This queue requires a verified email address.',
+      );
+    }
+    const provenFingerprint = verifyEmailVerificationProof(proof, queue.id);
+    if (!provenFingerprint) {
+      throw new AppError(
+        401,
+        'EMAIL_VERIFICATION_INVALID',
+        'Your email verification has expired. Please verify your address again.',
+      );
+    }
+    normalizedVerifiedContact = provenFingerprint;
+  } else if (repeatPolicyHelpers.needsVerifiedPhone(mode)) {
+    // Unreachable through configuration since ADR-037 — a phone-mode queue is
+    // reported as configurationRequired above and never gets this far. Kept
+    // so the legacy mode still behaves correctly rather than silently
+    // producing an identity with no verified contact at all.
     const proof = input.phoneVerificationProof?.trim();
     if (!proof) {
       throw new AppError(
@@ -116,9 +143,7 @@ function resolveCustomerIdentity(
         'Your phone verification has expired. Please verify your number again.',
       );
     }
-    // Carried through as the already-proven fingerprint rather than a raw
-    // number: the server never has to trust a phone value from this request.
-    normalizedPhone = provenFingerprint;
+    normalizedVerifiedContact = provenFingerprint;
   }
 
   let normalizedCustomValue: string | null = null;
@@ -140,7 +165,7 @@ function resolveCustomerIdentity(
     fingerprint: computeIdentityFingerprint({
       queueId: queue.id,
       mode,
-      normalizedPhone,
+      normalizedVerifiedContact,
       normalizedCustomValue,
     }),
     mode,
@@ -169,6 +194,9 @@ export interface CreateTokenInput {
   /// server-signed proof returned by the phone-verification flow. Never a
   /// client-asserted "verified" flag.
   phoneVerificationProof?: string;
+  /** ADR-037: the server-issued proof that this customer read a code sent to
+   * their mailbox. Never a client-asserted "verified" flag. */
+  emailVerificationProof?: string;
 }
 
 /** The shape every idempotency comparison needs — the existing token's full

@@ -6,14 +6,14 @@ import 'package:http/testing.dart';
 import 'package:mobile_app/providers/queue_join_provider.dart';
 import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
-import 'package:mobile_app/repositories/phone_verification_repository.dart';
+import 'package:mobile_app/repositories/email_verification_repository.dart';
 import 'package:mobile_app/repositories/queue_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
 import 'package:mobile_app/services/api_client.dart';
 import 'package:mobile_app/services/device_api_service.dart';
 import 'package:mobile_app/services/device_identity_service.dart';
 import 'package:mobile_app/services/history_storage_service.dart';
-import 'package:mobile_app/services/phone_verification_api_service.dart';
+import 'package:mobile_app/services/email_verification_api_service.dart';
 import 'package:mobile_app/services/queue_api_service.dart';
 import 'package:mobile_app/services/socket_service.dart';
 import 'package:mobile_app/services/token_api_service.dart';
@@ -21,7 +21,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// The join flow for a queue that limits repeat visits (ADR-034): the app
 /// asks the customer who they are, and carries a server-issued proof — never
-/// a claim of its own — into the join.
+/// a claim of its own — into the join. ADR-037 moved the verified channel
+/// from SMS to email.
 
 Map<String, dynamic> _queueJson({Map<String, dynamic>? identity}) => {
       'id': 'queue-1',
@@ -70,12 +71,12 @@ Map<String, dynamic> _tokenJson() => {
       'skippedAt': null,
     };
 
-Map<String, dynamic> _phoneIdentity() => {
+Map<String, dynamic> _emailIdentity() => {
       'repeatRestricted': true,
       'restrictionType': 'ONCE_EVER',
-      'identityMode': 'VERIFIED_PHONE',
+      'identityMode': 'VERIFIED_EMAIL',
       'identityFieldKey': null,
-      'requiresVerifiedPhone': true,
+      'requiresVerifiedEmail': true,
       'configurationRequired': false,
     };
 
@@ -92,8 +93,8 @@ QueueJoinProvider _buildProvider(http.Client mockClient) {
       apiService: DeviceApiService(apiClient),
     ),
     historyRepository: HistoryRepository(storageService: HistoryStorageService()),
-    phoneVerificationRepository: PhoneVerificationRepository(
-      apiService: PhoneVerificationApiService(apiClient),
+    emailVerificationRepository: EmailVerificationRepository(
+      apiService: EmailVerificationApiService(apiClient),
     ),
   );
 }
@@ -127,12 +128,12 @@ void main() {
   group('what the queue asks for', () {
     test('reads the identity requirement from the queue config', () async {
       final provider = _buildProvider(
-        MockClient((_) async => _ok(_queueJson(identity: _phoneIdentity()))),
+        MockClient((_) async => _ok(_queueJson(identity: _emailIdentity()))),
       );
 
       await provider.loadQueueById('queue-1');
 
-      expect(provider.requiresPhoneVerification, isTrue);
+      expect(provider.requiresEmailVerification, isTrue);
       expect(provider.canSubmitJoin, isFalse);
       expect(provider.queueConfig!.identity.restrictionType, 'ONCE_EVER');
     });
@@ -146,7 +147,7 @@ void main() {
               'restrictionUnit': 'DAY',
               'identityMode': 'CUSTOM_FIELD',
               'identityFieldKey': 'nid',
-              'requiresVerifiedPhone': false,
+              'requiresVerifiedEmail': false,
               'configurationRequired': false,
             }))),
       );
@@ -154,7 +155,7 @@ void main() {
       await provider.loadQueueById('queue-1');
 
       expect(provider.identityFieldKey, 'nid');
-      expect(provider.requiresPhoneVerification, isFalse);
+      expect(provider.requiresEmailVerification, isFalse);
       // Nothing to verify, so nothing blocks the join.
       expect(provider.canSubmitJoin, isTrue);
     });
@@ -166,7 +167,7 @@ void main() {
               'restrictionType': null,
               'identityMode': null,
               'identityFieldKey': null,
-              'requiresVerifiedPhone': false,
+              'requiresVerifiedEmail': false,
               'configurationRequired': true,
             }))),
       );
@@ -181,28 +182,28 @@ void main() {
 
       await provider.loadQueueById('queue-1');
 
-      expect(provider.requiresPhoneVerification, isFalse);
+      expect(provider.requiresEmailVerification, isFalse);
       expect(provider.queueNeedsIdentitySetup, isFalse);
       expect(provider.identityFieldKey, isNull);
       expect(provider.canSubmitJoin, isTrue);
     });
   });
 
-  group('phone verification', () {
+  group('email verification', () {
     test('sends a code and then carries the proof into the join', () async {
       String? sentProof;
       final provider = _buildProvider(MockClient((request) async {
         if (request.url.path.contains('/config')) {
-          return _ok(_queueJson(identity: _phoneIdentity()));
+          return _ok(_queueJson(identity: _emailIdentity()));
         }
-        if (request.url.path.endsWith('/phone-verification/start')) {
+        if (request.url.path.endsWith('/email-verification/start')) {
           return _ok({
             'verificationId': 'v1',
             'expiresAt': DateTime.now().add(const Duration(minutes: 5)).toIso8601String(),
             'resendAvailableInSeconds': 60,
           }, 201);
         }
-        if (request.url.path.endsWith('/phone-verification/confirm')) {
+        if (request.url.path.endsWith('/email-verification/confirm')) {
           return _ok({
             'verificationProof': 'signed-proof',
             'expiresAt': DateTime.now().add(const Duration(minutes: 15)).toIso8601String(),
@@ -212,31 +213,31 @@ void main() {
           return _ok({'id': 'device-1'}, 201);
         }
         sentProof =
-            (jsonDecode(request.body) as Map<String, dynamic>)['phoneVerificationProof'] as String?;
+            (jsonDecode(request.body) as Map<String, dynamic>)['emailVerificationProof'] as String?;
         return _ok(_tokenJson(), 201);
       }));
       await provider.loadQueueById('queue-1');
       provider.toggleService('service-1');
       provider.updateFormField('nid', 'A-123');
-      provider.updatePhoneNumber('+8801712345678');
+      provider.updateEmailAddress('person@example.com');
 
       expect(await provider.sendVerificationCode(), isTrue);
       expect(provider.isAwaitingCode, isTrue);
       expect(provider.resendAvailableAt, isNotNull);
 
       expect(await provider.confirmVerificationCode('123456'), isTrue);
-      expect(provider.isPhoneVerified, isTrue);
+      expect(provider.isEmailVerified, isTrue);
       expect(provider.canSubmitJoin, isTrue);
 
       expect(await provider.submitJoin(), isTrue);
       expect(sentProof, 'signed-proof');
     });
 
-    test('refuses to join before the number is verified, without calling the API', () async {
+    test('refuses to join before the address is verified, without calling the API', () async {
       var joinAttempted = false;
       final provider = _buildProvider(MockClient((request) async {
         if (request.url.path.contains('/config')) {
-          return _ok(_queueJson(identity: _phoneIdentity()));
+          return _ok(_queueJson(identity: _emailIdentity()));
         }
         joinAttempted = true;
         return _ok(_tokenJson(), 201);
@@ -249,15 +250,15 @@ void main() {
 
       expect(success, isFalse);
       expect(joinAttempted, isFalse);
-      expect(provider.errorMessage, contains('verify your phone number'));
+      expect(provider.errorMessage, contains('verify your email address'));
     });
 
     test('editing the number throws away the verification it no longer matches', () async {
       final provider = _buildProvider(MockClient((request) async {
         if (request.url.path.contains('/config')) {
-          return _ok(_queueJson(identity: _phoneIdentity()));
+          return _ok(_queueJson(identity: _emailIdentity()));
         }
-        if (request.url.path.endsWith('/phone-verification/start')) {
+        if (request.url.path.endsWith('/email-verification/start')) {
           return _ok({
             'verificationId': 'v1',
             'expiresAt': DateTime.now().add(const Duration(minutes: 5)).toIso8601String(),
@@ -270,14 +271,14 @@ void main() {
         });
       }));
       await provider.loadQueueById('queue-1');
-      provider.updatePhoneNumber('+8801712345678');
+      provider.updateEmailAddress('person@example.com');
       await provider.sendVerificationCode();
       await provider.confirmVerificationCode('123456');
-      expect(provider.isPhoneVerified, isTrue);
+      expect(provider.isEmailVerified, isTrue);
 
-      provider.updatePhoneNumber('+8801999999999');
+      provider.updateEmailAddress('other@example.com');
 
-      expect(provider.isPhoneVerified, isFalse);
+      expect(provider.isEmailVerified, isFalse);
       expect(provider.isAwaitingCode, isFalse);
       expect(provider.canSubmitJoin, isFalse);
     });
@@ -285,9 +286,9 @@ void main() {
     test('explains a wrong code without losing the challenge', () async {
       final provider = _buildProvider(MockClient((request) async {
         if (request.url.path.contains('/config')) {
-          return _ok(_queueJson(identity: _phoneIdentity()));
+          return _ok(_queueJson(identity: _emailIdentity()));
         }
-        if (request.url.path.endsWith('/phone-verification/start')) {
+        if (request.url.path.endsWith('/email-verification/start')) {
           return _ok({
             'verificationId': 'v1',
             'expiresAt': DateTime.now().add(const Duration(minutes: 5)).toIso8601String(),
@@ -297,7 +298,7 @@ void main() {
         return _err('VERIFICATION_CODE_INCORRECT', 'That code is not correct.');
       }));
       await provider.loadQueueById('queue-1');
-      provider.updatePhoneNumber('+8801712345678');
+      provider.updateEmailAddress('person@example.com');
       await provider.sendVerificationCode();
 
       final confirmed = await provider.confirmVerificationCode('000000');
@@ -311,7 +312,7 @@ void main() {
     test('passes the resend cooldown through as the server worded it', () async {
       final provider = _buildProvider(MockClient((request) async {
         if (request.url.path.contains('/config')) {
-          return _ok(_queueJson(identity: _phoneIdentity()));
+          return _ok(_queueJson(identity: _emailIdentity()));
         }
         return _err(
           'VERIFICATION_RESEND_TOO_SOON',
@@ -320,7 +321,7 @@ void main() {
         );
       }));
       await provider.loadQueueById('queue-1');
-      provider.updatePhoneNumber('+8801712345678');
+      provider.updateEmailAddress('person@example.com');
 
       final sent = await provider.sendVerificationCode();
 
@@ -328,11 +329,11 @@ void main() {
       expect(provider.verificationError, contains('45 seconds'));
     });
 
-    test('will not ask for a code with no number typed', () async {
+    test('will not ask for a code with no address typed', () async {
       var startCalled = false;
       final provider = _buildProvider(MockClient((request) async {
         if (request.url.path.contains('/config')) {
-          return _ok(_queueJson(identity: _phoneIdentity()));
+          return _ok(_queueJson(identity: _emailIdentity()));
         }
         startCalled = true;
         return _ok({}, 201);
@@ -341,7 +342,7 @@ void main() {
 
       expect(await provider.sendVerificationCode(), isFalse);
       expect(startCalled, isFalse);
-      expect(provider.verificationError, contains('international format'));
+      expect(provider.verificationError, contains('email address'));
     });
   });
 
@@ -356,7 +357,7 @@ void main() {
               'restrictionUnit': 'DAY',
             'identityMode': 'CUSTOM_FIELD',
             'identityFieldKey': 'nid',
-            'requiresVerifiedPhone': false,
+            'requiresVerifiedEmail': false,
             'configurationRequired': false,
           }));
         }
@@ -410,16 +411,16 @@ void main() {
     test('asks the customer to verify again when the proof has expired', () async {
       final provider = _buildProvider(MockClient((request) async {
         if (request.url.path.contains('/config')) {
-          return _ok(_queueJson(identity: _phoneIdentity()));
+          return _ok(_queueJson(identity: _emailIdentity()));
         }
-        if (request.url.path.endsWith('/phone-verification/start')) {
+        if (request.url.path.endsWith('/email-verification/start')) {
           return _ok({
             'verificationId': 'v1',
             'expiresAt': DateTime.now().add(const Duration(minutes: 5)).toIso8601String(),
             'resendAvailableInSeconds': 60,
           }, 201);
         }
-        if (request.url.path.endsWith('/phone-verification/confirm')) {
+        if (request.url.path.endsWith('/email-verification/confirm')) {
           return _ok({
             'verificationProof': 'stale-proof',
             'expiresAt': DateTime.now().toIso8601String(),
@@ -428,17 +429,17 @@ void main() {
         if (request.url.path.endsWith('/devices')) {
           return _ok({'id': 'device-1'}, 201);
         }
-        return _err('PHONE_VERIFICATION_INVALID', 'Expired.', status: 401);
+        return _err('EMAIL_VERIFICATION_INVALID', 'Expired.', status: 401);
       }));
       await provider.loadQueueById('queue-1');
       provider.toggleService('service-1');
       provider.updateFormField('nid', 'A-123');
-      provider.updatePhoneNumber('+8801712345678');
+      provider.updateEmailAddress('person@example.com');
       await provider.sendVerificationCode();
       await provider.confirmVerificationCode('123456');
 
       expect(await provider.submitJoin(), isFalse);
-      expect(provider.errorMessage, contains('verify your number again'));
+      expect(provider.errorMessage, contains('verify your address again'));
     });
   });
 }

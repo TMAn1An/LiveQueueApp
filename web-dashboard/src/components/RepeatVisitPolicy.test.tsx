@@ -153,6 +153,7 @@ describe('RepeatVisitPolicy', () => {
     renderPolicy();
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Allow again after'));
     await userEvent.clear(screen.getByLabelText('Amount'));
     await userEvent.type(screen.getByLabelText('Amount'), '90');
@@ -174,6 +175,7 @@ describe('RepeatVisitPolicy', () => {
     renderPolicy();
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Only once ever'));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -208,6 +210,7 @@ describe('RepeatVisitPolicy', () => {
     renderPolicy({}, null);
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Allow again after'));
     await userEvent.selectOptions(screen.getByLabelText('Unit'), 'MONTH');
 
@@ -220,6 +223,7 @@ describe('RepeatVisitPolicy', () => {
     renderPolicy({}, null);
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Allow again after'));
     await userEvent.selectOptions(screen.getByLabelText('Unit'), 'HOUR');
 
@@ -231,6 +235,7 @@ describe('RepeatVisitPolicy', () => {
     renderPolicy();
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
 
     const select = screen.getByLabelText(/Which form question identifies the customer/i);
     expect(select).toHaveTextContent('NID Number');
@@ -260,8 +265,113 @@ describe('RepeatVisitPolicy', () => {
     renderPolicy();
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
 
     expect(screen.getByText(/no question that could identify a customer/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+});
+
+/**
+ * ADR-037: verified email replaces the phone modes, which are deferred until
+ * an SMS provider exists. The selector must offer exactly the three that
+ * work, and must say plainly what each one means.
+ */
+describe('RepeatVisitPolicy — identity options', () => {
+  async function openIdentitySelector() {
+    renderPolicy();
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    return screen.getByLabelText(/How is the same customer recognised/i);
+  }
+
+  it('offers verified email, custom field, and both together', async () => {
+    const select = await openIdentitySelector();
+
+    expect(select).toHaveTextContent('Verified email');
+    expect(select).toHaveTextContent('Custom unique field');
+    expect(select).toHaveTextContent('Verified email + custom unique field');
+  });
+
+  it('does not offer phone verification at all', async () => {
+    const select = await openIdentitySelector();
+
+    expect(select).not.toHaveTextContent('Verified phone');
+    // And no SMS-provider warning is left lying around in normal use.
+    expect(screen.queryByText(/SMS provider/i)).not.toBeInTheDocument();
+  });
+
+  it('explains each option as it is selected', async () => {
+    const select = await openIdentitySelector();
+
+    expect(screen.getByText(/verifies access to an email address/i)).toBeInTheDocument();
+
+    await userEvent.selectOptions(select, 'CUSTOM_FIELD');
+    expect(screen.getByText(/NID, Student ID or Membership ID/i)).toBeInTheDocument();
+
+    await userEvent.selectOptions(select, 'VERIFIED_EMAIL_AND_CUSTOM_FIELD');
+    expect(screen.getByText(/share one email address/i)).toBeInTheDocument();
+  });
+
+  it('warns that one mailbox is one entitlement under email alone', async () => {
+    await openIdentitySelector();
+
+    expect(screen.getByText(/share one mailbox share one visit/i)).toBeInTheDocument();
+  });
+
+  it('asks for the identifying question in the compound mode', async () => {
+    const select = await openIdentitySelector();
+    await userEvent.selectOptions(select, 'VERIFIED_EMAIL_AND_CUSTOM_FIELD');
+
+    expect(
+      screen.getByLabelText(/Which form question identifies the customer/i),
+    ).toBeInTheDocument();
+  });
+
+  it('does not ask for a question when email alone identifies the customer', async () => {
+    await openIdentitySelector();
+
+    expect(
+      screen.queryByLabelText(/Which form question identifies the customer/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('sends the verified-email policy with no stale field key', async () => {
+    await openIdentitySelector();
+    await userEvent.click(screen.getByLabelText('Only once ever'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repeatIdentityMode: 'VERIFIED_EMAIL',
+        repeatIdentityFieldKey: null,
+      }),
+    );
+  });
+
+  it('tells an operator how to fix a queue still set to phone verification', () => {
+    renderPolicy({
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'ONCE_EVER',
+      repeatIdentityMode: 'VERIFIED_PHONE',
+    });
+
+    expect(screen.getByText(/not accepting customers/i)).toBeInTheDocument();
+    expect(screen.getByText(/no longer available/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /set up identification/i })).toBeInTheDocument();
+  });
+
+  it('starts a phone-configured queue on a mode that can actually be saved', async () => {
+    renderPolicy({
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'ONCE_EVER',
+      repeatIdentityMode: 'VERIFIED_PHONE',
+    });
+
+    await userEvent.click(screen.getByRole('button', { name: /set up identification/i }));
+
+    expect(screen.getByLabelText(/How is the same customer recognised/i)).toHaveValue(
+      'VERIFIED_EMAIL',
+    );
   });
 });

@@ -90,3 +90,18 @@ export const phoneVerificationRateLimiter = createLimiter(
   env.RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS,
   env.RATE_LIMIT_PHONE_VERIFICATION_MAX,
 );
+
+/**
+ * ADR-037: customer email verification. A start request costs a real email,
+ * so this is as tight as the SMS bucket above.
+ *
+ * Two complementary limits, as with phone: this one bounds a single caller
+ * (by address, the shared `createLimiter` key), while the per-challenge
+ * cooldown in customerEmailVerification.service.ts bounds a single mailbox
+ * however many callers ask for it. Neither alone is enough — the first would
+ * let a client cycle mailboxes, the second would let many clients hammer one.
+ */
+export const customerEmailVerificationRateLimiter = createLimiter(
+  env.RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_WINDOW_MS,
+  env.RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_MAX,
+);

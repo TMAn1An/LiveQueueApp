@@ -305,8 +305,8 @@ Customer sees queue details
 Customer selects one or more services (checkbox, or single-select when the
 queue disallows multiple services — V2 Checkpoint 5/6, ADR-027/ADR-028)
         ↓
-Customer verifies a phone number, when the queue identifies people that
-way (ADR-034)
+Customer verifies an email address, when the queue identifies people that
+way (ADR-034/ADR-037) — the server emails a code and returns a signed proof
         ↓
 Backend rejects the join if this *customer* is still inside the queue
 restriction window, and says when they may return (ADR-034/ADR-035 — no
@@ -328,11 +328,21 @@ As of V2 Checkpoint 5, a customer may select multiple services in one join — t
 
 As of V2 Checkpoint 6, each queue carries two independent settings, both defaulting to `true` for every existing queue: `allowRepeatVisits` and `allowMultipleServices` (when `false`, exactly one service must be selected).
 
-**ADR-034 replaced how `allowRepeatVisits = false` is enforced, and ADR-035 replaced what it can express.** It was originally keyed on the device identifier, which meant reinstalling the app reset the limit — the documented "accepted limitation" of Checkpoint 6 turned out to defeat the feature purpose, so it was fixed rather than kept. A restricted queue must say **how a customer is recognised** — a phone number verified by SMS, a required form question they answer (a national ID, student number and so on), or both — and **how long they must wait**. The server computes a queue-scoped HMAC fingerprint of the normalized value: it never stores the raw answer, never accepts a fingerprint from a client, and never correlates identities across organizations. Only a `COMPLETED` visit spends the allowance; `CANCELLED` and `SKIPPED` release it, exactly as before.
+**ADR-034 replaced how `allowRepeatVisits = false` is enforced, ADR-035 replaced what it can express, and ADR-037 replaced how the customer is recognised.** It was originally keyed on the device identifier, which meant reinstalling the app reset the limit — the documented "accepted limitation" of Checkpoint 6 turned out to defeat the feature purpose, so it was fixed rather than kept. A restricted queue must say **how a customer is recognised** — an **email address verified by the server**, a required form question they answer (a national ID, student number and so on), or both together — and **how long they must wait**. The server computes a queue-scoped HMAC fingerprint of the normalized value: it never stores the raw answer, never accepts a fingerprint from a client, and never correlates identities across organizations. Only a `COMPLETED` visit spends the allowance; `CANCELLED` and `SKIPPED` release it, exactly as before.
 
 The wait is written by the operator rather than chosen from presets (ADR-035): **once ever**, a **duration** (`n` minutes/hours/days/weeks/months/years measured from the delivered visit), or a **fixed cutoff instant** shared by everyone. Minutes through weeks are exact elapsed time and need no timezone; months and years are calendar increments evaluated in the queue own zone, with month-end clamped rather than rolled over. Exactly one claim per (queue, identity) governs eligibility at a time — older ones are retained as history — and the join reads that decision under the queue row lock that already serializes joins, with a unique index behind it, so two simultaneous joins from two phones still cannot both succeed. A rejection tells the customer when they may return.
 
-The one-active-token-per-installation rule is unchanged and still keyed on the device identifier, which is the right identity for that particular question. A queue restricted before ADR-034 has no identity method and refuses joins until an admin configures one — it does not silently keep running the old rule. Verified-phone queues additionally require an SMS provider, which this repository does not ship; until one is configured that identity mode cannot be selected at all. See ADR-034 and ADR-028 for the full design.
+The one-active-token-per-installation rule is unchanged and still keyed on the device identifier. That identifier is **installation-scoped only** and is never repeat-visit identity again: it answers "does this phone already have a token open", not "who is this person". A queue restricted before ADR-034 has no identity method and refuses joins until an admin configures one — it does not silently keep running the old rule.
+
+**Phone identification is deferred (ADR-037).** ADR-034 designed repeat identity around a phone number verified by SMS and gated it behind an SMS provider this repository has never shipped, so no real customer was ever identified that way. Verified email takes its place, because the product already sends real email in production. The two phone modes remain in the database — removing a PostgreSQL enum value is destructive and buys nothing — but cannot be configured: the request validator refuses them, the policy resolver refuses them, and a queue still holding one reports configuration-required and **refuses joins** until an administrator picks a workable method. A phone fingerprint is never reinterpreted as an email one, and SMS is not claimed as working or imminent.
+
+**How email verification works.** The customer asks for a code, the server emails a six-digit code generated with a secure RNG, and the customer types it back. The code is stored only as a one-way HMAC, compared in constant time, expires in five minutes, allows five wrong guesses, and cannot be requested again within sixty seconds; a resend reuses the same challenge, so neither budget resets by asking again. The code is never logged and never returned by the API. Confirming yields a **short-lived, queue-scoped signed proof carrying the fingerprint rather than the address**, and the join trusts that proof and nothing else — a client-asserted "verified" flag has no meaning anywhere in the system. A proof minted for one queue is refused by another.
+
+**Normalization is deliberately conservative.** Case is folded on both halves of the address, so nobody gains a second entitlement by pressing shift. Provider-specific mailbox tricks — dot-stripping, `+tag` removal — are deliberately **not** applied: they are true at one provider and false at others, and merging genuinely different people would deny somebody a service they are entitled to.
+
+**Shared mailboxes are a stated trade-off.** Under email alone the mailbox *is* the identity, so everyone reading `family@example.com` shares one visit; the dashboard says so where an administrator will read it. The compound mode is the answer when that matters — the fingerprint covers the email and the custom answer together, so one mailbox with two different national IDs is two distinct identities.
+
+See ADR-034, ADR-035, ADR-037 and ADR-028 for the full design.
 
 ## 4.4 Staff calls a token
 
@@ -1173,6 +1183,13 @@ Do not depend only on background execution. Use platform-supported notification 
 # 7.19 Device Management
 
 Each mobile installation should have a generated device identifier.
+
+This identifier is **installation-scoped only**. It answers device questions —
+whether this installation already holds an active token, and whether the device
+is blocked — and it is **never** repeat-visit identity: ADR-034 removed it from
+that role because reinstalling the app reset the limit, and ADR-037 did not put
+it back. Who a returning customer *is* is decided by a verified email address
+and/or a required form answer, never by the installation (§4.3).
 
 A device can have device-level authentication.
 

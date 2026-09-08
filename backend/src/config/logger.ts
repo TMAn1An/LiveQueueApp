@@ -49,6 +49,12 @@ const SENSITIVE_REDACT_PATHS = [
   // operator-chosen key, so it cannot be named here — formData is redacted
   // wholesale instead, which also covers every other answer a customer gives.
   'req.body.phone',
+  // ADR-037: a customer's email address is personal data and the code is a
+  // credential. Both arrive on the public verification routes, and the proof
+  // is a bearer credential for an identity claim.
+  'req.body.email',
+  'req.body.emailVerificationProof',
+  '*.emailVerificationProof',
   'req.body.code',
   'req.body.verificationProof',
   'req.body.phoneVerificationProof',

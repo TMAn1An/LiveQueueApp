@@ -106,9 +106,21 @@ export interface AssignableStaff {
 export type RepeatRestrictionType = 'ONCE_EVER' | 'DURATION' | 'UNTIL_DATETIME';
 export type RepeatRestrictionUnit = 'MINUTE' | 'HOUR' | 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
 export type RepeatIdentityMode =
+  /** ADR-037: deferred. Still in the union because a queue configured before
+   * this can still carry one; never offered, never savable. */
   | 'VERIFIED_PHONE'
+  | 'VERIFIED_PHONE_AND_CUSTOM_FIELD'
+  | 'VERIFIED_EMAIL'
   | 'CUSTOM_FIELD'
-  | 'VERIFIED_PHONE_AND_CUSTOM_FIELD';
+  | 'VERIFIED_EMAIL_AND_CUSTOM_FIELD';
+
+/** The three an administrator may actually choose (ADR-037), in the order
+ * they are offered. */
+export const SELECTABLE_IDENTITY_MODES: RepeatIdentityMode[] = [
+  'VERIFIED_EMAIL',
+  'CUSTOM_FIELD',
+  'VERIFIED_EMAIL_AND_CUSTOM_FIELD',
+];
 
 /** Form-field types that can actually hold an identifier — mirrors the
  * backend's IDENTITY_FIELD_TYPES. A checkbox or a dropdown would collapse

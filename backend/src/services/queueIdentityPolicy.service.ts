@@ -9,7 +9,7 @@ import type {
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { instantFromLocalParts, isValidTimezone, unitNeedsTimezone } from '../utils/customerIdentity';
-import { isPhoneVerificationAvailable } from './sms.service';
+import { isEmailAvailable } from './email.service';
 
 /**
  * The rules that decide whether a queue's repeat-visit configuration is
@@ -69,14 +69,44 @@ const MAX_AMOUNT_BY_UNIT: Record<RepeatRestrictionUnit, number> = {
 };
 
 function needsCustomField(mode: RepeatIdentityMode): boolean {
-  return mode === 'CUSTOM_FIELD' || mode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD';
+  return (
+    mode === 'CUSTOM_FIELD' ||
+    mode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD' ||
+    mode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD'
+  );
 }
 
 function needsVerifiedPhone(mode: RepeatIdentityMode): boolean {
   return mode === 'VERIFIED_PHONE' || mode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD';
 }
 
-export const repeatPolicyHelpers = { needsCustomField, needsVerifiedPhone };
+/** ADR-037: the verified channel that actually works today. */
+function needsVerifiedEmail(mode: RepeatIdentityMode): boolean {
+  return mode === 'VERIFIED_EMAIL' || mode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD';
+}
+
+/**
+ * The modes an administrator may choose from now on (ADR-037).
+ *
+ * The two phone modes are excluded rather than deleted: removing a
+ * PostgreSQL enum value is destructive, and no SMS provider was ever
+ * integrated, so neither has identified a real customer. A queue holding one
+ * from development reports `configurationRequired` and refuses joins until
+ * it is reconfigured — the same treatment ADR-034 gave queues that predated
+ * having any identity method, and for the same reason: better to say the
+ * policy is unusable than to quietly enforce something else.
+ */
+const SELECTABLE_IDENTITY_MODES: RepeatIdentityMode[] = [
+  'VERIFIED_EMAIL',
+  'CUSTOM_FIELD',
+  'VERIFIED_EMAIL_AND_CUSTOM_FIELD',
+];
+
+export function isSelectableIdentityMode(mode: RepeatIdentityMode): boolean {
+  return SELECTABLE_IDENTITY_MODES.includes(mode);
+}
+
+export const repeatPolicyHelpers = { needsCustomField, needsVerifiedPhone, needsVerifiedEmail };
 
 /**
  * Validates a queue's repeat configuration and returns what to store.
@@ -117,13 +147,25 @@ export async function resolveRepeatPolicy(
     );
   }
 
-  if (needsVerifiedPhone(mode) && !isPhoneVerificationAvailable()) {
-    // Fail safe: better to refuse the configuration than to create a queue
-    // whose customers can never complete the verification it demands.
+  // ADR-037: phone identification is deferred, so it can no longer be
+  // configured at all. Refusing here — rather than accepting a policy whose
+  // customers could never complete verification — is the same fail-safe
+  // stance ADR-034 took when no SMS provider was available.
+  if (!isSelectableIdentityMode(mode)) {
     throw new AppError(
       409,
-      'PHONE_VERIFICATION_UNAVAILABLE',
-      'Verified phone identification is unavailable because this server has no SMS provider configured.',
+      'IDENTITY_MODE_UNAVAILABLE',
+      'Phone verification is not available. Identify customers by a verified email address, a required form question, or both.',
+    );
+  }
+
+  // Email verification depends on the same provider the rest of the product
+  // already uses; a queue must not demand a code this server cannot send.
+  if (needsVerifiedEmail(mode) && !isEmailAvailable()) {
+    throw new AppError(
+      409,
+      'EMAIL_VERIFICATION_UNAVAILABLE',
+      'Verified email identification is unavailable because this server has no email provider configured.',
     );
   }
 
@@ -346,14 +388,21 @@ export function describeJoinRequirements(queue: {
       identityMode: null,
       identityFieldKey: null,
       requiresVerifiedPhone: false,
+      requiresVerifiedEmail: false,
       configurationRequired: false,
     };
   }
 
-  // A restricted queue with no identity method is one that predates ADR-034.
-  // It is reported as needing configuration rather than silently enforcing
-  // the old installation rule, which a reinstall bypassed.
-  if (!queue.repeatIdentityMode || !queue.repeatRestrictionType) {
+  // A restricted queue with no identity method predates ADR-034; one still
+  // holding a phone mode predates ADR-037, which deferred SMS. Both are
+  // reported as needing configuration rather than silently enforcing
+  // something the customer cannot actually complete — and a phone
+  // fingerprint is never reinterpreted as an email one.
+  if (
+    !queue.repeatIdentityMode ||
+    !queue.repeatRestrictionType ||
+    !isSelectableIdentityMode(queue.repeatIdentityMode)
+  ) {
     return {
       repeatRestricted: true as const,
       restrictionType: null,
@@ -363,6 +412,7 @@ export function describeJoinRequirements(queue: {
       identityMode: null,
       identityFieldKey: null,
       requiresVerifiedPhone: false,
+      requiresVerifiedEmail: false,
       configurationRequired: true,
     };
   }
@@ -378,6 +428,7 @@ export function describeJoinRequirements(queue: {
       ? queue.repeatIdentityFieldKey
       : null,
     requiresVerifiedPhone: needsVerifiedPhone(queue.repeatIdentityMode),
+    requiresVerifiedEmail: needsVerifiedEmail(queue.repeatIdentityMode),
     configurationRequired: false,
   };
 }

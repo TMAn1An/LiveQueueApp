@@ -5,20 +5,20 @@ import 'package:provider/provider.dart';
 
 import '../providers/queue_join_provider.dart';
 
-/// Verifying the customer's phone number before they join a queue that
-/// recognises people that way (ADR-034).
+/// Verifying the customer's email address before they join a queue that
+/// recognises people that way (ADR-037).
 ///
 /// Deliberately holds no notion of "verified" itself — it reflects the
 /// provider, whose only evidence is a proof the server signed. The code is
 /// typed here and sent straight on; it is never stored.
-class PhoneVerificationSection extends StatefulWidget {
-  const PhoneVerificationSection({super.key});
+class EmailVerificationSection extends StatefulWidget {
+  const EmailVerificationSection({super.key});
 
   @override
-  State<PhoneVerificationSection> createState() => _PhoneVerificationSectionState();
+  State<EmailVerificationSection> createState() => _EmailVerificationSectionState();
 }
 
-class _PhoneVerificationSectionState extends State<PhoneVerificationSection> {
+class _EmailVerificationSectionState extends State<EmailVerificationSection> {
   final TextEditingController _codeController = TextEditingController();
   Timer? _cooldownTicker;
 
@@ -29,10 +29,16 @@ class _PhoneVerificationSectionState extends State<PhoneVerificationSection> {
     // rebuild this widget as it is typed.
     _codeController.addListener(_onCodeChanged);
     // Drives the "resend in 45s" label, and only that — it rebuilds nothing
-    // while no cooldown is running.
+    // until a code has actually been sent.
+    //
+    // The condition is "a cooldown exists", not "time remains": stopping at
+    // zero would skip the very frame that re-enables the Resend button,
+    // leaving it stuck reading "Resend in 1s" for as long as the screen is
+    // open. One cheap rebuild per second while a challenge is pending is the
+    // right trade for a button that actually works.
     _cooldownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
-      if (_secondsUntilResend(context.read<QueueJoinProvider>().resendAvailableAt) > 0) {
+      if (context.read<QueueJoinProvider>().resendAvailableAt != null) {
         setState(() {});
       }
     });
@@ -62,17 +68,17 @@ class _PhoneVerificationSectionState extends State<PhoneVerificationSection> {
     final theme = Theme.of(context);
     final secondsLeft = _secondsUntilResend(provider.resendAvailableAt);
 
-    if (provider.isPhoneVerified) {
+    if (provider.isEmailVerified) {
       return Card(
         margin: EdgeInsets.zero,
         child: ListTile(
           leading: Icon(Icons.verified_user, color: theme.colorScheme.primary),
-          title: const Text('Phone number verified'),
-          subtitle: Text(provider.phoneNumber),
+          title: const Text('Email address verified'),
+          subtitle: Text(provider.emailAddress),
           trailing: TextButton(
             // Not a "log out" — it just clears the proof so a different
-            // number can be used, which the provider does on any edit.
-            onPressed: () => context.read<QueueJoinProvider>().updatePhoneNumber(''),
+            // address can be used, which the provider does on any edit.
+            onPressed: () => context.read<QueueJoinProvider>().updateEmailAddress(''),
             child: const Text('Change'),
           ),
         ),
@@ -82,24 +88,24 @@ class _PhoneVerificationSectionState extends State<PhoneVerificationSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Verify your phone number', style: theme.textTheme.titleMedium),
+        Text('Verify your email address', style: theme.textTheme.titleMedium),
         const SizedBox(height: 4),
         Text(
           'This queue limits how often one customer may return, so it needs to '
-          'know who you are. We will text you a code.',
+          'know who you are. We will email you a code.',
           style: theme.textTheme.bodySmall,
         ),
         const SizedBox(height: 12),
         TextField(
-          key: const Key('phone-field'),
-          keyboardType: TextInputType.phone,
+          key: const Key('email-field'),
+          keyboardType: TextInputType.emailAddress,
           enabled: !provider.isSendingCode,
-          onChanged: (value) => context.read<QueueJoinProvider>().updatePhoneNumber(value),
+          onChanged: (value) => context.read<QueueJoinProvider>().updateEmailAddress(value),
           decoration: const InputDecoration(
-            labelText: 'Phone number',
-            // International format is what the backend accepts — it will not
-            // guess a country, so neither does this hint.
-            hintText: '+8801712345678',
+            labelText: 'Email address',
+            // The backend normalizes what is typed; it never guesses at
+            // provider-specific mailbox tricks, so neither does this hint.
+            hintText: 'you@example.com',
             border: OutlineInputBorder(),
           ),
         ),

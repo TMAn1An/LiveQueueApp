@@ -25,6 +25,8 @@ export const createTokenSchema = {
       // ADR-034: opaque server-signed proof, only present for queues that
       // identify customers by verified phone. Never a "verified: true" flag.
       phoneVerificationProof: z.string().trim().min(1).max(4096).optional(),
+      // ADR-037: the server-issued proof for a verified-email queue.
+      emailVerificationProof: z.string().trim().min(1).max(4096).optional(),
       formData: z.record(z.string(), z.unknown()).default({}),
     })
     .refine((data) => Boolean(data.serviceId) !== Boolean(data.serviceIds), {
@@ -39,6 +41,7 @@ export const createTokenSchema = {
       queueId: data.queueId,
       deviceIdentifier: data.deviceIdentifier,
       phoneVerificationProof: data.phoneVerificationProof,
+      emailVerificationProof: data.emailVerificationProof,
       formData: data.formData,
       serviceIds: data.serviceIds ?? [data.serviceId!],
     })),

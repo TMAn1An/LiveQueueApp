@@ -29,7 +29,33 @@ function getClient(): Resend | null {
   return client;
 }
 
+/**
+ * Test seams, mirroring sms.service.ts's setSmsProviderForTesting exactly.
+ *
+ * Needed because customerEmailVerification.service.ts imports these two by
+ * name rather than through a namespace, so a spy on the module object would
+ * not intercept them — and the suite has to be able to run the whole
+ * verification flow, and capture the code, without a Resend account.
+ */
+let availabilityOverride: boolean | null = null;
+let customerVerificationSenderOverride:
+  | ((input: CustomerVerificationEmail) => Promise<boolean>)
+  | null = null;
+
+export function setEmailAvailableForTesting(available: boolean | null): void {
+  availabilityOverride = available;
+}
+
+export function setCustomerVerificationSenderForTesting(
+  sender: ((input: CustomerVerificationEmail) => Promise<boolean>) | null,
+): void {
+  customerVerificationSenderOverride = sender;
+}
+
 export function isEmailAvailable(): boolean {
+  if (availabilityOverride !== null) {
+    return availabilityOverride;
+  }
   return getClient() !== null;
 }
 
@@ -37,6 +63,13 @@ export function isEmailAvailable(): boolean {
  * it can only deliver to the address that owns the Resend account — every
  * other recipient is rejected by the provider. */
 const RESEND_SANDBOX_SENDER = 'onboarding@resend.dev';
+
+export interface CustomerVerificationEmail {
+  to: string;
+  code: string;
+  queueName: string;
+  expiresInMinutes: number;
+}
 
 /**
  * Registration is unusable if verification email never arrives, and an
@@ -231,6 +264,83 @@ function buildStaffInvitationHtml(input: {
   <p style="color: #94a3b8; font-size: 12px;">
     If you weren't expecting this invitation, you can ignore this email — the account cannot be used
     until someone sets a password with the link above.
+  </p>
+</div>`.trim();
+}
+
+/**
+ * The verification code a customer needs to join a queue that identifies
+ * people by email (ADR-037).
+ *
+ * Reuses the same Resend client, sender and never-throws contract as every
+ * other message here — no second provider, no duplicated HTTP handling. The
+ * caller treats `false` as a hard failure and deletes the challenge, because
+ * a code nobody received must not leave a usable one behind.
+ *
+ * Carries the code and, at most, the queue's name. Never a national ID or
+ * other form answer, never a token or device id, never the verification
+ * proof, never an internal database id.
+ */
+export async function sendCustomerVerificationCodeEmail(
+  input: CustomerVerificationEmail,
+): Promise<boolean> {
+  if (customerVerificationSenderOverride) {
+    return customerVerificationSenderOverride(input);
+  }
+  const resend = getClient();
+  if (!resend) {
+    return false;
+  }
+
+  try {
+    const { error } = await resend.emails.send({
+      from: env.EMAIL_FROM,
+      to: input.to,
+      subject: 'LiveQueue verification code',
+      html: buildCustomerVerificationHtml(input),
+    });
+    if (error) {
+      // name/statusCode distinguish an operator-fixable rejection from a
+      // transient outage. None of these fields carries the code or the
+      // recipient.
+      logger.error(
+        { name: error.name, message: error.message, from: env.EMAIL_FROM },
+        'Resend rejected a customer verification email — check the sender domain and API key configuration',
+      );
+      return false;
+    }
+    // Deliberately says nothing about who it went to or what was in it.
+    logger.info('Customer verification email sent');
+    return true;
+  } catch (err) {
+    logger.error(
+      { message: (err as Error).message },
+      'Failed to send a customer verification email',
+    );
+    return false;
+  }
+}
+
+function buildCustomerVerificationHtml(input: {
+  code: string;
+  queueName: string;
+  expiresInMinutes: number;
+}): string {
+  return `
+<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+  <h2 style="color: #1e293b;">Your LiveQueue verification code</h2>
+  <p style="color: #334155;">
+    Enter this code in the LiveQueue app to join ${escapeHtml(input.queueName)}.
+  </p>
+  <p style="margin: 24px 0; font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #1e293b;">
+    ${input.code}
+  </p>
+  <p style="color: #64748b; font-size: 13px;">
+    This code expires in ${input.expiresInMinutes} minutes. Do not share it with anyone.
+  </p>
+  <p style="color: #94a3b8; font-size: 12px;">
+    If you didn't request this, you can ignore this email — nobody can join a queue as you without
+    the code above.
   </p>
 </div>`.trim();
 }

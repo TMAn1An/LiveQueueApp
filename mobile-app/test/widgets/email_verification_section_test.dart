@@ -7,7 +7,7 @@ import 'package:http/testing.dart';
 import 'package:mobile_app/providers/queue_join_provider.dart';
 import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
-import 'package:mobile_app/repositories/phone_verification_repository.dart';
+import 'package:mobile_app/repositories/email_verification_repository.dart';
 import 'package:mobile_app/repositories/queue_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
 import 'package:mobile_app/screens/dynamic_form_screen.dart';
@@ -15,7 +15,7 @@ import 'package:mobile_app/services/api_client.dart';
 import 'package:mobile_app/services/device_api_service.dart';
 import 'package:mobile_app/services/device_identity_service.dart';
 import 'package:mobile_app/services/history_storage_service.dart';
-import 'package:mobile_app/services/phone_verification_api_service.dart';
+import 'package:mobile_app/services/email_verification_api_service.dart';
 import 'package:mobile_app/services/queue_api_service.dart';
 import 'package:mobile_app/services/socket_service.dart';
 import 'package:mobile_app/services/token_api_service.dart';
@@ -26,7 +26,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// customer must not be able to reach "Join Queue" before verifying, and the
 /// code they type must never be shown back to them anywhere else.
 
-Map<String, dynamic> _queueJson({required bool requiresPhone}) => {
+Map<String, dynamic> _queueJson({required bool requiresEmail}) => {
       'id': 'queue-1',
       'name': 'Relief Distribution',
       'description': null,
@@ -34,11 +34,11 @@ Map<String, dynamic> _queueJson({required bool requiresPhone}) => {
       'clientTerminology': null,
       'allowMultipleServices': true,
       'identity': {
-        'repeatRestricted': requiresPhone,
-        'restrictionPeriod': requiresPhone ? 'ONCE_EVER' : null,
-        'identityMode': requiresPhone ? 'VERIFIED_PHONE' : null,
+        'repeatRestricted': requiresEmail,
+        'restrictionType': requiresEmail ? 'ONCE_EVER' : null,
+        'identityMode': requiresEmail ? 'VERIFIED_EMAIL' : null,
         'identityFieldKey': null,
-        'requiresVerifiedPhone': requiresPhone,
+        'requiresVerifiedEmail': requiresEmail,
         'configurationRequired': false,
       },
       'services': [
@@ -55,13 +55,13 @@ Map<String, dynamic> _queueJson({required bool requiresPhone}) => {
 http.Response _ok(Map<String, dynamic> data, [int status = 200]) =>
     http.Response(jsonEncode({'success': true, 'data': data}), status);
 
-Future<QueueJoinProvider> _provider({required bool requiresPhone}) async {
+Future<QueueJoinProvider> _provider({required bool requiresEmail}) async {
   final apiClient = ApiClient(
     httpClient: MockClient((request) async {
       if (request.url.path.contains('/config')) {
-        return _ok(_queueJson(requiresPhone: requiresPhone));
+        return _ok(_queueJson(requiresEmail: requiresEmail));
       }
-      if (request.url.path.endsWith('/phone-verification/start')) {
+      if (request.url.path.endsWith('/email-verification/start')) {
         return _ok({
           'verificationId': 'v1',
           'expiresAt': DateTime.now().add(const Duration(minutes: 5)).toIso8601String(),
@@ -86,8 +86,8 @@ Future<QueueJoinProvider> _provider({required bool requiresPhone}) async {
       apiService: DeviceApiService(apiClient),
     ),
     historyRepository: HistoryRepository(storageService: HistoryStorageService()),
-    phoneVerificationRepository: PhoneVerificationRepository(
-      apiService: PhoneVerificationApiService(apiClient),
+    emailVerificationRepository: EmailVerificationRepository(
+      apiService: EmailVerificationApiService(apiClient),
     ),
   );
   await provider.loadQueueById('queue-1');
@@ -115,21 +115,21 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('a queue that does not verify phones shows no verification step', (tester) async {
-    await _pump(tester, await _provider(requiresPhone: false));
+  testWidgets('a queue that does not verify emails shows no verification step', (tester) async {
+    await _pump(tester, await _provider(requiresEmail: false));
 
-    expect(find.text('Verify your phone number'), findsNothing);
+    expect(find.text('Verify your email address'), findsNothing);
     expect(_joinButton(tester).onPressed, isNotNull);
   });
 
-  testWidgets('Join stays unavailable until the number is verified', (tester) async {
-    final provider = await _provider(requiresPhone: true);
+  testWidgets('Join stays unavailable until the address is verified', (tester) async {
+    final provider = await _provider(requiresEmail: true);
     await _pump(tester, provider);
 
-    expect(find.text('Verify your phone number'), findsOneWidget);
+    expect(find.text('Verify your email address'), findsOneWidget);
     expect(_joinButton(tester).onPressed, isNull);
 
-    await tester.enterText(find.byKey(const Key('phone-field')), '+8801712345678');
+    await tester.enterText(find.byKey(const Key('email-field')), 'person@example.com');
     await tester.tap(find.byKey(const Key('send-code-button')));
     await tester.pumpAndSettle();
 
@@ -142,14 +142,14 @@ void main() {
     await tester.tap(find.byKey(const Key('confirm-code-button')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Phone number verified'), findsOneWidget);
+    expect(find.text('Email address verified'), findsOneWidget);
     expect(_joinButton(tester).onPressed, isNotNull);
   });
 
   testWidgets('the code the customer typed is not displayed once verified', (tester) async {
-    final provider = await _provider(requiresPhone: true);
+    final provider = await _provider(requiresEmail: true);
     await _pump(tester, provider);
-    await tester.enterText(find.byKey(const Key('phone-field')), '+8801712345678');
+    await tester.enterText(find.byKey(const Key('email-field')), 'person@example.com');
     await tester.tap(find.byKey(const Key('send-code-button')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('code-field')), '123456');
@@ -163,9 +163,9 @@ void main() {
   });
 
   testWidgets('resend is held back while the cooldown runs', (tester) async {
-    final provider = await _provider(requiresPhone: true);
+    final provider = await _provider(requiresEmail: true);
     await _pump(tester, provider);
-    await tester.enterText(find.byKey(const Key('phone-field')), '+8801712345678');
+    await tester.enterText(find.byKey(const Key('email-field')), 'person@example.com');
     await tester.tap(find.byKey(const Key('send-code-button')));
     await tester.pumpAndSettle();
 
@@ -174,10 +174,10 @@ void main() {
     expect(find.textContaining('Resend in'), findsOneWidget);
   });
 
-  testWidgets('changing the number after verifying blocks Join again', (tester) async {
-    final provider = await _provider(requiresPhone: true);
+  testWidgets('changing the address after verifying blocks Join again', (tester) async {
+    final provider = await _provider(requiresEmail: true);
     await _pump(tester, provider);
-    await tester.enterText(find.byKey(const Key('phone-field')), '+8801712345678');
+    await tester.enterText(find.byKey(const Key('email-field')), 'person@example.com');
     await tester.tap(find.byKey(const Key('send-code-button')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('code-field')), '123456');
@@ -189,7 +189,44 @@ void main() {
     await tester.tap(find.text('Change'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Verify your phone number'), findsOneWidget);
+    expect(find.text('Verify your email address'), findsOneWidget);
     expect(_joinButton(tester).onPressed, isNull);
+  });
+  testWidgets('offers an email keyboard rather than a phone one', (tester) async {
+    await _pump(tester, await _provider(requiresEmail: true));
+
+    final field = tester.widget<TextField>(find.byKey(const Key('email-field')));
+    expect(field.keyboardType, TextInputType.emailAddress);
+    expect(field.decoration!.labelText, 'Email address');
+  });
+
+  testWidgets('will not send a code for an empty address', (tester) async {
+    final provider = await _provider(requiresEmail: true);
+    await _pump(tester, provider);
+
+    await tester.tap(find.byKey(const Key('send-code-button')));
+    await tester.pumpAndSettle();
+
+    // No challenge started, and the customer is told why.
+    expect(find.byKey(const Key('code-field')), findsNothing);
+    expect(provider.verificationError, isNotNull);
+  });
+
+  testWidgets('offers a resend once the cooldown has passed', (tester) async {
+    final provider = await _provider(requiresEmail: true);
+    await _pump(tester, provider);
+    await tester.enterText(find.byKey(const Key('email-field')), 'person@example.com');
+    await tester.tap(find.byKey(const Key('send-code-button')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Resend in'), findsOneWidget);
+
+    // The countdown is read from the provider, so moving it into the past is
+    // what a minute later looks like.
+    provider.resendAvailableAt = DateTime.now().subtract(const Duration(seconds: 1));
+    await tester.pump(const Duration(seconds: 1));
+
+    final resend = tester.widget<TextButton>(find.byKey(const Key('resend-code-button')));
+    expect(resend.onPressed, isNotNull);
+    expect(find.text('Resend code'), findsOneWidget);
   });
 }

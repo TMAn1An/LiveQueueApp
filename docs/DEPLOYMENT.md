@@ -122,6 +122,41 @@ WHERE allow_repeat_visits = false AND repeat_identity_mode IS NULL
   AND deleted_at IS NULL;
 ```
 
+#### Fourth identity migration (`20260910090000_add_verified_email_identity`)
+
+Adds verified-email customer identity (ADR-037). **Purely additive**: two
+values appended to the `RepeatIdentityMode` enum, one new table. Nothing is
+dropped, renamed or rewritten, and no backfill is needed.
+
+**Phone identification is deferred and can no longer be configured.** No SMS
+provider was ever integrated, so neither phone mode has identified a real
+customer — but if a development or staging database has a queue holding one,
+that queue reports configuration-required and **refuses joins** until an
+administrator picks verified email or a custom field. This is the same
+treatment ADR-034 gave queues with no identity method: better to say the
+policy is unusable than to quietly enforce something else. A phone
+fingerprint is never reinterpreted as an email one.
+
+Check before deploying, so you know who to tell:
+
+```sql
+SELECT id, name, repeat_identity_mode FROM queues
+WHERE repeat_identity_mode IN ('VERIFIED_PHONE', 'VERIFIED_PHONE_AND_CUSTOM_FIELD')
+  AND deleted_at IS NULL;
+```
+
+**Verified email needs the email provider that already runs in production.**
+`RESEND_API_KEY`, `EMAIL_FROM` and `APP_BASE_URL` are the same three that
+account verification and staff invitations depend on (§3b). Without them the
+dashboard refuses to configure a verified-email queue at all
+(`EMAIL_VERIFICATION_UNAVAILABLE`) rather than creating one whose customers
+could never join — and if the provider fails mid-flight, the customer is told
+the code could not be sent and no usable challenge is left behind.
+
+`CUSTOMER_IDENTITY_SECRET` (§3a) now also keys the email verification codes
+and proofs. Rotating it still invalidates every stored repeat-visit
+fingerprint; that is unchanged.
+
 #### Third identity migration (`20260909090000_custom_repeat_window_and_invitations`)
 
 Replaces the four fixed repeat periods with a custom window, adds an
@@ -242,9 +277,14 @@ break signup end to end.
 | `RATE_LIMIT_SENSITIVE_WINDOW_MS` / `RATE_LIMIT_SENSITIVE_MAX` | `900000` / `30` | Sensitive authenticated mutations (incl. OTP-gated `/start`). |
 | `RATE_LIMIT_REPORT_WINDOW_MS` / `RATE_LIMIT_REPORT_MAX` | `900000` / `10` | Reports/export. |
 | `RATE_LIMIT_EMAIL_WINDOW_MS` / `RATE_LIMIT_EMAIL_MAX` | `900000` / `3` | Verification-email resend (deliberately tighter — a real email is sent). |
-| `RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS` / `RATE_LIMIT_PHONE_VERIFICATION_MAX` | `900000` / `10` | Phone-verification start/confirm. The tightest bucket in the app — a start request costs a real SMS. |
-| `SMS_PROVIDER` | `none` | **`none` means the VERIFIED_PHONE identity mode cannot be configured at all** (the dashboard's save is refused with `PHONE_VERIFICATION_UNAVAILABLE`), so a queue can never demand a code this server cannot send. `log` is development only — it writes the last four digits of the number and *never* the code. A real provider is a code change: implement `SmsVerificationProvider` in `backend/src/services/sms.service.ts`. Until then, do not tell an operator that verified-phone queues are available. |
-| `PHONE_VERIFICATION_CODE_TTL_MINUTES` | `5` | How long a sent code stays usable. |
+| `RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS` / `RATE_LIMIT_PHONE_VERIFICATION_MAX` | `900000` / `10` | Dormant with `SMS_PROVIDER` (ADR-037). |
+| `RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_WINDOW_MS` / `RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_MAX` | `900000` / `10` | Customer email-verification start/confirm (ADR-037). One of the tightest buckets in the app — a start request costs a real email. Separate from `RATE_LIMIT_EMAIL_*`, which covers staff traffic rather than anonymous customers. |
+| `EMAIL_VERIFICATION_CODE_TTL_MINUTES` | `5` | How long a sent customer code stays usable. |
+| `EMAIL_VERIFICATION_MAX_ATTEMPTS` | `5` | Wrong guesses allowed per code. Not resettable by re-asking — a resend reuses the same challenge row. |
+| `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS` | `60` | Minimum gap between codes to one mailbox on one queue. |
+| `EMAIL_VERIFICATION_PROOF_TTL_MINUTES` | `15` | How long a confirmed verification stays usable for joining. Short by design: it only has to survive the rest of one join. |
+| `SMS_PROVIDER` | `none` | **Dormant since ADR-037.** Phone identification is deferred and can no longer be configured on any queue, so this setting currently changes nothing. Left in place for whenever SMS is picked up: a real provider is still a code change implementing `SmsVerificationProvider` in `backend/src/services/sms.service.ts`. Do not tell an operator that verified-phone queues are available. |
+| `PHONE_VERIFICATION_CODE_TTL_MINUTES` | `5` | Dormant with `SMS_PROVIDER` (ADR-037). |
 | `PHONE_VERIFICATION_MAX_ATTEMPTS` | `5` | Wrong guesses allowed per code. Not resettable by re-asking — a resend reuses the same challenge row. |
 | `PHONE_VERIFICATION_RESEND_COOLDOWN_SECONDS` | `60` | Minimum gap between codes to one number on one queue. |
 | `PHONE_VERIFICATION_PROOF_TTL_MINUTES` | `15` | How long a confirmed verification stays usable for joining. Short by design: it only has to survive the rest of one join. |

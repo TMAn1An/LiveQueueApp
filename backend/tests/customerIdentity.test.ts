@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   api,
   createCounter,
@@ -11,10 +11,16 @@ import {
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
-import { setSmsProviderForTesting, type SmsVerificationProvider } from '../src/services/sms.service';
+import {
+  setCustomerVerificationSenderForTesting,
+  setEmailAvailableForTesting,
+  type CustomerVerificationEmail,
+} from '../src/services/email.service';
+import { resolveRepeatPolicy } from '../src/services/queueIdentityPolicy.service';
 import {
   computeEligibleAgainAt,
   normalizeCustomIdentity,
+  normalizeEmail,
   normalizePhone,
 } from '../src/utils/customerIdentity';
 
@@ -24,35 +30,38 @@ import {
  * second visit.
  */
 
-/** In-memory SMS, so the phone flow is exercised end to end without a
- * provider. Captures codes the way a real inbox would — the code never
- * appears in a response or a log. */
-class FakeSmsProvider implements SmsVerificationProvider {
-  readonly name = 'fake';
-  readonly sent: { phone: string; code: string }[] = [];
-  isAvailable(): boolean {
+/** An in-memory inbox, so the whole verification flow runs end to end
+ * without a Resend account. Reads codes the way a real recipient would —
+ * they never appear in a response or a log. */
+class FakeMailbox {
+  readonly sent: CustomerVerificationEmail[] = [];
+  deliver = true;
+
+  send = async (message: CustomerVerificationEmail): Promise<boolean> => {
+    if (!this.deliver) return false;
+    this.sent.push(message);
     return true;
-  }
-  async sendVerificationCode(input: { phone: string; code: string }): Promise<void> {
-    this.sent.push(input);
-  }
-  lastCodeFor(phone: string): string {
-    const entry = [...this.sent].reverse().find((item) => item.phone === phone);
-    if (!entry) throw new Error(`no code was sent to ${phone}`);
+  };
+
+  lastCodeFor(email: string): string {
+    const entry = [...this.sent].reverse().find((item) => item.to === email);
+    if (!entry) throw new Error(`no code was sent to ${email}`);
     return entry.code;
   }
 }
 
-let sms: FakeSmsProvider;
+let mailbox: FakeMailbox;
 
 beforeEach(async () => {
   await resetDb();
-  sms = new FakeSmsProvider();
-  setSmsProviderForTesting(sms);
+  mailbox = new FakeMailbox();
+  setCustomerVerificationSenderForTesting(mailbox.send);
+  setEmailAvailableForTesting(true);
 });
 
 afterEach(() => {
-  setSmsProviderForTesting(null);
+  setCustomerVerificationSenderForTesting(null);
+  setEmailAvailableForTesting(null);
 });
 
 const NID_FIELD = { key: 'nid', label: 'NID Number', type: 'text', required: true } as const;
@@ -151,6 +160,26 @@ describe('normalization', () => {
 
   it('treats case and surrounding whitespace in an identifier as the same person', () => {
     expect(normalizeCustomIdentity('  ab-123456 ')).toBe(normalizeCustomIdentity('AB-123456'));
+  });
+
+  it('treats one mailbox written in different cases as one person', () => {
+    const canonical = normalizeEmail('person@example.com');
+    expect(normalizeEmail('Person@Example.com')).toBe(canonical);
+    expect(normalizeEmail('  PERSON@EXAMPLE.COM  ')).toBe(canonical);
+  });
+
+  it('does not guess provider-specific mailbox tricks', () => {
+    // Dots and +tags mean different things at different providers. Merging
+    // them everywhere would deny service to genuinely different people at
+    // any provider that treats them as significant.
+    expect(normalizeEmail('first.last@example.com')).not.toBe(normalizeEmail('firstlast@example.com'));
+    expect(normalizeEmail('person+queue@example.com')).not.toBe(normalizeEmail('person@example.com'));
+  });
+
+  it('rejects anything that is not an address', () => {
+    for (const bad of ['', '   ', 'person', 'person@', '@example.com', 'person@example', 'a b@example.com']) {
+      expect(normalizeEmail(bad)).toBeNull();
+    }
   });
 
   it('keeps meaningful characters, so two different identifiers stay different', () => {
@@ -290,8 +319,49 @@ describe('queue identity policy configuration', () => {
     expect(wrongType.body.error.code).toBe('IDENTITY_FIELD_TYPE_INVALID');
   });
 
-  it('refuses verified-phone identification when no SMS provider is configured', async () => {
-    setSmsProviderForTesting(null); // falls back to the 'none' provider
+  it.each(['VERIFIED_PHONE', 'VERIFIED_PHONE_AND_CUSTOM_FIELD'])(
+    'refuses to configure %s, which is deferred (ADR-037)',
+    async (mode) => {
+      const ctx = await registerOwner();
+      const queue = await createQueue(ctx.accessToken);
+      await setFormFields(ctx.accessToken, queue.id, [NID_FIELD] as never);
+
+      const res = await api()
+        .put(`/api/queues/${queue.id}`)
+        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .send({
+          allowRepeatVisits: false,
+          repeatRestrictionType: 'ONCE_EVER',
+          repeatIdentityMode: mode,
+          repeatIdentityFieldKey: 'nid',
+        });
+
+      // Refused twice over: the request validator no longer lists the phone
+      // modes at all, and the policy resolver refuses them again in case the
+      // two ever drift apart. Either rejection is correct — what matters is
+      // that no queue can be left configured this way.
+      expect([409, 422]).toContain(res.status);
+      const stored = await prisma.queue.findUniqueOrThrow({ where: { id: queue.id } });
+      expect(stored.repeatIdentityMode).toBeNull();
+      expect(stored.allowRepeatVisits).toBe(true);
+    },
+  );
+
+  it('refuses a phone mode even if it reaches the policy resolver directly', async () => {
+    // Belt and braces on the rule itself rather than the request shape: the
+    // resolver is what a future caller would go through.
+    await expect(
+      resolveRepeatPolicy(
+        null,
+        null,
+        { allowRepeatVisits: false, repeatRestrictionType: 'ONCE_EVER', repeatIdentityMode: 'VERIFIED_PHONE' },
+        null,
+      ),
+    ).rejects.toMatchObject({ code: 'IDENTITY_MODE_UNAVAILABLE' });
+  });
+
+  it('refuses verified email when no email provider is configured', async () => {
+    setEmailAvailableForTesting(false);
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
 
@@ -301,11 +371,11 @@ describe('queue identity policy configuration', () => {
       .send({
         allowRepeatVisits: false,
         repeatRestrictionType: 'ONCE_EVER',
-        repeatIdentityMode: 'VERIFIED_PHONE',
+        repeatIdentityMode: 'VERIFIED_EMAIL',
       });
 
     expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('PHONE_VERIFICATION_UNAVAILABLE');
+    expect(res.body.error.code).toBe('EMAIL_VERIFICATION_UNAVAILABLE');
   });
 
   it('will not let the identity question be deleted while it is in use', async () => {
@@ -742,20 +812,24 @@ describe('repeat enforcement by customer identity', () => {
   });
 });
 
-describe('phone verification', () => {
-  const PHONE = '+8801712345678';
+describe('customer email verification', () => {
+  const EMAIL = 'person@example.com';
 
-  async function phoneQueue() {
+  async function emailQueue(mode = 'VERIFIED_EMAIL', fields: Record<string, unknown>[] = []) {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
+    if (fields.length > 0) {
+      await setFormFields(ctx.accessToken, queue.id, fields as never);
+    }
     const res = await api()
       .put(`/api/queues/${queue.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
       .send({
         allowRepeatVisits: false,
         repeatRestrictionType: 'ONCE_EVER',
-        repeatIdentityMode: 'VERIFIED_PHONE',
+        repeatIdentityMode: mode,
+        ...(mode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD' ? { repeatIdentityFieldKey: 'nid' } : {}),
       });
     if (res.status !== 200) {
       throw new Error(`policy update failed: ${res.status} ${JSON.stringify(res.body)}`);
@@ -763,27 +837,45 @@ describe('phone verification', () => {
     return { ...ctx, queue, service };
   }
 
-  const start = (queueId: string, phone = PHONE) =>
-    api().post('/api/public/phone-verification/start').send({ queueId, phone });
+  const start = (queueId: string, email = EMAIL) =>
+    api().post('/api/public/email-verification/start').send({ queueId, email });
 
-  const confirm = (verificationId: string, code: string, phone = PHONE) =>
-    api().post('/api/public/phone-verification/confirm').send({ verificationId, code, phone });
+  const confirm = (verificationId: string, code: string, email = EMAIL) =>
+    api().post('/api/public/email-verification/confirm').send({ verificationId, code, email });
+
+  /** The whole flow, returning the proof a join can carry. */
+  async function verify(queueId: string, email = EMAIL): Promise<string> {
+    const started = await start(queueId, email);
+    const confirmed = await confirm(started.body.data.verificationId, mailbox.lastCodeFor(email), email);
+    return confirmed.body.data.verificationProof as string;
+  }
 
   it('sends a code and never returns it', async () => {
-    const org = await phoneQueue();
+    const org = await emailQueue();
 
     const res = await start(org.queue.id);
 
     expect(res.status).toBe(201);
     expect(res.body.data.verificationId).toBeDefined();
-    expect(JSON.stringify(res.body)).not.toContain(sms.lastCodeFor(PHONE));
+    expect(JSON.stringify(res.body)).not.toContain(mailbox.lastCodeFor(EMAIL));
+  });
+
+  it('addresses the code to the mailbox that was asked for', async () => {
+    const org = await emailQueue();
+
+    await start(org.queue.id, 'Person@Example.COM');
+
+    // Normalized before sending, so one person cannot hold two identities by
+    // changing the case they type.
+    expect(mailbox.sent.at(-1)!.to).toBe(EMAIL);
+    expect(mailbox.sent.at(-1)!.code).toMatch(/^\d{6}$/);
   });
 
   it('verifies the correct code and issues a usable proof', async () => {
-    const org = await phoneQueue();
+    const org = await emailQueue();
     const started = await start(org.queue.id);
 
-    const res = await confirm(started.body.data.verificationId, sms.lastCodeFor(PHONE));
+    const res = await confirm(started.body.data.verificationId, mailbox.lastCodeFor(EMAIL));
 
     expect(res.status).toBe(200);
     expect(res.body.data.verificationProof).toBeDefined();
@@ -791,138 +883,196 @@ describe('phone verification', () => {
     const joined = await join(
       org.queue.id,
       org.service.id,
-      { formData: {}, phoneVerificationProof: res.body.data.verificationProof },
+      { formData: {}, emailVerificationProof: res.body.data.verificationProof },
       'device-1',
     );
     expect(joined.status).toBe(201);
   });
 
   it('counts a wrong code against the attempt budget', async () => {
-    const org = await phoneQueue();
+    const org = await emailQueue();
     const started = await start(org.queue.id);
 
     const res = await confirm(started.body.data.verificationId, '000000');
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VERIFICATION_CODE_INCORRECT');
-    const stored = await prisma.phoneVerification.findUniqueOrThrow({
+    const stored = await prisma.customerEmailVerification.findUniqueOrThrow({
       where: { id: started.body.data.verificationId },
     });
     expect(stored.failedAttempts).toBe(1);
   });
 
   it('stops accepting codes once the attempt budget is spent', async () => {
-    const org = await phoneQueue();
+    const org = await emailQueue();
     const started = await start(org.queue.id);
-    await prisma.phoneVerification.update({
+    await prisma.customerEmailVerification.update({
       where: { id: started.body.data.verificationId },
       data: { failedAttempts: 99 },
     });
 
-    const res = await confirm(started.body.data.verificationId, sms.lastCodeFor(PHONE));
+    const res = await confirm(started.body.data.verificationId, mailbox.lastCodeFor(EMAIL));
 
     expect(res.status).toBe(429);
     expect(res.body.error.code).toBe('VERIFICATION_ATTEMPTS_EXCEEDED');
   });
 
   it('rejects an expired challenge', async () => {
-    const org = await phoneQueue();
+    const org = await emailQueue();
     const started = await start(org.queue.id);
-    await prisma.phoneVerification.update({
+    await prisma.customerEmailVerification.update({
       where: { id: started.body.data.verificationId },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
 
-    const res = await confirm(started.body.data.verificationId, sms.lastCodeFor(PHONE));
+    const res = await confirm(started.body.data.verificationId, mailbox.lastCodeFor(EMAIL));
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VERIFICATION_INVALID_OR_EXPIRED');
   });
 
   it('enforces a resend cooldown', async () => {
-    const org = await phoneQueue();
+    const org = await emailQueue();
     await start(org.queue.id);
 
     const again = await start(org.queue.id);
 
     expect(again.status).toBe(429);
     expect(again.body.error.code).toBe('VERIFICATION_RESEND_TOO_SOON');
+    // And no second email went out.
+    expect(mailbox.sent).toHaveLength(1);
   });
 
-  it('will not verify a different number than the code was sent to', async () => {
-    const org = await phoneQueue();
+  it('a resend replaces the previous code', async () => {
+    const org = await emailQueue();
+    const started = await start(org.queue.id);
+    const firstCode = mailbox.lastCodeFor(EMAIL);
+    // Moving the send time back is what "a minute later" looks like here.
+    await prisma.customerEmailVerification.update({
+      where: { id: started.body.data.verificationId },
+      data: { lastSentAt: new Date(Date.now() - 5 * 60_000) },
+    });
+
+    const resent = await start(org.queue.id);
+    expect(resent.status).toBe(201);
+    // Same challenge row, so the cooldown and budget cannot be reset by
+    // simply asking again.
+    expect(resent.body.data.verificationId).toBe(started.body.data.verificationId);
+
+    const stale = await confirm(started.body.data.verificationId, firstCode);
+    expect(stale.status).toBe(400);
+    expect(stale.body.error.code).toBe('VERIFICATION_CODE_INCORRECT');
+
+    const fresh = await confirm(started.body.data.verificationId, mailbox.lastCodeFor(EMAIL));
+    expect(fresh.status).toBe(200);
+  });
+
+  it('will not verify a different address than the code was sent to', async () => {
+    const org = await emailQueue();
     const started = await start(org.queue.id);
 
     const res = await confirm(
       started.body.data.verificationId,
-      sms.lastCodeFor(PHONE),
-      '+8801999999999',
+      mailbox.lastCodeFor(EMAIL),
+      'someone.else@example.com',
     );
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('VERIFICATION_PHONE_MISMATCH');
+    expect(res.body.error.code).toBe('VERIFICATION_EMAIL_MISMATCH');
   });
 
   it('will not accept a proof issued for another queue', async () => {
-    const orgA = await phoneQueue();
-    const orgB = await phoneQueue();
-    const started = await start(orgA.queue.id);
-    const confirmed = await confirm(started.body.data.verificationId, sms.lastCodeFor(PHONE));
+    const orgA = await emailQueue();
+    const orgB = await emailQueue();
+    const proof = await verify(orgA.queue.id);
 
     const res = await join(
       orgB.queue.id,
       orgB.service.id,
-      { formData: {}, phoneVerificationProof: confirmed.body.data.verificationProof },
+      { formData: {}, emailVerificationProof: proof },
       'device-1',
     );
 
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('PHONE_VERIFICATION_INVALID');
+    expect(res.body.error.code).toBe('EMAIL_VERIFICATION_INVALID');
   });
 
   it('rejects a tampered proof', async () => {
-    const org = await phoneQueue();
+    const org = await emailQueue();
 
     const res = await join(
       org.queue.id,
       org.service.id,
-      { formData: {}, phoneVerificationProof: 'not.a-real-proof' },
+      { formData: {}, emailVerificationProof: 'not.a-real-proof' },
       'device-1',
     );
 
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('PHONE_VERIFICATION_INVALID');
+    expect(res.body.error.code).toBe('EMAIL_VERIFICATION_INVALID');
   });
 
-  it('requires a proof at all on a phone-identified queue', async () => {
-    const org = await phoneQueue();
+  it('rejects an expired proof', async () => {
+    const org = await emailQueue();
+    const proof = await verify(org.queue.id);
+    // A proof carries its own expiry, so time is what invalidates it.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.now() + 60 * 60_000));
+    try {
+      const res = await join(
+        org.queue.id,
+        org.service.id,
+        { formData: {}, emailVerificationProof: proof },
+        'device-1',
+      );
+      expect(res.status).toBe(401);
+      expect(res.body.error.code).toBe('EMAIL_VERIFICATION_INVALID');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('requires a proof at all on an email-identified queue', async () => {
+    const org = await emailQueue();
 
     const res = await join(org.queue.id, org.service.id, { formData: {} }, 'device-1');
 
     expect(res.status).toBe(422);
-    expect(res.body.error.code).toBe('PHONE_VERIFICATION_REQUIRED');
+    expect(res.body.error.code).toBe('EMAIL_VERIFICATION_REQUIRED');
   });
 
-  it('refuses to send for a queue that does not ask for a phone', async () => {
+  it('refuses to send for a queue that does not ask for an email', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
 
     const res = await start(queue.id);
 
     expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('PHONE_VERIFICATION_NOT_REQUIRED');
+    expect(res.body.error.code).toBe('EMAIL_VERIFICATION_NOT_REQUIRED');
+    expect(mailbox.sent).toHaveLength(0);
   });
 
-  it('recognises the same person across installations by verified phone', async () => {
-    const org = await phoneQueue();
-    const started = await start(org.queue.id);
-    const confirmed = await confirm(started.body.data.verificationId, sms.lastCodeFor(PHONE));
-    const proof = confirmed.body.data.verificationProof;
+  it('reports a provider failure rather than claiming a code was sent', async () => {
+    const org = await emailQueue();
+    mailbox.deliver = false;
+
+    const res = await start(org.queue.id);
+
+    expect(res.status).toBe(502);
+    expect(res.body.error.code).toBe('VERIFICATION_SEND_FAILED');
+    // No usable challenge is left behind for a message nobody received.
+    expect(await prisma.customerEmailVerification.count()).toBe(0);
+    // And nothing about the provider leaks to the customer.
+    expect(JSON.stringify(res.body)).not.toContain('Resend');
+  });
+
+  it('recognises the same person across installations by verified email', async () => {
+    const org = await emailQueue();
+    const proof = await verify(org.queue.id);
 
     const first = await join(
       org.queue.id,
       org.service.id,
-      { formData: {}, phoneVerificationProof: proof },
+      { formData: {}, emailVerificationProof: proof },
       'phone-a',
     );
     expect(first.status).toBe(201);
@@ -930,22 +1080,207 @@ describe('phone verification', () => {
     const second = await join(
       org.queue.id,
       org.service.id,
-      { formData: {}, phoneVerificationProof: proof },
+      { formData: {}, emailVerificationProof: proof },
       'phone-b-different-installation',
     );
     expect(second.status).toBe(409);
     expect(second.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
   });
 
-  it('never writes the phone number into the verification row', async () => {
-    const org = await phoneQueue();
+  it('a reinstall re-verifying the same address still cannot bypass the limit', async () => {
+    const org = await emailQueue();
+    const first = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: {}, emailVerificationProof: await verify(org.queue.id) },
+      'device-1',
+    );
+    expect(first.status).toBe(201);
+    await completeToken({ ...org, queue: org.queue } as never, first.body.data.id, 'device-1');
+
+    // A fresh install, a fresh verification of the very same mailbox.
+    await prisma.customerEmailVerification.deleteMany({});
+    const second = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: {}, emailVerificationProof: await verify(org.queue.id) },
+      'device-2-after-reinstall',
+    );
+
+    expect(second.status).toBe(409);
+    expect(second.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
+  });
+
+  it('treats two different addresses as two different people', async () => {
+    const org = await emailQueue();
+    const first = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: {}, emailVerificationProof: await verify(org.queue.id) },
+      'd1',
+    );
+    expect(first.status).toBe(201);
+
+    const other = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: {}, emailVerificationProof: await verify(org.queue.id, 'someone.else@example.com') },
+      'd2',
+    );
+
+    expect(other.status).toBe(201);
+  });
+
+  it('lets exactly one of two simultaneous joins through', async () => {
+    const org = await emailQueue();
+    const proof = await verify(org.queue.id);
+
+    const results = await Promise.all([
+      join(org.queue.id, org.service.id, { formData: {}, emailVerificationProof: proof }, 'device-a'),
+      join(org.queue.id, org.service.id, { formData: {}, emailVerificationProof: proof }, 'device-b'),
+    ]);
+
+    expect(results.filter((res) => res.status === 201)).toHaveLength(1);
+    expect(results.filter((res) => res.status === 409)).toHaveLength(1);
+    expect(await prisma.token.count({ where: { queueId: org.queue.id } })).toBe(1);
+  });
+
+  it('never writes the address into the verification row', async () => {
+    const org = await emailQueue();
     const started = await start(org.queue.id);
 
-    const row = await prisma.phoneVerification.findUniqueOrThrow({
+    const row = await prisma.customerEmailVerification.findUniqueOrThrow({
       where: { id: started.body.data.verificationId },
     });
-    expect(JSON.stringify(row)).not.toContain('1712345678');
-    expect(JSON.stringify(row)).not.toContain(sms.lastCodeFor(PHONE));
+
+    expect(JSON.stringify(row)).not.toContain('person@example.com');
+    expect(JSON.stringify(row)).not.toContain(mailbox.lastCodeFor(EMAIL));
+    expect(row.emailFingerprint).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('never writes the address into the identity claim', async () => {
+    const org = await emailQueue();
+    await join(
+      org.queue.id,
+      org.service.id,
+      { formData: {}, emailVerificationProof: await verify(org.queue.id) },
+      'd1',
+    );
+
+    const claim = await prisma.queueIdentityClaim.findFirstOrThrow({
+      where: { queueId: org.queue.id },
+    });
+    expect(JSON.stringify(claim)).not.toContain('person@example.com');
+    expect(claim.identityFingerprint).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('email combined with a custom identifier', () => {
+  const EMAIL = 'family@example.com';
+
+  async function compoundQueue() {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const service = await createService(ctx.accessToken, queue.id);
+    await setFormFields(ctx.accessToken, queue.id, [NID_FIELD] as never);
+    const res = await api()
+      .put(`/api/queues/${queue.id}`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({
+        allowRepeatVisits: false,
+        repeatRestrictionType: 'ONCE_EVER',
+        repeatIdentityMode: 'VERIFIED_EMAIL_AND_CUSTOM_FIELD',
+        repeatIdentityFieldKey: 'nid',
+      });
+    if (res.status !== 200) {
+      throw new Error(`policy update failed: ${res.status} ${JSON.stringify(res.body)}`);
+    }
+    return { ...ctx, queue, service };
+  }
+
+  async function verify(queueId: string, email = EMAIL): Promise<string> {
+    const started = await api()
+      .post('/api/public/email-verification/start')
+      .send({ queueId, email });
+    const confirmed = await api()
+      .post('/api/public/email-verification/confirm')
+      .send({
+        verificationId: started.body.data.verificationId,
+        code: mailbox.lastCodeFor(email),
+        email,
+      });
+    return confirmed.body.data.verificationProof as string;
+  }
+
+  it('lets two people share one mailbox when their identifiers differ', async () => {
+    const org = await compoundQueue();
+    const proof = await verify(org.queue.id);
+
+    const parent = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: { nid: 'A-1' }, emailVerificationProof: proof },
+      'shared-phone',
+    );
+    expect(parent.status).toBe(201);
+    await completeToken({ ...org } as never, parent.body.data.id, 'shared-phone');
+
+    // Same household mailbox, a different person's national ID.
+    const child = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: { nid: 'B-2' }, emailVerificationProof: proof },
+      'shared-phone',
+    );
+
+    expect(child.status).toBe(201);
+  });
+
+  it('still blocks the same mailbox and the same identifier', async () => {
+    const org = await compoundQueue();
+    const proof = await verify(org.queue.id);
+    const first = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: { nid: 'A-1' }, emailVerificationProof: proof },
+      'd1',
+    );
+    await completeToken({ ...org } as never, first.body.data.id, 'd1');
+
+    const again = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: { nid: 'A-1' }, emailVerificationProof: proof },
+      'd2',
+    );
+
+    expect(again.status).toBe(409);
+    expect(again.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
+  });
+
+  it('requires both halves, not just the verified email', async () => {
+    const org = await compoundQueue();
+    const proof = await verify(org.queue.id);
+
+    const res = await join(
+      org.queue.id,
+      org.service.id,
+      { formData: { nid: '   ' }, emailVerificationProof: proof },
+      'd1',
+    );
+
+    // The form's own required-field rule catches the blank answer first;
+    // either way the join cannot proceed on the email alone.
+    expect(res.status).toBe(422);
+  });
+
+  it('requires the verified email, not just the identifier', async () => {
+    const org = await compoundQueue();
+
+    const res = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('EMAIL_VERIFICATION_REQUIRED');
   });
 });
 
@@ -966,6 +1301,7 @@ describe('what the app is told before joining', () => {
       identityMode: 'CUSTOM_FIELD',
       identityFieldKey: 'nid',
       requiresVerifiedPhone: false,
+      requiresVerifiedEmail: false,
       configurationRequired: false,
     });
     // Who has already visited is never public.

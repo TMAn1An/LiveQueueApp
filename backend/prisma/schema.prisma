@@ -250,12 +250,13 @@ model Queue {
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
-  services          QueueService[]
-  counters          Counter[]
-  formFields        QueueFormField[]
-  tokens            Token[]
-  identityClaims    QueueIdentityClaim[]
-  PhoneVerification PhoneVerification[]
+  services           QueueService[]
+  counters           Counter[]
+  formFields         QueueFormField[]
+  tokens             Token[]
+  identityClaims     QueueIdentityClaim[]
+  PhoneVerification  PhoneVerification[]
+  emailVerifications CustomerEmailVerification[]
 
   @@index([organizationId])
   @@map("queues")
@@ -629,9 +630,20 @@ enum RepeatRestrictionUnit {
 /// installation identifier is reset by a reinstall, so it can never be the
 /// authority for "this person already came" (ADR-034).
 enum RepeatIdentityMode {
+  /// DEPRECATED by ADR-037. Kept because removing a PostgreSQL enum value is
+  /// destructive and buys nothing: no queue can be configured with either
+  /// phone mode any more, and no SMS provider was ever integrated, so these
+  /// two have never identified a real customer. They stay so that a value
+  /// already written to a development database still parses.
   VERIFIED_PHONE
   CUSTOM_FIELD
   VERIFIED_PHONE_AND_CUSTOM_FIELD
+  /// ADR-037: the customer proves access to an email address before it can
+  /// stand as their identity. Replaces the phone modes, which waited on an
+  /// SMS provider that was never integrated — email delivery already works
+  /// in production for account verification and staff invitations.
+  VERIFIED_EMAIL
+  VERIFIED_EMAIL_AND_CUSTOM_FIELD
 }
 
 enum IdentityClaimStatus {
@@ -736,4 +748,41 @@ model PhoneVerification {
   @@index([queueId, phoneFingerprint])
   @@index([expiresAt])
   @@map("phone_verifications")
+}
+
+/// ADR-037: an email verification challenge, proving a customer can read a
+/// mailbox before that address may stand as their repeat-visit identity.
+///
+/// Deliberately its own model rather than a generalisation of
+/// PhoneVerification: that table is dormant (no SMS provider was ever
+/// integrated) and renaming its columns would be a destructive change to
+/// earn nothing. Deliberately separate from the Staff email-verification
+/// columns too — proving a customer can read a mailbox is a different
+/// question from an owner proving they control an account, with a different
+/// lifetime, a different audience and a different secret purpose.
+model CustomerEmailVerification {
+  id      String @id @default(uuid())
+  queueId String @map("queue_id")
+  queue   Queue  @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  /// Fingerprint of the normalized address, never the address itself: this
+  /// row only ever has to answer "is this the same mailbox as before", and
+  /// the identity system never needs a second copy of a customer's email.
+  emailFingerprint String @map("email_fingerprint")
+  /// HMAC of the code. One-way — nothing ever reads the code back, unlike
+  /// the service-start OTP which the owning customer re-fetches.
+  codeHash         String @map("code_hash")
+
+  expiresAt      DateTime  @map("expires_at")
+  failedAttempts Int       @default(0) @map("failed_attempts")
+  consumedAt     DateTime? @map("consumed_at")
+  /// Drives the resend cooldown without a second table.
+  lastSentAt     DateTime  @default(now()) @map("last_sent_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([queueId, emailFingerprint])
+  @@index([expiresAt])
+  @@map("customer_email_verifications")
 }

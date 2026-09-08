@@ -17,6 +17,7 @@ class QueueIdentityRequirements {
     this.identityMode,
     this.identityFieldKey,
     this.requiresVerifiedPhone = false,
+    this.requiresVerifiedEmail = false,
     this.configurationRequired = false,
   });
 
@@ -45,6 +46,10 @@ class QueueIdentityRequirements {
   /// The customer must verify a phone number by SMS before joining.
   final bool requiresVerifiedPhone;
 
+  /// ADR-037: the customer must prove access to an email address before
+  /// joining. Replaces the phone requirement, which is deferred.
+  final bool requiresVerifiedEmail;
+
   /// A queue restricted before ADR-034 that has not yet been given an
   /// identity method. The backend refuses joins in this state, so the app
   /// says so instead of letting someone fill in a whole form first.
@@ -62,6 +67,7 @@ class QueueIdentityRequirements {
       identityMode: json['identityMode'] as String?,
       identityFieldKey: json['identityFieldKey'] as String?,
       requiresVerifiedPhone: json['requiresVerifiedPhone'] as bool? ?? false,
+      requiresVerifiedEmail: json['requiresVerifiedEmail'] as bool? ?? false,
       configurationRequired: json['configurationRequired'] as bool? ?? false,
     );
   }

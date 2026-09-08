@@ -66,4 +66,48 @@ describe('logger redaction — secrets must never reach log output', () => {
     const line = captureLogLine({ req: { method: 'GET', url: '/health' } });
     expect(line).toContain('"url":"/health"');
   });
+
+  /**
+   * ADR-037: a customer's email address is personal data, the code is a
+   * credential, and the proof is a bearer credential for an identity claim.
+   * All three arrive on the public verification and join routes.
+   */
+  it('redacts a customer email verification request', () => {
+    const line = captureLogLine({
+      req: {
+        method: 'POST',
+        url: '/api/public/email-verification/confirm',
+        body: {
+          verificationId: 'abc',
+          email: 'person@example.com',
+          code: '424242',
+          emailVerificationProof: 'SECRET_EMAIL_PROOF',
+        },
+      },
+    });
+
+    expect(line).not.toContain('person@example.com');
+    expect(line).not.toContain('424242');
+    expect(line).not.toContain('SECRET_EMAIL_PROOF');
+  });
+
+  it('redacts the email proof on the join request too', () => {
+    // The proof rides along on POST /api/tokens as well as the verification
+    // routes. The wildcard entry covers a top-level req.emailVerificationProof;
+    // like the pre-existing '*.token', it matches two-segment paths only, so
+    // req.body is named explicitly rather than relied on by pattern.
+    const line = captureLogLine({
+      req: {
+        method: 'POST',
+        url: '/api/tokens',
+        body: { emailVerificationProof: 'SECRET_EMAIL_PROOF' },
+        // Also covered one level up by the '*.emailVerificationProof'
+        // wildcard, which — like the pre-existing '*.token' — matches
+        // two-segment paths, so this is the reach it actually has.
+        emailVerificationProof: 'SECRET_EMAIL_PROOF',
+      },
+    });
+
+    expect(line).not.toContain('SECRET_EMAIL_PROOF');
+  });
 });

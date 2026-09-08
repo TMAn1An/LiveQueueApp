@@ -22,8 +22,13 @@ const repeatPolicyFields = {
     .regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}$/, 'Enter the date and time as YYYY-MM-DD HH:mm.')
     .nullable()
     .optional(),
+  // ADR-037: the two phone modes are deliberately absent — they are deferred
+  // and no longer configurable. The enum values still exist in the database
+  // so an old development row parses, but nothing new may be written with
+  // them, and queueIdentityPolicy.service.ts refuses them again in case this
+  // list and that rule ever drift apart.
   repeatIdentityMode: z
-    .enum(['VERIFIED_PHONE', 'CUSTOM_FIELD', 'VERIFIED_PHONE_AND_CUSTOM_FIELD'])
+    .enum(['VERIFIED_EMAIL', 'CUSTOM_FIELD', 'VERIFIED_EMAIL_AND_CUSTOM_FIELD'])
     .nullable()
     .optional(),
   repeatIdentityFieldKey: z.string().trim().min(1).max(120).nullable().optional(),

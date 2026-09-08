@@ -40,6 +40,17 @@ const envSchema = z.object({
   /// only has to survive the rest of one join flow.
   PHONE_VERIFICATION_PROOF_TTL_MINUTES: z.coerce.number().int().positive().default(15),
 
+  // ADR-037: customer email verification. Its own knobs rather than sharing
+  // the phone ones — email is deliverable now and phone is deferred, so the
+  // two will be tuned on different evidence. Defaults match the shape the
+  // phone flow settled on, which is what the mobile UI is already built for.
+  EMAIL_VERIFICATION_CODE_TTL_MINUTES: z.coerce.number().int().positive().default(5),
+  EMAIL_VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().positive().default(60),
+  /// How long a confirmed verification stays usable for joining. Short: it
+  /// only has to survive the rest of one join flow.
+  EMAIL_VERIFICATION_PROOF_TTL_MINUTES: z.coerce.number().int().positive().default(15),
+
   CORS_ORIGINS: z.string().default(''),
 
   BCRYPT_SALT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
@@ -102,6 +113,17 @@ const envSchema = z.object({
   // tightest bucket in the app.
   RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_PHONE_VERIFICATION_MAX: z.coerce.number().int().positive().default(10),
+
+  // ADR-037: a start request costs a real email, so this is as tight as the
+  // SMS bucket. Separate from RATE_LIMIT_EMAIL_* (account verification and
+  // staff invitations), which is per-organization staff traffic rather than
+  // anonymous customer traffic and deserves its own budget.
+  RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_WINDOW_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(900_000),
+  RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_MAX: z.coerce.number().int().positive().default(10),
 
   // Pending-registration cleanup (V2 Checkpoint 2). Every 5 minutes is far
   // more granular than the 1-hour deadline it's checking needs — matches

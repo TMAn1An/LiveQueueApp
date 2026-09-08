@@ -1,11 +1,20 @@
 import { Router } from 'express';
 import * as publicController from '../controllers/public.controller';
-import { phoneVerificationRateLimiter, publicRateLimiter } from '../middleware/rateLimit';
+import {
+  customerEmailVerificationRateLimiter,
+  phoneVerificationRateLimiter,
+  publicRateLimiter,
+} from '../middleware/rateLimit';
 import * as phoneVerificationController from '../controllers/phoneVerification.controller';
+import * as customerEmailVerificationController from '../controllers/customerEmailVerification.controller';
 import {
   confirmPhoneVerificationSchema,
   startPhoneVerificationSchema,
 } from '../validators/phoneVerification.validators';
+import {
+  confirmCustomerEmailVerificationSchema,
+  startCustomerEmailVerificationSchema,
+} from '../validators/customerEmailVerification.validators';
 import { validate } from '../middleware/validate';
 import { appVersionPolicySchema, publicQueueConfigSchema } from '../validators/public.validators';
 
@@ -44,6 +53,24 @@ router.post(
   phoneVerificationRateLimiter,
   validate(confirmPhoneVerificationSchema),
   phoneVerificationController.confirm,
+);
+
+/**
+ * ADR-037: customer email verification — public and unauthenticated for the
+ * same reason as every other customer route, with its own limiter because a
+ * start request costs a real email.
+ */
+router.post(
+  '/email-verification/start',
+  customerEmailVerificationRateLimiter,
+  validate(startCustomerEmailVerificationSchema),
+  customerEmailVerificationController.start,
+);
+router.post(
+  '/email-verification/confirm',
+  customerEmailVerificationRateLimiter,
+  validate(confirmCustomerEmailVerificationSchema),
+  customerEmailVerificationController.confirm,
 );
 
 export default router;

@@ -1031,3 +1031,51 @@ Navigation and token lifecycle are now separate concerns:
 Adding a `queueId` to `Counter` or a queue binding to `Staff`: both already exist in effect. Counter has carried `queueId` since the initial schema, and a staff member's queue is a consequence of the counter they hold — a second stored copy would be a synchronization bug waiting to happen. No migration was needed and none was written.
 
 **Verification:** backend 69 files / 696 tests (29 new), typecheck/lint/build clean; dashboard 26 files / 151 tests (10 new), typecheck/lint/build clean; mobile 207 tests (17 new), `flutter analyze` clean apart from the pre-existing style hints, debug APK builds. No production database was accessed and nothing was deployed.
+
+## ADR-037: Verified email replaces the planned phone identity (2026-09-10)
+
+**Status:** Implemented, tested, committed. One additive migration (`20260910090000_add_verified_email_identity`).
+
+### The problem with the plan
+
+ADR-034 built repeat-visit identity around a verified phone number and shipped the whole mechanism — challenge storage, code hashing, proofs, rate limits, a provider interface — behind a `SmsVerificationProvider` whose only implementations were `none` and `log`. That was the honest thing to do at the time: it refused to let a queue demand a code the server could not send. But the consequence was that **the only identity method anyone could actually use in production was a form question**, and a form question is something the customer types, not something they prove.
+
+Meanwhile the product already sends real email in production — account verification since ADR-024, staff invitations since ADR-035. The verified channel that works has been sitting there the whole time.
+
+### Decision
+
+`VERIFIED_EMAIL` and `VERIFIED_EMAIL_AND_CUSTOM_FIELD` join `CUSTOM_FIELD` as the three modes an administrator may choose. SMS is deferred, not abandoned; this ADR does not claim phone verification works and does not pretend it is coming soon.
+
+**The phone enum values stay.** Removing a PostgreSQL enum value means rebuilding the type and every column that references it — a destructive operation, and one that buys nothing here: no SMS provider was ever integrated, so neither phone mode has ever identified a real customer. They remain in the database so a value written during development still parses, and are refused in three independent places: the request validator no longer lists them, `resolveRepeatPolicy` rejects them with `IDENTITY_MODE_UNAVAILABLE`, and `describeJoinRequirements` reports any queue still holding one as `configurationRequired`. That last one matters most — such a queue **refuses joins** until an administrator picks a workable method, exactly as ADR-034 treated queues with no identity method at all. A phone fingerprint is never reinterpreted as an email one.
+
+### Email verification
+
+A six-digit code, generated with `randomInt`, stored only as an HMAC, compared in constant time, expiring in five minutes with a five-attempt budget and a sixty-second resend cooldown — all configurable, all defaulting to the shape the phone flow settled on. A resend reuses the same challenge row, so neither the cooldown nor the attempt budget can be reset by asking again; the previous code stops working the moment a new one is issued.
+
+Confirmation returns a short-lived signed proof carrying `{queueId, emailFingerprint, exp}` — a fingerprint, never the address. The join endpoint trusts that proof and nothing else; a client-asserted `verified: true` has no meaning anywhere in the system. The proof is queue-scoped, so one issued for the pharmacy is refused by registration.
+
+**Three verification flows now exist and none is interchangeable.** The service-start OTP proves to *staff* that the person at the counter is the right customer; ADR-024's account token proves an *owner* controls an address they registered with; this proves to the *server* that whoever is joining can read a particular mailbox. Different lifetimes, budgets, storage — and different HMAC purpose strings, so a value minted for one differs from the others at the first byte.
+
+The model is its own table rather than a generalisation of `PhoneVerification`: that table is dormant, and renaming its columns would be a destructive change earning nothing.
+
+### Email normalization
+
+Deliberately conservative, and the reasoning matters more than the rule. The domain is lower-cased because DNS is case-insensitive and nobody disputes it. The local part is *also* lower-cased — a documented product choice, not a standards one: RFC 5321 permits case-sensitive local parts, but no provider a customer is likely to use treats `Person@` and `person@` as two people, and treating them as two would hand one person two entitlements for pressing shift.
+
+What it deliberately does **not** do is guess provider-specific mailbox equivalence — no dot-stripping, no `+tag` removal. Those rules are true at Gmail and false elsewhere. Applying them universally would merge genuinely different people at any provider where dots are significant, and being wrong in *that* direction denies somebody a service they are entitled to. Being wrong in the other direction merely lets one person hold two entitlements at one provider, which the compound mode exists to address anyway.
+
+### Shared mailboxes, and why the compound mode exists
+
+With `VERIFIED_EMAIL` alone the mailbox **is** the identity: everyone who reads `family@example.com` shares one entitlement. That is a real trade-off, not an oversight, and the dashboard says so where an administrator will read it rather than leaving them to discover it from a support ticket. `VERIFIED_EMAIL_AND_CUSTOM_FIELD` is the answer when it matters — the same mailbox with two different national IDs becomes two distinct compound identities, because the fingerprint covers both values.
+
+### Privacy
+
+The claim row holds a fingerprint and no address. The verification row holds a fingerprint and no address. The logger redacts `req.body.email`, the code, and both proof fields, alongside `formData`. Nothing about a customer's identity reaches Socket.io, FCM or audit metadata. The email itself is sent to the mailbox and then forgotten; the only place a raw address persists is the queue's own form data, if and only if the queue asked for it as a question — which is unchanged, staff-visible behaviour.
+
+### Clients
+
+The dashboard offers exactly the three workable modes with one sentence of help each, and shows a phone-configured queue a specific remediation rather than a generic warning. The mobile app's phone verification flow was **converted** rather than duplicated: with no queue able to require a phone, keeping that path would have meant shipping code nobody could reach beside an identical email one. The files were renamed in git so the history follows.
+
+**A defect the new tests found:** the resend countdown only rebuilt while seconds remained, so the tick that reached zero never repainted — the Resend button stayed disabled, reading "Resend in 1s", for as long as the screen stayed open. It now rebuilds while a cooldown exists at all.
+
+**Verification:** backend 69 files / 716 tests, typecheck/lint/build clean; dashboard 26 files / 160 tests, typecheck/lint/build clean; mobile 210 tests, `flutter analyze` clean apart from the pre-existing style hints, debug APK builds. Migration reviewed as SQL before applying — two `ALTER TYPE ... ADD VALUE`, one `CREATE TABLE`, two indexes, one foreign key; no `DROP`, `DELETE` or `TRUNCATE`. No production database was accessed and nothing was deployed.

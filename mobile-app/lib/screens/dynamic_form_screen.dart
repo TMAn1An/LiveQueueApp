@@ -5,7 +5,7 @@ import '../providers/queue_join_provider.dart';
 import '../widgets/dynamic_form_field_widget.dart';
 import '../widgets/dual_time_row.dart';
 import '../widgets/error_banner.dart';
-import '../widgets/phone_verification_section.dart';
+import '../widgets/email_verification_section.dart';
 import 'token_confirmation_screen.dart';
 
 class DynamicFormScreen extends StatelessWidget {
@@ -35,13 +35,13 @@ class DynamicFormScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (provider.requiresPhoneVerification) ...[
-              const PhoneVerificationSection(),
+            if (provider.requiresEmailVerification) ...[
+              const EmailVerificationSection(),
               const SizedBox(height: 20),
               const Divider(),
               const SizedBox(height: 8),
             ],
-            if (fields.isEmpty && !provider.requiresPhoneVerification)
+            if (fields.isEmpty && !provider.requiresEmailVerification)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
                 child: Text('No additional information is needed for this service.'),
