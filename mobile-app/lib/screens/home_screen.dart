@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/active_token_provider.dart';
 import '../providers/queue_join_provider.dart';
 import '../widgets/app_drawer.dart';
+import '../widgets/dev_backend_banner.dart';
 import 'active_token_screen.dart';
 import '../theme/app_colors.dart';
 import 'qr_scanner_screen.dart';
@@ -32,6 +33,10 @@ class HomeScreen extends StatelessWidget {
             const Text('LiveQueue'),
           ],
         ),
+        // A strip under the app bar, above everything else on the first
+        // screen — because it explains every other thing that is about to
+        // fail. Occupies no height at all in a configured build.
+        bottom: const DevBackendBanner(),
       ),
       body: Center(
         child: Padding(

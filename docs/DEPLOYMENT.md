@@ -573,6 +573,46 @@ cached *blocking* policy still blocks.
 
 ---
 
+## 11a. Building the mobile app (`API_BASE_URL` is mandatory)
+
+**Every mobile build for a real device must pass `API_BASE_URL`.** There is no
+default that works on a phone:
+
+```bash
+flutter build apk --release \
+  --dart-define=API_BASE_URL=https://<your-backend-host>
+```
+
+`AppConfig.apiBaseUrl` falls back to `http://10.0.2.2:4000`, the Android
+emulator's alias for the host machine's localhost, so that a plain
+`flutter run` works against a local backend with no arguments. That address is
+**unroutable from a physical device**. A build that omits the define and is
+then installed on a phone reaches nothing at all.
+
+Nothing crashes when this happens, which is what makes it expensive: every
+request simply spends its whole timeout and fails. What that looks like from
+the outside is two unrelated-seeming faults —
+
+| Symptom | What is actually happening |
+| --- | --- |
+| "The QR scanner is broken" | The camera and the decode are fine. The queue lookup that follows the scan spends the 12s request timeout and fails, so the scan appears to do nothing. |
+| "The app is very slow to start" | The startup version-policy gate spends its full 6s budget before falling back to the cached policy, and Home cannot appear until it does. Device and FCM registration then spend 12s each behind it. |
+
+Measured on a Pixel 8 against a warm backend, an unconfigured build reached
+Home in ~7.2s and finished startup in 30.4s; the same build with the define
+reached Home in ~1.9s and finished in 1.9s. The app-side startup path was
+identical in both — the entire difference was where the requests were going.
+
+Two things now make this self-announcing rather than something to rediscover:
+the first screen carries a **"Development build"** banner whenever the app is
+pointed at the emulator alias, and any request that fails to reach the backend
+in that state says so by name instead of blaming the customer's connection.
+
+`flutter test` runs unconfigured by design, so the guard is covered by
+`test/utils/app_config_test.dart`.
+
+---
+
 ## 12. Instance count / horizontal scaling
 
 **Run a single backend instance unless Socket.io is reworked first.**

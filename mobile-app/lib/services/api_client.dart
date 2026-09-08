@@ -23,6 +23,25 @@ const _requestTimeout = Duration(seconds: 12);
 /// for the full general timeout.
 const startupRequestTimeout = Duration(seconds: 6);
 
+/// A request failed without reaching the backend. When the app is pointed at
+/// the local-dev default this is almost always the reason rather than the
+/// customer's connection, and saying so turns a confusing "check your
+/// connection" into a one-line diagnosis — see [AppConfig.usesLocalDevBackend].
+String _unreachableMessage(String ordinaryCause) {
+  if (AppConfig.usesLocalDevBackend) {
+    return 'This build is pointed at the local development backend '
+        '(${AppConfig.localDevBaseUrl}), which only exists on an emulator. '
+        'Rebuild with --dart-define=API_BASE_URL=<your backend> to use it on '
+        'this device.';
+  }
+  return ordinaryCause;
+}
+
+const _noConnection =
+    'No network connection. Please check your connection and try again.';
+const _timedOut =
+    'The request timed out. Please check your connection and try again.';
+
 /// Thin wrapper over `http` that understands the backend's response
 /// envelope (`{ success, data }` / `{ success: false, error: { code,
 /// message } }`, unchanged since Phase 1) and turns any non-2xx response
@@ -31,8 +50,8 @@ const startupRequestTimeout = Duration(seconds: 6);
 /// UI widgets and out of raw API wrappers).
 class ApiClient {
   ApiClient({http.Client? httpClient, String? baseUrl})
-      : _httpClient = httpClient ?? http.Client(),
-        _baseUrl = baseUrl ?? AppConfig.apiBaseUrl;
+    : _httpClient = httpClient ?? http.Client(),
+      _baseUrl = baseUrl ?? AppConfig.apiBaseUrl;
 
   final http.Client _httpClient;
   final String _baseUrl;
@@ -54,7 +73,9 @@ class ApiClient {
     throw ApiException(
       statusCode: response.statusCode,
       code: (error?['code'] as String?) ?? 'UNKNOWN_ERROR',
-      message: (error?['message'] as String?) ?? 'Something went wrong. Please try again.',
+      message:
+          (error?['message'] as String?) ??
+          'Something went wrong. Please try again.',
       details: (error?['details'] as Map<String, dynamic>?) ?? const {},
     );
   }
@@ -66,9 +87,9 @@ class ApiClient {
           .timeout(timeout ?? _requestTimeout);
       return _handle(response);
     } on SocketException {
-      throw const NetworkException('No network connection. Please check your connection and try again.');
+      throw NetworkException(_unreachableMessage(_noConnection));
     } on TimeoutException {
-      throw const NetworkException('The request timed out. Please check your connection and try again.');
+      throw NetworkException(_unreachableMessage(_timedOut));
     }
   }
 
@@ -81,15 +102,19 @@ class ApiClient {
       final response = await _httpClient
           .post(
             _uri(path),
-            headers: {'Content-Type': 'application/json', 'Accept': 'application/json', ...?headers},
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              ...?headers,
+            },
             body: jsonEncode(body ?? const {}),
           )
           .timeout(_requestTimeout);
       return _handle(response);
     } on SocketException {
-      throw const NetworkException('No network connection. Please check your connection and try again.');
+      throw NetworkException(_unreachableMessage(_noConnection));
     } on TimeoutException {
-      throw const NetworkException('The request timed out. Please check your connection and try again.');
+      throw NetworkException(_unreachableMessage(_timedOut));
     }
   }
 
