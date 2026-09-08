@@ -3,6 +3,12 @@ import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { hashPassword } from '../utils/password';
+import {
+  dispatchInvitation,
+  generateInvitationToken,
+  resendInvitation,
+  unusablePasswordHash,
+} from './staffInvitation.service';
 import { getEffectivePermissions } from '../constants/permissions';
 import type { createStaffSchema, updateStaffSchema } from '../validators/staff.validators';
 
@@ -45,6 +51,11 @@ function serializeStaff(staff: Staff) {
     role: staff.role,
     permissions: getEffectivePermissions(staff.role),
     status: staff.status,
+    /// ADR-035: true while this person still has an unaccepted invitation,
+    /// which is what the dashboard's Resend action keys off. Never exposes
+    /// the token itself.
+    invitationPending: staff.status === 'PENDING_EMAIL_VERIFICATION' && staff.invitationSentAt !== null,
+    invitationSentAt: staff.invitationSentAt,
     lastLoginAt: staff.lastLoginAt,
     createdAt: staff.createdAt,
     updatedAt: staff.updatedAt,
@@ -118,28 +129,59 @@ export async function getStaff(organizationId: string, staffId: string) {
   return serializeStaff(staff);
 }
 
+/**
+ * ADR-035: creating a staff member now invites them rather than handing an
+ * admin a password to pass along. The account exists immediately but cannot
+ * be signed into until the invitee follows the emailed link and chooses their
+ * own password, so no credential is ever known by two people.
+ *
+ * The email is sent after the row is committed and never rolls it back: a
+ * provider outage must not lose an account an admin just created. The result
+ * says whether delivery worked so the dashboard can offer Resend instead of
+ * pretending it arrived.
+ */
 export async function createStaff(organizationId: string, input: CreateStaffInput) {
   const existing = await prisma.staff.findUnique({ where: { email: input.email } });
   if (existing) {
     throw new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'This email is already registered.');
   }
 
-  const passwordHash = await hashPassword(input.password);
+  const organization = await prisma.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: { name: true },
+  });
+  const token = generateInvitationToken();
+
   const staff = await prisma.staff.create({
     data: {
       organizationId,
       name: input.name,
       email: input.email,
-      passwordHash,
+      passwordHash: await unusablePasswordHash(),
       role: input.role,
       // Role-derived, not client-suppliable (frozen RBAC policy) — kept in
       // sync on the stored row purely for observability; no code path reads
       // this column back as authoritative (see getEffectivePermissions).
       permissions: getEffectivePermissions(input.role),
+      // Blocks sign-in until the invitation is accepted, reusing the status
+      // every gate already understands.
+      status: 'PENDING_EMAIL_VERIFICATION',
+      invitationTokenHash: token.hash,
+      invitationExpiresAt: token.expiresAt,
+      invitationSentAt: new Date(),
     },
   });
 
-  return serializeStaff(staff);
+  const emailSent = await dispatchInvitation({
+    id: staff.id,
+    email: staff.email,
+    name: staff.name,
+    role: staff.role,
+    organizationName: organization.name,
+    rawToken: token.raw,
+  });
+
+  return { ...serializeStaff(staff), invitationEmailSent: emailSent };
 }
 
 export async function updateStaff(organizationId: string, staffId: string, input: UpdateStaffInput) {
@@ -160,6 +202,26 @@ export async function updateStaff(organizationId: string, staffId: string, input
   // "no stale permissions may survive a role change").
   const effectiveRole = input.role ?? existing.role;
 
+  /**
+   * ADR-035 escape hatch: an administrator setting a password on someone who
+   * was invited but has not accepted activates them, and cancels the pending
+   * invitation.
+   *
+   * Without this, a broken mailbox would strand a colleague permanently —
+   * invited, unable to sign in, and with no route to access but resending an
+   * email that never arrives. It is a deliberate, explicit admin action, not
+   * the default path, and it reverts to the pre-invitation trade-off (the
+   * admin knows the password) only for the person they choose.
+   *
+   * Scoped to *invited* accounts by requiring invitationSentAt: a pending
+   * OWNER is mid-email-verification (ADR-024) and must never be activated by
+   * a password write, which would skip proving they own the address.
+   */
+  const activatesInvitee =
+    Boolean(passwordHash) &&
+    existing.status === 'PENDING_EMAIL_VERIFICATION' &&
+    existing.invitationSentAt !== null;
+
   const staff = await prisma.staff.update({
     where: { id: staffId },
     data: {
@@ -167,8 +229,9 @@ export async function updateStaff(organizationId: string, staffId: string, input
       email: input.email,
       role: input.role,
       permissions: getEffectivePermissions(effectiveRole),
-      status: input.status,
+      status: input.status ?? (activatesInvitee ? 'ACTIVE' : undefined),
       ...(passwordHash ? { passwordHash } : {}),
+      ...(activatesInvitee ? { invitationTokenHash: null, invitationExpiresAt: null } : {}),
     },
   });
 
@@ -182,4 +245,10 @@ export async function deleteStaff(organizationId: string, staffId: string) {
     throw new AppError(403, 'CANNOT_DELETE_OWNER', 'The organization owner cannot be deleted.');
   }
   await prisma.staff.delete({ where: { id: staffId } });
+}
+
+/** ADR-035 — thin pass-through so the controller keeps talking to one
+ * service, while the invitation mechanics live with the rest of their kind. */
+export function resendStaffInvitation(organizationId: string, staffId: string) {
+  return resendInvitation(organizationId, staffId);
 }

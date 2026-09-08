@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import * as authApi from '../api/auth.api';
 import { registerAuthHandlers } from '../api/client';
+import { browserTimezone } from '../utils/timezone';
 import type { Organization, Permission, Staff } from '../types/auth';
 
 const REFRESH_TOKEN_STORAGE_KEY = 'livequeue_refresh_token';
@@ -117,7 +118,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function register(organizationName: string, email: string, password: string) {
-    const { data } = await authApi.register({ organizationName, email, password });
+    // ADR-035: the browser's zone becomes the organization's starting
+    // timezone, so queues have a clock without anyone choosing one.
+    const { data } = await authApi.register({
+      organizationName,
+      email,
+      password,
+      timezone: browserTimezone(),
+    });
     applyAuthResult(data);
   }
 

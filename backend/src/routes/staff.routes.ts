@@ -34,6 +34,16 @@ router.put(
   validate(updateStaffSchema),
   staffController.update,
 );
+// ADR-035: re-send an invitation that never arrived. Same permission and
+// limiter as any other staff mutation, plus its own cooldown in the service.
+router.post(
+  '/:staffId/resend-invitation',
+  sensitiveRateLimiter,
+  authenticate,
+  requirePermission('manage_staff'),
+  validate(staffIdOnlySchema),
+  staffController.resendInvitation,
+);
 router.delete(
   '/:staffId',
   sensitiveRateLimiter,

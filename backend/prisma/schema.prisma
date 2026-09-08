@@ -83,6 +83,13 @@ model Organization {
   id        String             @id @default(uuid())
   name      String
   status    OrganizationStatus @default(ACTIVE)
+  /// ADR-035: the IANA zone this organization operates in, and the default
+  /// every one of its queues inherits. Initialized from the browser of the
+  /// person setting the organization up — that is the admin's computer, not
+  /// a surveyed location, so it is a starting suggestion they can correct in
+  /// settings, never something presented as authoritative. Nullable because
+  /// every organization that predates this had no such value.
+  timezone  String?
   createdAt DateTime           @default(now()) @map("created_at")
   updatedAt DateTime           @updatedAt @map("updated_at")
 
@@ -121,6 +128,19 @@ model Staff {
   /// extended by a resend — the cleanup scheduler deletes the organization
   /// (cascading to this row) once this passes while still unverified.
   registrationExpiresAt      DateTime? @map("registration_expires_at")
+
+  /// ADR-035 staff invitations. A deliberately separate slot from the three
+  /// registration columns above, even though the token shape is identical:
+  /// both flows leave an account PENDING_EMAIL_VERIFICATION, so sharing one
+  /// slot would let an invitation link be redeemed at the registration
+  /// endpoint — activating an account whose password nobody has ever set and
+  /// burning the invitation in the process. Only the hash is stored.
+  invitationTokenHash String?   @map("invitation_token_hash")
+  invitationExpiresAt DateTime? @map("invitation_expires_at")
+  /// When the most recent invitation was sent, which is what the resend
+  /// cooldown is measured from. Null for an account that was never invited
+  /// (every owner, and every staff member created before ADR-035).
+  invitationSentAt    DateTime? @map("invitation_sent_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -191,19 +211,39 @@ model Queue {
   /// been configured yet — such a queue refuses new joins rather than
   /// falling back to the old installation-based rule, which a reinstall
   /// could bypass (see ADR-034).
+  /// DEPRECATED by ADR-035, retained rather than dropped so the original
+  /// choice stays readable after the migration rewrote it into the columns
+  /// below. Nothing reads it any more; nothing writes it any more.
   repeatRestrictionPeriod RepeatRestrictionPeriod? @map("repeat_restriction_period")
+
+  /// ADR-035: how the restriction is expressed. Null on a restricted queue
+  /// means the policy has not been configured yet, exactly as before.
+  ///  - ONCE_EVER      — one visit, permanently.
+  ///  - DURATION       — a wait measured from the completed visit.
+  ///  - UNTIL_DATETIME — a fixed cutoff instant shared by everyone.
+  repeatRestrictionType   RepeatRestrictionType? @map("repeat_restriction_type")
+  /// DURATION only. Together these mean "may return after 1 month" etc.
+  repeatRestrictionAmount Int?                   @map("repeat_restriction_amount")
+  repeatRestrictionUnit   RepeatRestrictionUnit? @map("repeat_restriction_unit")
+  /// UNTIL_DATETIME only. Stored as an absolute instant, converted from the
+  /// queue-local date and time the admin entered — so it does not drift if
+  /// the queue's timezone is later corrected.
+  repeatRestrictionUntil  DateTime?              @map("repeat_restriction_until")
   /// Which persistent detail identifies the customer for that restriction.
   /// Deliberately has no device/installation option: an app reinstall must
   /// never reset a repeat restriction.
-  repeatIdentityMode      RepeatIdentityMode?      @map("repeat_identity_mode")
+  repeatIdentityMode      RepeatIdentityMode?    @map("repeat_identity_mode")
   /// The `key` of the QueueFormField used as the custom identity, when the
   /// mode includes CUSTOM_FIELD. Stored as the key rather than a row id so
   /// it survives the form-version rewrite that editing the form performs.
-  repeatIdentityFieldKey  String?                  @map("repeat_identity_field_key")
-  /// IANA zone deciding when a day/week/month rolls over for this queue's
-  /// restriction. Required for DAILY/WEEKLY/MONTHLY and unused by
-  /// ONCE_EVER. Deliberately has no default: the server must never guess a
-  /// business's local midnight (see ADR-034).
+  repeatIdentityFieldKey  String?                @map("repeat_identity_field_key")
+  /// IANA zone for this queue. ADR-035: no longer chosen from a dropdown in
+  /// the repeat-visit settings — it is initialized automatically and lives
+  /// under the queue's own settings as an override of the organization's
+  /// zone, which is what most queues use. Null means "inherit the
+  /// organization's". Still stored rather than derived per request: a
+  /// restriction has to mean the same thing on every call, and it must never
+  /// depend on where the customer happens to be standing.
   timezone                String?
 
   createdAt DateTime  @default(now()) @map("created_at")
@@ -549,13 +589,39 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-/// How often one customer may use a restricted queue. ONCE_EVER needs no
-/// timezone; the others roll over at midnight in the queue's own zone.
+/// DEPRECATED by ADR-035 — the four fixed windows a restricted queue used to
+/// choose between. Retained only because Queue.repeatRestrictionPeriod keeps
+/// its historical value.
 enum RepeatRestrictionPeriod {
   ONCE_EVER
   DAILY
   WEEKLY
   MONTHLY
+}
+
+/// ADR-035: how a queue expresses its repeat limit.
+enum RepeatRestrictionType {
+  /// One visit, permanently. Needs no timezone and no arithmetic.
+  ONCE_EVER
+  /// A wait measured from the moment the visit was delivered, so every
+  /// customer gets the same wait regardless of when they happened to arrive.
+  DURATION
+  /// A single cutoff instant shared by everyone — "nobody may rejoin before
+  /// 31 December, 11:59 PM".
+  UNTIL_DATETIME
+}
+
+/// The unit of a DURATION restriction. MINUTE through WEEK are exact elapsed
+/// time and need no timezone. MONTH and YEAR are calendar increments — one
+/// month after 31 January is 28 February, not "30 days later" — so they are
+/// evaluated in the queue's own zone.
+enum RepeatRestrictionUnit {
+  MINUTE
+  HOUR
+  DAY
+  WEEK
+  MONTH
+  YEAR
 }
 
 /// Which persistent detail identifies the customer for a repeat restriction.
@@ -598,13 +664,33 @@ model QueueIdentityClaim {
   /// HMAC-SHA256 over the queue id, identity mode and normalized identity
   /// material. Queue-scoped by construction, so a fingerprint is meaningless
   /// in any other queue and a policy change naturally starts a new namespace.
-  identityFingerprint String @map("identity_fingerprint")
-  /// The restriction window this claim occupies: `EVER`, `2026-09-08`,
-  /// `2026-W37` or `2026-09`, computed in the queue's own timezone.
-  periodKey           String @map("period_key")
+  identityFingerprint String  @map("identity_fingerprint")
+  /// LEGACY (ADR-034): the fixed window this claim occupied — `EVER`,
+  /// `2026-09-08`, `2026-W37` or `2026-09`. ADR-035 replaced fixed windows
+  /// with an explicit `eligibleAgainAt`, which the migration computed from
+  /// exactly these values. Kept, and now nullable, so the original window
+  /// stays readable; nothing is written here any more.
+  periodKey           String? @map("period_key")
 
   status IdentityClaimStatus @default(RESERVED)
   mode   RepeatIdentityMode
+
+  /// When the visit was actually delivered. Null while merely RESERVED.
+  consumedAt      DateTime? @map("consumed_at")
+  /// When this customer may use the queue again. Null together with a
+  /// non-null consumedAt means never — a once-ever queue. Meaningless while
+  /// RESERVED, because an active token blocks regardless.
+  eligibleAgainAt DateTime? @map("eligible_again_at")
+
+  /// ADR-035: exactly one claim per (queue, identity) governs eligibility at
+  /// a time; older ones are kept for history rather than deleted. Rather
+  /// than a partial unique index — which Prisma cannot express, and which
+  /// would therefore read as schema drift forever — the live row holds the
+  /// literal slot value ACTIVE while a superseded row takes its own id.
+  /// Ids are unique, so history can grow without ever colliding, and the
+  /// unique index below still admits only one governing claim.
+  claimSlot    String    @default("ACTIVE") @map("claim_slot")
+  supersededAt DateTime? @map("superseded_at")
 
   /// The token holding this claim. Unique so a token can never hold two.
   tokenId String @unique @map("token_id")
@@ -613,8 +699,9 @@ model QueueIdentityClaim {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@unique([queueId, identityFingerprint, periodKey])
+  @@unique([queueId, identityFingerprint, claimSlot])
   @@index([queueId, status])
+  @@index([queueId, identityFingerprint])
   @@map("queue_identity_claims")
 }
 

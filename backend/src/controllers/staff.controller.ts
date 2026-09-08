@@ -55,3 +55,26 @@ export async function remove(req: Request, res: Response) {
   await staffService.deleteStaff(req.auth!.organizationId, req.params.staffId as string);
   res.status(204).send();
 }
+
+/**
+ * ADR-035: re-issues an invitation for someone who has not set up their
+ * account yet. Rate-limited at the route and cooled down in the service, so
+ * an impatient click cannot turn into a stream of provider requests.
+ */
+export async function resendInvitation(req: Request, res: Response) {
+  const result = await staffService.resendStaffInvitation(
+    req.auth!.organizationId,
+    req.params.staffId as string,
+  );
+  res.status(200).json({ success: true, data: result });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'staff_updated',
+    entityType: 'staff',
+    entityId: req.params.staffId as string,
+    // Whether it actually reached the provider is the operationally useful
+    // fact; the token and the link never appear anywhere.
+    metadata: { invitationResent: true, emailSent: result.emailSent },
+    ipAddress: req.ip,
+  });
+}

@@ -1,6 +1,7 @@
 import type { Organization, Staff } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
+import { isValidTimezone } from '../utils/customerIdentity';
 import { hashPassword, verifyPassword } from '../utils/password';
 import { signAccessToken } from '../utils/tokens';
 import {
@@ -21,6 +22,10 @@ interface RegisterInput {
   organizationName: string;
   email: string;
   password: string;
+  /** ADR-035 — the browser's IANA zone, which becomes the organization's
+   * starting timezone. Optional: an older dashboard does not send one, and
+   * the organization simply has none until someone sets it in settings. */
+  timezone?: string;
 }
 
 interface LoginInput {
@@ -91,7 +96,12 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
 
   const { staff, organization } = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({
-      data: { name: input.organizationName },
+      data: {
+        name: input.organizationName,
+        // Only kept when the runtime actually recognizes the zone; anything
+        // else is dropped rather than left to break date arithmetic later.
+        timezone: input.timezone && isValidTimezone(input.timezone) ? input.timezone : null,
+      },
     });
 
     const staff = await tx.staff.create({

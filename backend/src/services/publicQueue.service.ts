@@ -1,6 +1,6 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
-import { describeJoinRequirements } from './queueIdentityPolicy.service';
+import { describeJoinRequirements, resolveQueueTimezone } from './queueIdentityPolicy.service';
 
 /**
  * Public, unauthenticated endpoint consumed by the mobile app before token
@@ -9,7 +9,10 @@ import { describeJoinRequirements } from './queueIdentityPolicy.service';
  * versions, no token sequence state.
  */
 export async function getPublicQueueConfig(queueId: string) {
-  const queue = await prisma.queue.findUnique({ where: { id: queueId } });
+  const queue = await prisma.queue.findUnique({
+    where: { id: queueId },
+    include: { organization: { select: { timezone: true } } },
+  });
   if (!queue || queue.deletedAt) {
     throw new AppError(404, 'QUEUE_NOT_FOUND', 'Queue not found.');
   }
@@ -45,6 +48,11 @@ export async function getPublicQueueConfig(queueId: string) {
     // customer. This exposes only the shape of the requirement, never any
     // customer's identity or whether a given person has already visited.
     identity: describeJoinRequirements(queue),
+    // ADR-035: the app shows a queue's own times alongside the customer's,
+    // which needs the queue's zone — a fact about the queue, not about the
+    // phone reading it. Null means the organization never set one, and the
+    // app simply shows local times only.
+    timezone: resolveQueueTimezone(queue, queue.organization),
     services: services.map((service) => ({
       id: service.id,
       serviceName: service.serviceName,

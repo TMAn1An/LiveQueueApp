@@ -13,7 +13,7 @@ import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 import { setSmsProviderForTesting, type SmsVerificationProvider } from '../src/services/sms.service';
 import {
-  computePeriodKey,
+  computeEligibleAgainAt,
   normalizeCustomIdentity,
   normalizePhone,
 } from '../src/utils/customerIdentity';
@@ -60,8 +60,10 @@ const NID_FIELD = { key: 'nid', label: 'NID Number', type: 'text', required: tru
 async function setupQueue(
   policy: Record<string, unknown> = {},
   fields: Record<string, unknown>[] = [NID_FIELD],
+  /** Only the calendar-based windows need one; the rest work without. */
+  timezone?: string,
 ) {
-  const ctx = await registerOwner();
+  const ctx = await registerOwner(timezone ? { timezone } : {});
   const queue = await createQueue(ctx.accessToken);
   const service = await createService(ctx.accessToken, queue.id);
   if (fields.length > 0) {
@@ -79,13 +81,21 @@ async function setupQueue(
   return { ...ctx, queue, service };
 }
 
-const restrictByNid = (period = 'ONCE_EVER', timezone?: string) => ({
+const restrictByNid = (overrides: Record<string, unknown> = {}) => ({
   allowRepeatVisits: false,
-  repeatRestrictionPeriod: period,
+  repeatRestrictionType: 'ONCE_EVER',
   repeatIdentityMode: 'CUSTOM_FIELD',
   repeatIdentityFieldKey: 'nid',
-  ...(timezone ? { timezone } : {}),
+  ...overrides,
 });
+
+/** "Allow again after n units" — the everyday configuration. */
+const restrictForDuration = (amount: number, unit: string) =>
+  restrictByNid({
+    repeatRestrictionType: 'DURATION',
+    repeatRestrictionAmount: amount,
+    repeatRestrictionUnit: unit,
+  });
 
 function join(
   queueId: string,
@@ -149,27 +159,83 @@ describe('normalization', () => {
   });
 });
 
-describe('restriction periods', () => {
+describe('when a customer becomes eligible again', () => {
   const dhaka = 'Asia/Dhaka';
+  const served = new Date('2026-09-08T10:00:00Z');
 
-  it('once-ever needs no timezone and never changes', () => {
-    expect(computePeriodKey('ONCE_EVER', null, new Date('2026-01-01T00:00:00Z'))).toBe('EVER');
-    expect(computePeriodKey('ONCE_EVER', null, new Date('2027-06-15T00:00:00Z'))).toBe('EVER');
+  it('never, for a once-ever queue — and it needs no timezone', () => {
+    expect(computeEligibleAgainAt({ type: 'ONCE_EVER' }, served, null)).toBeNull();
   });
 
-  it('rolls the day over at local midnight, not UTC midnight', () => {
-    // 19:00 UTC is already the next day in Dhaka (UTC+6).
-    expect(computePeriodKey('DAILY', dhaka, new Date('2026-09-08T19:00:00Z'))).toBe('2026-09-09');
-    expect(computePeriodKey('DAILY', dhaka, new Date('2026-09-08T17:00:00Z'))).toBe('2026-09-08');
+  it('counts minutes, hours, days and weeks as plain elapsed time', () => {
+    const after = (amount: number, unit: 'MINUTE' | 'HOUR' | 'DAY' | 'WEEK') =>
+      computeEligibleAgainAt({ type: 'DURATION', amount, unit }, served, null)!.toISOString();
+
+    expect(after(90, 'MINUTE')).toBe('2026-09-08T11:30:00.000Z');
+    expect(after(12, 'HOUR')).toBe('2026-09-08T22:00:00.000Z');
+    expect(after(30, 'DAY')).toBe('2026-10-08T10:00:00.000Z');
+    expect(after(2, 'WEEK')).toBe('2026-09-22T10:00:00.000Z');
   });
 
-  it('groups a month and a week by the queue timezone', () => {
-    expect(computePeriodKey('MONTHLY', dhaka, new Date('2026-09-08T12:00:00Z'))).toBe('2026-09');
-    expect(computePeriodKey('MONTHLY', dhaka, new Date('2026-10-01T12:00:00Z'))).toBe('2026-10');
-    // Monday and Sunday of one ISO week share a key; the next Monday differs.
-    const monday = computePeriodKey('WEEKLY', dhaka, new Date('2026-09-07T12:00:00Z'));
-    expect(computePeriodKey('WEEKLY', dhaka, new Date('2026-09-13T12:00:00Z'))).toBe(monday);
-    expect(computePeriodKey('WEEKLY', dhaka, new Date('2026-09-14T12:00:00Z'))).not.toBe(monday);
+  it('advances a month by the calendar, not by thirty days', () => {
+    const oneMonth = computeEligibleAgainAt(
+      { type: 'DURATION', amount: 1, unit: 'MONTH' },
+      served,
+      dhaka,
+    )!;
+    // Served 8 September; back on 8 October, same time of day.
+    expect(oneMonth.toISOString()).toBe('2026-10-08T10:00:00.000Z');
+    // Thirty days would have been 8 October too here, so prove the difference
+    // where the two genuinely diverge: February is short.
+    const fromJanuary = computeEligibleAgainAt(
+      { type: 'DURATION', amount: 1, unit: 'MONTH' },
+      new Date('2026-01-31T10:00:00Z'),
+      dhaka,
+    )!;
+    expect(fromJanuary.toISOString()).toBe('2026-02-28T10:00:00.000Z');
+  });
+
+  it('advances a year by the calendar', () => {
+    const oneYear = computeEligibleAgainAt(
+      { type: 'DURATION', amount: 1, unit: 'YEAR' },
+      served,
+      dhaka,
+    )!;
+    expect(oneYear.toISOString()).toBe('2027-09-08T10:00:00.000Z');
+    // A leap day cannot roll into 1 March.
+    const fromLeapDay = computeEligibleAgainAt(
+      { type: 'DURATION', amount: 1, unit: 'YEAR' },
+      new Date('2028-02-29T10:00:00Z'),
+      dhaka,
+    )!;
+    expect(fromLeapDay.toISOString()).toBe('2029-02-28T10:00:00.000Z');
+  });
+
+  it('uses the queue timezone, so the wait is measured on the queue’s clock', () => {
+    // Mid-October to mid-November: New York leaves daylight saving in
+    // between and Dhaka does not, so keeping the same *local* time of day
+    // lands the two zones on genuinely different instants. That divergence is
+    // the whole reason a calendar window needs a zone at all.
+    const served = new Date('2026-10-15T20:00:00Z');
+    const inDhaka = computeEligibleAgainAt(
+      { type: 'DURATION', amount: 1, unit: 'MONTH' },
+      served,
+      dhaka,
+    )!;
+    const inNewYork = computeEligibleAgainAt(
+      { type: 'DURATION', amount: 1, unit: 'MONTH' },
+      served,
+      'America/New_York',
+    )!;
+
+    expect(inDhaka.toISOString()).toBe('2026-11-15T20:00:00.000Z');
+    // Still 16:00 in New York, but that is now 21:00 UTC rather than 20:00.
+    expect(inNewYork.toISOString()).toBe('2026-11-15T21:00:00.000Z');
+  });
+
+  it('returns the exact cutoff instant for a fixed end date', () => {
+    const until = new Date('2026-12-31T17:59:00Z');
+    expect(computeEligibleAgainAt({ type: 'UNTIL_DATETIME', until }, served, dhaka)).toEqual(until);
   });
 });
 
@@ -195,7 +261,7 @@ describe('queue identity policy configuration', () => {
     const res = await api()
       .put(`/api/queues/${queue.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send(restrictByNid('DAILY'));
+      .send(restrictForDuration(1, 'MONTH'));
 
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('QUEUE_TIMEZONE_REQUIRED');
@@ -219,7 +285,7 @@ describe('queue identity policy configuration', () => {
     const wrongType = await api()
       .put(`/api/queues/${queue.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ ...restrictByNid(), repeatIdentityFieldKey: 'agree' });
+      .send(restrictByNid({ repeatIdentityFieldKey: 'agree' }));
     expect(wrongType.status).toBe(422);
     expect(wrongType.body.error.code).toBe('IDENTITY_FIELD_TYPE_INVALID');
   });
@@ -234,7 +300,7 @@ describe('queue identity policy configuration', () => {
       .set('Authorization', `Bearer ${ctx.accessToken}`)
       .send({
         allowRepeatVisits: false,
-        repeatRestrictionPeriod: 'ONCE_EVER',
+        repeatRestrictionType: 'ONCE_EVER',
         repeatIdentityMode: 'VERIFIED_PHONE',
       });
 
@@ -318,7 +384,7 @@ describe('repeat enforcement by customer identity', () => {
 
     expect(second.status).toBe(409);
     expect(second.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
-    expect(second.body.error.details).toEqual({ restrictionPeriod: 'ONCE_EVER' });
+    expect(second.body.error.details.reason).toBe('ALREADY_USED');
   });
 
   it('matches normalization variants of the same identifier', async () => {
@@ -538,24 +604,104 @@ describe('repeat enforcement by customer identity', () => {
     expect(claim.status).toBe('CONSUMED');
   });
 
-  it('permits the same person again in the next period', async () => {
-    const org = await setupQueue(restrictByNid('MONTHLY', 'Asia/Dhaka'));
+  it('tells a blocked customer when they may come back', async () => {
+    const org = await setupQueue(restrictForDuration(1, 'MONTH'), [NID_FIELD], 'Asia/Dhaka');
     const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
     await completeToken(org, first.body.data.id, 'd1');
 
     const blocked = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
-    expect(blocked.status).toBe(409);
-    expect(blocked.body.error.details).toEqual({ restrictionPeriod: 'MONTHLY' });
 
-    // Rolling the stored claim into last month is what "next month" looks
-    // like to the enforcement, without waiting for the calendar.
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.details.reason).toBe('ALREADY_USED');
+    // Roughly a month away, and an exact instant the app can render.
+    const endsAt = new Date(blocked.body.error.details.restrictionEndsAt as string);
+    const daysAway = (endsAt.getTime() - Date.now()) / 86_400_000;
+    expect(daysAway).toBeGreaterThan(27);
+    expect(daysAway).toBeLessThan(32);
+  });
+
+  it('lets the same person back once the window has passed', async () => {
+    const org = await setupQueue(restrictForDuration(1, 'HOUR'));
+    const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
+    await completeToken(org, first.body.data.id, 'd1');
+
+    const tooSoon = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
+    expect(tooSoon.status).toBe(409);
+
+    // Moving the recorded eligibility into the past is what "an hour later"
+    // looks like to the enforcement, without the test waiting an hour.
     await prisma.queueIdentityClaim.updateMany({
       where: { queueId: org.queue.id },
-      data: { periodKey: '2000-01' },
+      data: { eligibleAgainAt: new Date(Date.now() - 1000) },
     });
 
-    const nextPeriod = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd3');
-    expect(nextPeriod.status).toBe(201);
+    const later = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd3');
+    expect(later.status).toBe(201);
+  });
+
+  it('keeps the spent visit on record after the customer returns', async () => {
+    const org = await setupQueue(restrictForDuration(1, 'HOUR'));
+    const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
+    await completeToken(org, first.body.data.id, 'd1');
+    await prisma.queueIdentityClaim.updateMany({
+      where: { queueId: org.queue.id },
+      data: { eligibleAgainAt: new Date(Date.now() - 1000) },
+    });
+
+    const later = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
+    expect(later.status).toBe(201);
+
+    // Two rows: the earlier visit kept as history, the new one governing.
+    const claims = await prisma.queueIdentityClaim.findMany({ where: { queueId: org.queue.id } });
+    expect(claims).toHaveLength(2);
+    expect(claims.filter((claim) => claim.supersededAt === null)).toHaveLength(1);
+    expect(claims.filter((claim) => claim.supersededAt !== null)).toHaveLength(1);
+  });
+
+  it('blocks until an exact cutoff when the queue sets one', async () => {
+    const org = await setupQueue(
+      restrictByNid({
+        repeatRestrictionType: 'UNTIL_DATETIME',
+        repeatRestrictionUntilLocal: '2099-12-31T23:59',
+      }),
+      [NID_FIELD],
+      'Asia/Dhaka',
+    );
+    const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
+    await completeToken(org, first.body.data.id, 'd1');
+
+    const blocked = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
+
+    expect(blocked.status).toBe(409);
+    // 23:59 on the queue's clock in Dhaka is 17:59 UTC.
+    expect(blocked.body.error.details.restrictionEndsAt).toBe('2099-12-31T17:59:00.000Z');
+  });
+
+  it('refuses a calendar window when no timezone has been set anywhere', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    await setFormFields(ctx.accessToken, queue.id, [NID_FIELD] as never);
+
+    const res = await api()
+      .put(`/api/queues/${queue.id}`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send(restrictForDuration(1, 'MONTH'));
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('QUEUE_TIMEZONE_REQUIRED');
+  });
+
+  it('needs no timezone for a window measured in elapsed time', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    await setFormFields(ctx.accessToken, queue.id, [NID_FIELD] as never);
+
+    const res = await api()
+      .put(`/api/queues/${queue.id}`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send(restrictForDuration(48, 'HOUR'));
+
+    expect(res.status).toBe(200);
   });
 
   it('refuses joins on a queue restricted before an identity method existed', async () => {
@@ -608,7 +754,7 @@ describe('phone verification', () => {
       .set('Authorization', `Bearer ${ctx.accessToken}`)
       .send({
         allowRepeatVisits: false,
-        repeatRestrictionPeriod: 'ONCE_EVER',
+        repeatRestrictionType: 'ONCE_EVER',
         repeatIdentityMode: 'VERIFIED_PHONE',
       });
     if (res.status !== 200) {
@@ -805,7 +951,7 @@ describe('phone verification', () => {
 
 describe('what the app is told before joining', () => {
   it('describes the identity requirement without revealing anyone', async () => {
-    const org = await setupQueue(restrictByNid('DAILY', 'Asia/Dhaka'));
+    const org = await setupQueue(restrictForDuration(30, 'DAY'));
     await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
 
     const res = await api().get(`/api/public/queues/${org.queue.id}/config`);
@@ -813,7 +959,10 @@ describe('what the app is told before joining', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.identity).toEqual({
       repeatRestricted: true,
-      restrictionPeriod: 'DAILY',
+      restrictionType: 'DURATION',
+      restrictionAmount: 30,
+      restrictionUnit: 'DAY',
+      restrictionUntil: null,
       identityMode: 'CUSTOM_FIELD',
       identityFieldKey: 'nid',
       requiresVerifiedPhone: false,
@@ -821,6 +970,15 @@ describe('what the app is told before joining', () => {
     });
     // Who has already visited is never public.
     expect(JSON.stringify(res.body)).not.toContain('A-1');
+  });
+
+  it('publishes the queue timezone so the app can show the queue’s own clock', async () => {
+    const ctx = await registerOwner({ timezone: 'Asia/Dhaka' });
+    const queue = await createQueue(ctx.accessToken);
+
+    const res = await api().get(`/api/public/queues/${queue.id}/config`);
+
+    expect(res.body.data.timezone).toBe('Asia/Dhaka');
   });
 
   it('says nothing is required when repeat visits are allowed', async () => {

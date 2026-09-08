@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useFormFields } from '../hooks/useFormFields';
 import { useUpdateQueue } from '../hooks/useQueues';
 import { Button } from '../components/Button';
@@ -6,7 +6,13 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { ApiError } from '../api/client';
 import { IDENTITY_FIELD_TYPES } from '../types/queue';
-import type { Queue, RepeatIdentityMode, RepeatRestrictionPeriod } from '../types/queue';
+import type {
+  Queue,
+  RepeatIdentityMode,
+  RepeatRestrictionType,
+  RepeatRestrictionUnit,
+} from '../types/queue';
+import { formatInZone } from '../utils/timezone';
 
 /**
  * How often a customer may use this queue, and — the part that actually
@@ -17,12 +23,30 @@ import type { Queue, RepeatIdentityMode, RepeatRestrictionPeriod } from '../type
  * read them, and it can be invalid in ways a single toggle cannot express.
  */
 
-const PERIOD_LABELS: Record<RepeatRestrictionPeriod, string> = {
-  ONCE_EVER: 'Once only, ever',
-  DAILY: 'Once per day',
-  WEEKLY: 'Once per week',
-  MONTHLY: 'Once per month',
+/** Singular and plural, so the summary reads as a sentence rather than as
+ * "1 DAYS". */
+const UNIT_LABELS: Record<RepeatRestrictionUnit, [string, string]> = {
+  MINUTE: ['minute', 'minutes'],
+  HOUR: ['hour', 'hours'],
+  DAY: ['day', 'days'],
+  WEEK: ['week', 'weeks'],
+  MONTH: ['month', 'months'],
+  YEAR: ['year', 'years'],
 };
+
+const UNIT_ORDER: RepeatRestrictionUnit[] = ['MINUTE', 'HOUR', 'DAY', 'WEEK', 'MONTH', 'YEAR'];
+
+/** Only these two need the queue to have a timezone at all; the rest are
+ * plain elapsed time. Mirrors the backend rule exactly, so the editor asks
+ * for a zone in precisely the cases a save would otherwise be refused. */
+function unitNeedsTimezone(unit: RepeatRestrictionUnit): boolean {
+  return unit === 'MONTH' || unit === 'YEAR';
+}
+
+function describeUnit(amount: number, unit: RepeatRestrictionUnit): string {
+  const [one, many] = UNIT_LABELS[unit];
+  return `${amount} ${amount === 1 ? one : many}`;
+}
 
 const MODE_LABELS: Record<RepeatIdentityMode, string> = {
   CUSTOM_FIELD: 'An identifier they enter (for example a national ID)',
@@ -38,39 +62,56 @@ function needsPhone(mode: RepeatIdentityMode): boolean {
   return mode === 'VERIFIED_PHONE' || mode === 'VERIFIED_PHONE_AND_CUSTOM_FIELD';
 }
 
-/** The browser's own tz database when it exposes one, so nobody has to type
- * an IANA name from memory. Older engines fall back to a plain text box
- * rather than to a guessed default — which timezone a queue runs in is the
- * operator's answer to give, not ours. */
-function useTimezoneOptions(): string[] | null {
-  return useMemo(() => {
-    const supported = (
-      Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] }
-    ).supportedValuesOf;
-    if (typeof supported !== 'function') return null;
-    try {
-      return supported('timeZone');
-    } catch {
-      return null;
-    }
-  }, []);
-}
-
 const inputClass = 'w-full rounded-md border border-border-strong px-2 py-1.5 text-sm';
 
-export function RepeatVisitPolicy({ queue }: { queue: Queue }) {
+/** The stored cutoff instant rendered back onto the queue's clock as the
+ * `YYYY-MM-DDTHH:mm` a datetime-local input expects. Round-tripping through
+ * the queue's zone is what stops an admin in another country seeing a
+ * different cutoff than the one they set. */
+function toQueueLocalInput(iso: string | null, timezone: string | null): string {
+  if (!iso) return '';
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone || undefined,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date(iso));
+    const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+    const hour = get('hour') === '24' ? '00' : get('hour');
+    return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}`;
+  } catch {
+    return '';
+  }
+}
+
+export function RepeatVisitPolicy({
+  queue,
+  /** The zone this queue actually runs on — its own, or its organization's.
+   * Shown here for context only; it is edited in the queue's settings. */
+  effectiveTimezone,
+}: {
+  queue: Queue;
+  effectiveTimezone: string | null;
+}) {
   const { data: formFields } = useFormFields(queue.id);
   const updateQueue = useUpdateQueue(queue.id);
-  const timezoneOptions = useTimezoneOptions();
 
   const [editing, setEditing] = useState(false);
   const [restricted, setRestricted] = useState(!queue.allowRepeatVisits);
-  const [period, setPeriod] = useState<RepeatRestrictionPeriod>(
-    queue.repeatRestrictionPeriod ?? 'ONCE_EVER',
+  const [type, setType] = useState<RepeatRestrictionType>(
+    queue.repeatRestrictionType ?? 'DURATION',
+  );
+  const [amount, setAmount] = useState(String(queue.repeatRestrictionAmount ?? 1));
+  const [unit, setUnit] = useState<RepeatRestrictionUnit>(queue.repeatRestrictionUnit ?? 'MONTH');
+  const [until, setUntil] = useState(
+    toQueueLocalInput(queue.repeatRestrictionUntil, effectiveTimezone),
   );
   const [mode, setMode] = useState<RepeatIdentityMode>(queue.repeatIdentityMode ?? 'CUSTOM_FIELD');
   const [fieldKey, setFieldKey] = useState(queue.repeatIdentityFieldKey ?? '');
-  const [timezone, setTimezone] = useState(queue.timezone ?? '');
   const [error, setError] = useState<string | null>(null);
 
   /* Only questions that can actually tell two people apart, and only
@@ -92,16 +133,29 @@ export function RepeatVisitPolicy({ queue }: { queue: Queue }) {
 
   function startEditing() {
     setRestricted(!queue.allowRepeatVisits);
-    setPeriod(queue.repeatRestrictionPeriod ?? 'ONCE_EVER');
+    setType(queue.repeatRestrictionType ?? 'DURATION');
+    setAmount(String(queue.repeatRestrictionAmount ?? 1));
+    setUnit(queue.repeatRestrictionUnit ?? 'MONTH');
+    setUntil(toQueueLocalInput(queue.repeatRestrictionUntil, effectiveTimezone));
     setMode(queue.repeatIdentityMode ?? 'CUSTOM_FIELD');
     setFieldKey(queue.repeatIdentityFieldKey ?? eligibleFields[0]?.key ?? '');
-    setTimezone(queue.timezone ?? '');
     setError(null);
     setEditing(true);
   }
 
+  const parsedAmount = Number(amount);
+  const amountValid = Number.isInteger(parsedAmount) && parsedAmount >= 1;
+
   const missingField = restricted && needsField(mode) && !fieldKey;
-  const missingTimezone = restricted && period !== 'ONCE_EVER' && !timezone;
+  const missingAmount = restricted && type === 'DURATION' && !amountValid;
+  const missingUntil = restricted && type === 'UNTIL_DATETIME' && !until;
+  /* The two configurations that need a calendar also need to know whose.
+     Saying so here — rather than letting the save be refused — points the
+     admin at the queue's settings, which is where the zone actually lives. */
+  const needsZone =
+    restricted &&
+    (type === 'UNTIL_DATETIME' || (type === 'DURATION' && unitNeedsTimezone(unit)));
+  const missingTimezone = needsZone && !effectiveTimezone;
 
   async function save() {
     setError(null);
@@ -110,10 +164,14 @@ export function RepeatVisitPolicy({ queue }: { queue: Queue }) {
         restricted
           ? {
               allowRepeatVisits: false,
-              repeatRestrictionPeriod: period,
+              repeatRestrictionType: type,
+              repeatRestrictionAmount: type === 'DURATION' ? parsedAmount : null,
+              repeatRestrictionUnit: type === 'DURATION' ? unit : null,
+              // Sent as the queue's own wall clock; the server turns it into
+              // an instant, since only it knows which clock that is.
+              repeatRestrictionUntilLocal: type === 'UNTIL_DATETIME' ? until : null,
               repeatIdentityMode: mode,
               repeatIdentityFieldKey: needsField(mode) ? fieldKey : null,
-              timezone: period === 'ONCE_EVER' ? null : timezone,
             }
           : { allowRepeatVisits: true },
       );
@@ -141,11 +199,10 @@ export function RepeatVisitPolicy({ queue }: { queue: Queue }) {
             <p className="text-fg-soft">
               Customers may join this queue as often as they like.
             </p>
-          ) : queue.repeatRestrictionPeriod && queue.repeatIdentityMode ? (
+          ) : queue.repeatRestrictionType && queue.repeatIdentityMode ? (
             <div className="space-y-1 text-fg-soft">
               <p>
-                <span className="font-medium">{PERIOD_LABELS[queue.repeatRestrictionPeriod]}</span>
-                {queue.timezone && <span className="text-muted"> ({queue.timezone})</span>}
+                <span className="font-medium">{describeRestriction(queue, effectiveTimezone)}</span>
               </p>
               <p className="text-xs text-muted">
                 Customers are recognised by{' '}
@@ -208,56 +265,97 @@ export function RepeatVisitPolicy({ queue }: { queue: Queue }) {
 
       {restricted && (
         <div className="space-y-3 border-l-2 border-border pl-4">
-          <div>
-            <label className="mb-1 block text-xs text-muted" htmlFor="repeat-period">
-              How often may one customer use this queue?
+          <fieldset className="space-y-2">
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="repeat-window"
+                checked={type === 'ONCE_EVER'}
+                onChange={() => setType('ONCE_EVER')}
+                className="mt-0.5"
+              />
+              <span className="font-medium text-fg-soft">Only once ever</span>
             </label>
-            <select
-              id="repeat-period"
-              value={period}
-              onChange={(e) => setPeriod(e.target.value as RepeatRestrictionPeriod)}
-              className={inputClass}
-            >
-              {(Object.keys(PERIOD_LABELS) as RepeatRestrictionPeriod[]).map((value) => (
-                <option key={value} value={value}>
-                  {PERIOD_LABELS[value]}
-                </option>
-              ))}
-            </select>
-          </div>
 
-          {period !== 'ONCE_EVER' && (
-            <div>
-              <label className="mb-1 block text-xs text-muted" htmlFor="repeat-timezone">
-                Which timezone does this queue run in?
-              </label>
-              {timezoneOptions ? (
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="repeat-window"
+                checked={type === 'DURATION'}
+                onChange={() => setType('DURATION')}
+                className="mt-0.5"
+              />
+              <span className="font-medium text-fg-soft">Allow again after</span>
+            </label>
+            {type === 'DURATION' && (
+              <div className="ml-6 flex gap-2">
+                <input
+                  aria-label="Amount"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-24 rounded-md border border-border-strong px-2 py-1.5 text-sm"
+                />
                 <select
-                  id="repeat-timezone"
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  className={inputClass}
+                  aria-label="Unit"
+                  value={unit}
+                  onChange={(e) => setUnit(e.target.value as RepeatRestrictionUnit)}
+                  className="flex-1 rounded-md border border-border-strong px-2 py-1.5 text-sm"
                 >
-                  <option value="">Choose a timezone…</option>
-                  {timezoneOptions.map((zone) => (
-                    <option key={zone} value={zone}>
-                      {zone}
+                  {UNIT_ORDER.map((value) => (
+                    <option key={value} value={value}>
+                      {UNIT_LABELS[value][1].replace(/^./, (c) => c.toUpperCase())}
                     </option>
                   ))}
                 </select>
-              ) : (
+              </div>
+            )}
+
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="repeat-window"
+                checked={type === 'UNTIL_DATETIME'}
+                onChange={() => setType('UNTIL_DATETIME')}
+                className="mt-0.5"
+              />
+              <span className="font-medium text-fg-soft">Block until a date and time</span>
+            </label>
+            {type === 'UNTIL_DATETIME' && (
+              <div className="ml-6">
                 <input
-                  id="repeat-timezone"
-                  value={timezone}
-                  onChange={(e) => setTimezone(e.target.value)}
-                  placeholder="Asia/Dhaka"
-                  className={inputClass}
+                  aria-label="Restriction ends"
+                  type="datetime-local"
+                  value={until}
+                  onChange={(e) => setUntil(e.target.value)}
+                  className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
                 />
-              )}
-              <p className="mt-1 text-xs text-muted">
-                Decides when the day, week or month actually ends for your customers.
-              </p>
-            </div>
+                <p className="mt-1 text-xs text-muted">
+                  On this queue's clock
+                  {effectiveTimezone ? ` (${effectiveTimezone})` : ''} — the same moment for every
+                  customer, wherever they are.
+                </p>
+              </div>
+            )}
+          </fieldset>
+
+          {type === 'DURATION' && amountValid && (
+            <p className="text-xs text-muted">
+              A customer served now could return after {describeUnit(parsedAmount, unit)}
+              {unitNeedsTimezone(unit)
+                ? ` — counted on the calendar, in ${effectiveTimezone ?? 'the queue’s timezone'}.`
+                : '.'}
+            </p>
+          )}
+
+          {missingTimezone && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+              This queue has no timezone yet, and a {type === 'UNTIL_DATETIME' ? 'fixed cutoff' : 'monthly or yearly'} limit
+              needs one. Set it under Queue Settings, or choose a limit measured in hours, days or
+              weeks — those need no timezone at all.
+            </p>
           )}
 
           <div>
@@ -332,7 +430,13 @@ export function RepeatVisitPolicy({ queue }: { queue: Queue }) {
       <div className="flex gap-2">
         <Button
           loading={updateQueue.isPending}
-          disabled={updateQueue.isPending || missingField || missingTimezone}
+          disabled={
+            updateQueue.isPending ||
+            missingField ||
+            missingAmount ||
+            missingUntil ||
+            missingTimezone
+          }
           onClick={() => void save()}
         >
           {updateQueue.isPending ? 'Saving…' : 'Save'}
@@ -343,4 +447,24 @@ export function RepeatVisitPolicy({ queue }: { queue: Queue }) {
       </div>
     </div>
   );
+}
+
+/** The one-line summary shown when not editing. Reads as a sentence, and
+ * names the clock whenever the answer depends on one. */
+function describeRestriction(queue: Queue, effectiveTimezone: string | null): string {
+  if (queue.repeatRestrictionType === 'ONCE_EVER') {
+    return 'Each customer may use this queue once, ever';
+  }
+  if (queue.repeatRestrictionType === 'UNTIL_DATETIME' && queue.repeatRestrictionUntil) {
+    const when = formatInZone(new Date(queue.repeatRestrictionUntil), effectiveTimezone);
+    return `Nobody may return until ${when}${effectiveTimezone ? ` (${effectiveTimezone})` : ''}`;
+  }
+  if (queue.repeatRestrictionType === 'DURATION' && queue.repeatRestrictionAmount && queue.repeatRestrictionUnit) {
+    const window = describeUnit(queue.repeatRestrictionAmount, queue.repeatRestrictionUnit);
+    const zone = unitNeedsTimezone(queue.repeatRestrictionUnit) && effectiveTimezone
+      ? ` (${effectiveTimezone})`
+      : '';
+    return `A customer may return ${window} after being served${zone}`;
+  }
+  return 'Repeat visits are limited';
 }

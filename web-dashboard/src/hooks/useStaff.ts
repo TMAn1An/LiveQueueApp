@@ -35,3 +35,13 @@ export function useDeleteStaff() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['staff'] }),
   });
 }
+
+/** ADR-035: re-sends an invitation that never arrived. The list is refreshed
+ * because the send time — which drives the cooldown — has moved. */
+export function useResendInvitation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (staffId: string) => staffApi.resendStaffInvitation(staffId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['staff'] }),
+  });
+}

@@ -11,6 +11,7 @@ import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { ServicesManager } from '../components/ServicesManager';
 import { FormBuilder } from '../components/FormBuilder';
 import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
+import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
 
 export function QueueDetailsPage() {
   const { queueId } = useParams<{ queueId: string }>();
@@ -143,11 +144,22 @@ export function QueueDetailsPage() {
         )}
       </Card>
 
+      {/* ADR-035: the queue's clock lives with the queue's own settings, not
+          inside the repeat-visit form — it is a fact about where the queue
+          runs, and the customer app uses it to show queue-local times. */}
+      <Card>
+        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Queue Timezone</h2>
+        <QueueTimezoneSetting queue={queue} organizationTimezone={organization?.timezone ?? null} />
+      </Card>
+
       {/* Directly under Details so a queue that has stopped accepting
           customers says so where an operator will actually see it. */}
       <Card>
         <h2 className="mb-3 text-sm font-semibold text-fg-soft">Repeat Visits</h2>
-        <RepeatVisitPolicy queue={queue} />
+        <RepeatVisitPolicy
+          queue={queue}
+          effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
+        />
       </Card>
 
       <Card>

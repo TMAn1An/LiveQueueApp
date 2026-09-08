@@ -8,12 +8,28 @@ import { z } from 'zod';
  * service that also has to read the queue's form fields.
  */
 const repeatPolicyFields = {
-  repeatRestrictionPeriod: z.enum(['ONCE_EVER', 'DAILY', 'WEEKLY', 'MONTHLY']).nullable().optional(),
+  repeatRestrictionType: z.enum(['ONCE_EVER', 'DURATION', 'UNTIL_DATETIME']).nullable().optional(),
+  repeatRestrictionAmount: z.number().int().positive().max(100_000).nullable().optional(),
+  repeatRestrictionUnit: z
+    .enum(['MINUTE', 'HOUR', 'DAY', 'WEEK', 'MONTH', 'YEAR'])
+    .nullable()
+    .optional(),
+  /** Queue-local wall clock, never an instant: the admin is naming a moment
+   * on the queue's clock, and only the server knows which clock that is. */
+  repeatRestrictionUntilLocal: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}$/, 'Enter the date and time as YYYY-MM-DD HH:mm.')
+    .nullable()
+    .optional(),
   repeatIdentityMode: z
     .enum(['VERIFIED_PHONE', 'CUSTOM_FIELD', 'VERIFIED_PHONE_AND_CUSTOM_FIELD'])
     .nullable()
     .optional(),
   repeatIdentityFieldKey: z.string().trim().min(1).max(120).nullable().optional(),
+  /** ADR-035: no longer part of the repeat-visit form. It lives in the
+   * queue's own settings as an override of the organization's zone, and is
+   * normally never sent at all. */
   timezone: z.string().trim().min(1).max(64).nullable().optional(),
 };
 

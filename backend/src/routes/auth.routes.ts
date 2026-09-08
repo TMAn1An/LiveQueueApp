@@ -11,6 +11,7 @@ import {
   registerSchema,
   verifyEmailSchema,
 } from '../validators/auth.validators';
+import { acceptInvitationSchema } from '../validators/staff.validators';
 
 const router = Router();
 
@@ -25,6 +26,16 @@ router.patch(
   sensitiveRateLimiter,
   validate(changePasswordSchema),
   authController.changePassword,
+);
+
+// ADR-035: an invited staff member sets their own password here. Public for
+// the same reason as email verification below — the link is the credential,
+// and it is clicked in a browser with no session.
+router.post(
+  '/accept-invitation',
+  authRateLimiter,
+  validate(acceptInvitationSchema),
+  authController.acceptInvitation,
 );
 
 // V2 Checkpoint 2 (ADR-024). Public — the token itself is the credential;

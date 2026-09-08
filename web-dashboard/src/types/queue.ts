@@ -38,11 +38,15 @@ export interface Queue {
    * created before ADR-034 also has them null — that is the state the UI
    * flags as needing configuration, since the old device-based rule it was
    * saved under is no longer enforced. */
-  repeatRestrictionPeriod: RepeatRestrictionPeriod | null;
+  repeatRestrictionType: RepeatRestrictionType | null;
+  repeatRestrictionAmount: number | null;
+  repeatRestrictionUnit: RepeatRestrictionUnit | null;
+  /** Absolute instant; the editor shows and edits it on the queue's clock. */
+  repeatRestrictionUntil: string | null;
   repeatIdentityMode: RepeatIdentityMode | null;
   repeatIdentityFieldKey: string | null;
-  /** IANA name. Decides when a day, week or month actually ends for this
-   * queue's customers; only required for a recurring period. */
+  /** IANA name, or null when this queue simply uses its organization's zone
+   * (ADR-035). Only a month/year window or a fixed cutoff actually needs one. */
   timezone: string | null;
   allowMultipleServices: boolean;
   formVersion: number;
@@ -95,7 +99,8 @@ export interface AssignableStaff {
  * Never the app installation: a reinstall must not hand someone a second
  * visit, so the rule is keyed on something the person carries.
  */
-export type RepeatRestrictionPeriod = 'ONCE_EVER' | 'DAILY' | 'WEEKLY' | 'MONTHLY';
+export type RepeatRestrictionType = 'ONCE_EVER' | 'DURATION' | 'UNTIL_DATETIME';
+export type RepeatRestrictionUnit = 'MINUTE' | 'HOUR' | 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
 export type RepeatIdentityMode =
   | 'VERIFIED_PHONE'
   | 'CUSTOM_FIELD'

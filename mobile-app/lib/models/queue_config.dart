@@ -22,6 +22,7 @@ class QueueConfig {
     this.clientTerminology,
     this.allowMultipleServices = true,
     this.identity = const QueueIdentityRequirements(),
+    this.timezone,
   });
 
   final String id;
@@ -42,6 +43,12 @@ class QueueConfig {
   /// number, and whether it should refuse to start at all.
   final QueueIdentityRequirements identity;
 
+  /// ADR-035 — the IANA zone this queue runs in, so the app can show the
+  /// queue's own clock beside the customer's. A fact about the queue, never
+  /// derived from the device. Null when the organization has not set one, in
+  /// which case only the customer's local time is shown.
+  final String? timezone;
+
   bool get isAcceptingCustomers => status == 'ACTIVE';
 
   factory QueueConfig.fromJson(Map<String, dynamic> json) {
@@ -52,6 +59,7 @@ class QueueConfig {
       status: json['status'] as String,
       clientTerminology: json['clientTerminology'] as String?,
       allowMultipleServices: json['allowMultipleServices'] as bool? ?? true,
+      timezone: json['timezone'] as String?,
       identity: QueueIdentityRequirements.fromJson(
         (json['identity'] as Map<String, dynamic>?) ?? const {},
       ),

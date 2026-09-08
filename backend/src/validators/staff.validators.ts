@@ -21,11 +21,14 @@ export const listStaffSchema = {
   }),
 };
 
+// ADR-035: no password here. The invitee sets their own through the emailed
+// setup link, so an administrator never chooses — or learns — a colleague's
+// password. Update still accepts one, for the separate case of an admin
+// resetting an account somebody has lost access to.
 export const createStaffSchema = {
   body: z.object({
     name: z.string().trim().min(1, 'Name is required.').max(120),
     email: emailSchema,
-    password: passwordSchema,
     role: manageableRole,
   }),
 };
@@ -43,4 +46,14 @@ export const updateStaffSchema = {
 
 export const staffIdOnlySchema = {
   params: staffIdParams,
+};
+
+/** ADR-035: redeeming an emailed invitation. The token is the credential, so
+ * there is no session and no email address here — the token identifies the
+ * account on its own. */
+export const acceptInvitationSchema = {
+  body: z.object({
+    token: z.string().trim().min(1, 'An invitation token is required.'),
+    password: passwordSchema,
+  }),
 };

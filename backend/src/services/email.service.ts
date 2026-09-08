@@ -141,3 +141,96 @@ function buildVerificationEmailHtml(verificationUrl: string): string {
   <p style="color: #94a3b8; font-size: 12px;">If you didn't create a LiveQueue account, you can safely ignore this email.</p>
 </div>`.trim();
 }
+
+const ROLE_LABELS: Record<string, string> = {
+  OWNER: 'Owner',
+  ADMIN: 'Administrator',
+  STAFF: 'Staff',
+};
+
+/**
+ * The invitation a new colleague receives (ADR-035). Carries a one-time setup
+ * link and nothing else that matters: no password, no temporary credential,
+ * no token beyond the link itself, and no internal ids. Same never-throws
+ * contract as sendVerificationEmail — a delivery failure is reported, not
+ * raised, because the account it refers to already exists.
+ */
+export async function sendStaffInvitationEmail(input: {
+  to: string;
+  name: string;
+  organizationName: string;
+  role: string;
+  setupUrl: string;
+}): Promise<boolean> {
+  const resend = getClient();
+  if (!resend) {
+    return false;
+  }
+
+  try {
+    const { error } = await resend.emails.send({
+      from: env.EMAIL_FROM,
+      to: input.to,
+      subject: `You've been invited to LiveQueue`,
+      html: buildStaffInvitationHtml(input),
+    });
+    if (error) {
+      logger.error(
+        { name: error.name, message: error.message, from: env.EMAIL_FROM },
+        'Resend rejected the staff invitation email — check the sender domain and API key configuration',
+      );
+      return false;
+    }
+    logger.info('Staff invitation email sent');
+    return true;
+  } catch (err) {
+    logger.error({ message: (err as Error).message }, 'Failed to send the staff invitation email');
+    return false;
+  }
+}
+
+/** Escapes text taken from the organization or the invitee's own name — both
+ * are free text an admin typed, and they are being placed into HTML. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildStaffInvitationHtml(input: {
+  name: string;
+  organizationName: string;
+  role: string;
+  setupUrl: string;
+}): string {
+  const role = ROLE_LABELS[input.role] ?? 'Staff';
+  return `
+<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+  <h2 style="color: #1e293b;">You've been invited to LiveQueue</h2>
+  <p style="color: #334155;">
+    Hi ${escapeHtml(input.name)}, ${escapeHtml(input.organizationName)} has given you access to
+    LiveQueue as <strong>${role}</strong>.
+  </p>
+  <p style="color: #334155;">
+    Choose a password to finish setting up your account. Nobody else knows it — not even the
+    administrator who invited you.
+  </p>
+  <p style="margin: 24px 0;">
+    <a href="${input.setupUrl}" style="background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">
+      Set up your account
+    </a>
+  </p>
+  <p style="color: #64748b; font-size: 13px;">
+    This link works once and expires in 7 days. After that, ask an administrator to send a new one.
+  </p>
+  <p style="color: #64748b; font-size: 13px;">
+    You'll sign in afterwards at <a href="${env.APP_BASE_URL}/login">${env.APP_BASE_URL}/login</a>.
+  </p>
+  <p style="color: #94a3b8; font-size: 12px;">
+    If you weren't expecting this invitation, you can ignore this email — the account cannot be used
+    until someone sets a password with the link above.
+  </p>
+</div>`.trim();
+}

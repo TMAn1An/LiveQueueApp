@@ -915,3 +915,73 @@ Rejected alternatives: keeping the claim `RESERVED` through a skip would have br
 **A flaky test, diagnosed rather than re-run.** `token.stateMachine.test.ts`'s concurrent-recall case failed intermittently under full-suite load. Cause: `callToken` re-reads the token *before* opening its transaction, so which refusal the loser receives depends on where it was when the winner committed — `409 TOKEN_STATE_CHANGED` if it read early and reached the compare-and-swap, `422 INVALID_TOKEN_TRANSITION` if it read late and already saw CALLED. Both are correct refusals; the test pinned one interleaving. It now asserts the invariant that matters — exactly one recall wins — and accepts either refusal. No product behaviour changed.
 
 **Verification:** backend 641/641 (7 new), typecheck/lint/build clean. Dashboard and mobile untouched by this fix and re-verified unchanged. Migration is three nullable columns: no `DROP`, no `DELETE`, no `TRUNCATE`, no `NOT NULL` without a default, existing rows untouched. Safe to apply to the already-deployed database while it is running.
+
+## ADR-035: Custom repeat windows, an inherited queue clock, and staff invitations (2026-09-09)
+
+**Status:** Implemented, tested, committed. One migration (`20260909090000_custom_repeat_window_and_invitations`) that adds columns and rewrites the old policy values into them; nothing holding data is dropped.
+
+Three changes ship together because the first two share the queue's timezone and the third was blocking real use of the product.
+
+### 1. A repeat limit is now a window an operator writes, not one of four presets
+
+ADR-034 shipped four fixed periods — once ever, daily, weekly, monthly. They were the wrong shape. "Once per day" answered a question nobody asked: a customer served at 23:00 could return at 00:01, because the rule was about the *calendar square* the visit landed in rather than about how long they had to wait. And nothing expressed "once per 90 days", which is what an organization actually says.
+
+`Queue` now carries a `repeatRestrictionType`:
+
+- **ONCE_EVER** — one visit, permanently. Kept as its own explicit option rather than folded in as "a very long duration", because that is what it means and an operator should be able to say it plainly.
+- **DURATION** — `amount` + `unit`, measured from the moment the visit was delivered.
+- **UNTIL_DATETIME** — one cutoff instant shared by everyone: "nobody may rejoin before 31 December, 11:59 PM".
+
+**Two kinds of arithmetic, deliberately.** MINUTE/HOUR/DAY/WEEK are exact elapsed time: "again after 12 hours" means twelve hours, wherever anyone is and whatever the clocks do — so those need **no timezone at all**. MONTH and YEAR are calendar increments, because that is what the words mean: a month after 31 January is 28 February, not "30 days later". Month-end is **clamped, never rolled over** — rolling 31 January into 3 March would let a customer back early, which is the wrong direction to be wrong in. A leap day plus one year is 28 February.
+
+The maximum in each unit is bounded (10 years, 120 months, and so on) — not a security boundary, just a guard against a slipped digit turning "30 days" into a ban nobody notices until a customer complains.
+
+### 2. Eligibility is an instant, so the claim model changed shape
+
+The old unique index `(queue, fingerprint, periodKey)` asked a yes/no question of the database, which worked because a period was discrete. A custom window is not discrete — it is a moment — so the decision is now read explicitly inside the join transaction, and the index's job narrows to guaranteeing that only one claim per identity ever *governs*.
+
+`QueueIdentityClaim` gains `consumedAt`, `eligibleAgainAt` (null with a set `consumedAt` means never — a once-ever queue), and a `claimSlot`/`supersededAt` pair. The live row holds the literal slot value `ACTIVE`; a superseded row takes **its own id**, which is unique by construction, so history can grow without ever colliding. That is a Prisma-expressible stand-in for a partial unique index, which Prisma cannot declare and which would therefore read as permanent schema drift.
+
+**Concurrency is unchanged and undiminished.** Reading before writing is safe *here* precisely because every join to a queue already serializes on the `SELECT ... FOR UPDATE` taken on the queue row at the top of the transaction. The unique index remains as the backstop that would turn a future mistake into a failed request rather than a silently doubled entitlement. Two phones, a reinstall, and two simultaneous requests all still resolve to exactly one token.
+
+**Rejections now say when.** `REPEAT_VISIT_NOT_ALLOWED` carries `reason` (`ALREADY_USED` / `ALREADY_IN_QUEUE`) and, when one exists, `restrictionEndsAt`. Still never the other visit's identity, form answers or token.
+
+### 3. Migration: the queue's rule is translated, each customer's expiry is preserved exactly
+
+Two separate mappings, because they are two different questions.
+
+**Queue policies** map DAILY/WEEKLY/MONTHLY to a 1 day / 1 week / 1 month DURATION. This is a real semantic shift for those three — the old rule freed a customer at the next local midnight, the new one a full day/week/month after their visit. The direction is deliberate: it can only ever hold someone *longer*, never let them back sooner, which is the safe way to be wrong about a limit an organization asked for.
+
+**Existing claims** keep their exact old expiry, computed in SQL from the claim's own `period_key` in the queue's zone — `'2026-09-08'` under DAILY still frees that customer at local midnight on the 9th, to the second. So nobody already waiting is affected by the shift above. The expressions were verified against Postgres before the migration was written (ISO weeks via `to_date(…,'IYYY-"W"IW')`, month starts, and `AT TIME ZONE` conversions all checked against known instants).
+
+Where the old index allowed several claims per identity — one per period — the newest becomes the governing row and the rest are marked superseded. **No claim row is deleted.** `repeat_restriction_period` and `period_key` are both kept, now purely historical, so the original configuration stays readable.
+
+### 4. The queue's timezone is inherited, not chosen from a dropdown
+
+Nothing in this system stores a location: `Organization` had only a name, `Queue` has no address or coordinates. So the honest hierarchy is short — a queue's own zone, else its organization's — and there is nothing to derive one *from*.
+
+`Organization.timezone` is therefore initialized from the browser at registration, and every queue inherits it. That is the admin's computer, not a surveyed location, so it is treated as a starting value they can correct in settings and is **never presented as authoritative**. No IP geolocation. No GPS permission on a customer's phone. And never the customer's own timezone: two people in different countries joining one queue must get the same answer, and that answer belongs to the queue.
+
+The timezone selector is **gone from the repeat-visit form**. It now lives under the queue's own settings, where it belongs — it is a fact about where the queue runs, and the customer app uses it for display as much as the policy uses it for arithmetic. Most queues will never touch it. It is still stored rather than computed per request: a restriction has to mean the same thing on every call.
+
+Only a month/year window and a fixed cutoff actually need a zone. When one is missing the dashboard says so *before* the save, and points at the queue's settings — rather than letting the request be refused.
+
+### 5. Both clocks, where it helps
+
+The mobile app shows the queue's clock beside the customer's for the times that are genuinely about the queue: expected service time, and when a blocked customer may return. It **collapses to one line whenever the two agree**, which is the overwhelmingly common case — two identically-valued rows labelled differently is clutter, not information. History keeps showing the customer's own local time, unchanged. The countdown stays timezone-independent, because a duration is.
+
+`timezone` was promoted from a transitive dependency to a direct one; Dart's core `DateTime` converts only to UTC and to the device's own zone, so rendering an arbitrary IANA zone needs the tz database. No new package weight.
+
+### 6. Staff invitations
+
+Creating a staff member wrote a row with a password the administrator had chosen and told nobody. The person being given access learned about it only if someone messaged them separately — and their password was one another person knew.
+
+Creating a staff member now **invites** them: the account is created with no usable password at all, and an email carries a one-time link they use to set their own. The token machinery is deliberately the same shape ADR-024 already proved here — high-entropy raw value, only its SHA-256 hash stored, expiry, single use — rather than a second, subtly different one. It gets its **own** column slot rather than sharing the email-verification one: both flows leave an account `PENDING_EMAIL_VERIFICATION`, so sharing a slot would let an invitation link be redeemed at the *registration* endpoint, activating an account whose password nobody had ever set and burning the invitation in the process.
+
+`POST /api/staff` no longer accepts a password. The email carries the organization, the role, the dashboard URL and the link — no password, no hash, no token beyond the link itself, no internal ids. Free text from the admin (organization name, invitee name) is HTML-escaped.
+
+**Delivery failure never loses the account.** The email is sent after the row is committed and the result is reported back as `invitationEmailSent`, so the dashboard says "added, but the invitation email could not be sent" and offers Resend on that row, rather than claiming success or rolling back an account over a provider outage. Resend issues a fresh link (which invalidates the previous one — there is only one slot), behind a 60-second cooldown measured from the stored send time, so it survives a restart and cannot be sidestepped by a second browser tab.
+
+**One escape hatch, added deliberately.** An administrator setting a password on an invited-but-not-accepted account activates them and cancels the invitation. Without it a broken mailbox would strand a colleague permanently — invited, unable to sign in, with no route to access but resending mail that never arrives. It is scoped to *invited* accounts by requiring `invitationSentAt`: a pending OWNER is mid-email-verification, and must never be activated by a password write, which would skip proving they own the address.
+
+**Verification:** backend 68 files / 667 tests, typecheck/lint/build clean; dashboard 25 files / 141 tests, typecheck/lint/build clean; mobile 190 tests, `flutter analyze` clean (same pre-existing info hints), debug APK builds. `prisma validate` and `migrate status` clean. No production database was accessed and nothing was deployed.

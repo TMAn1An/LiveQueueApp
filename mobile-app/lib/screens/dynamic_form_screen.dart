@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/queue_join_provider.dart';
 import '../widgets/dynamic_form_field_widget.dart';
+import '../widgets/dual_time_row.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/phone_verification_section.dart';
 import 'token_confirmation_screen.dart';
@@ -64,7 +65,22 @@ class DynamicFormScreen extends StatelessWidget {
                 ),
               const SizedBox(height: 12),
             ],
-            if (provider.errorMessage != null) ErrorBanner(message: provider.errorMessage!),
+            if (provider.errorMessage != null) ...[
+              ErrorBanner(message: provider.errorMessage!),
+              // ADR-035: when a repeat limit turned them away, say exactly
+              // when they may come back — on the queue's clock and on
+              // theirs, so a customer abroad is not left guessing.
+              if (provider.restrictionEndsAt != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: DualTimeRow(
+                    label: 'You can join again after',
+                    instant: provider.restrictionEndsAt!,
+                    timezoneName: provider.queueConfig?.timezone,
+                    dateAndTime: true,
+                  ),
+                ),
+            ],
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,

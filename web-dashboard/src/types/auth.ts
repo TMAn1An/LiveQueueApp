@@ -26,6 +26,10 @@ export interface Staff {
   role: StaffRole;
   status: StaffStatus;
   permissions?: Permission[];
+  /** ADR-035: still waiting on an emailed invitation to be accepted. This is
+   * what the Resend action keys off; the token itself is never exposed. */
+  invitationPending?: boolean;
+  invitationSentAt?: string | null;
   lastLoginAt: string | null;
   createdAt: string;
   updatedAt?: string;
@@ -35,6 +39,8 @@ export interface Organization {
   id: string;
   name: string;
   status: OrganizationStatus;
+  /** ADR-035: the clock every queue inherits unless it sets its own. */
+  timezone?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

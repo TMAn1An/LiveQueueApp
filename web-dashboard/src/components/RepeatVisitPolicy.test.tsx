@@ -44,7 +44,10 @@ function queue(overrides: Partial<Queue> = {}): Queue {
     baseTimeMinutes: 5,
     defaultNotificationMinutes: 10,
     allowRepeatVisits: true,
-    repeatRestrictionPeriod: null,
+    repeatRestrictionType: null,
+    repeatRestrictionAmount: null,
+    repeatRestrictionUnit: null,
+    repeatRestrictionUntil: null,
     repeatIdentityMode: null,
     repeatIdentityFieldKey: null,
     timezone: null,
@@ -57,6 +60,10 @@ function queue(overrides: Partial<Queue> = {}): Queue {
     services: [],
     ...overrides,
   };
+}
+
+function renderPolicy(overrides: Partial<Queue> = {}, timezone: string | null = 'Asia/Dhaka') {
+  return render(<RepeatVisitPolicy queue={queue(overrides)} effectiveTimezone={timezone} />);
 }
 
 beforeEach(() => {
@@ -80,38 +87,148 @@ beforeEach(() => {
 
 describe('RepeatVisitPolicy', () => {
   it('says plainly that an unrestricted queue has no limit', () => {
-    render(<RepeatVisitPolicy queue={queue()} />);
+    renderPolicy();
 
     expect(screen.getByText(/join this queue as often as they like/i)).toBeInTheDocument();
   });
 
-  it('names the question a restricted queue identifies customers by', () => {
-    render(
-      <RepeatVisitPolicy
-        queue={queue({
-          allowRepeatVisits: false,
-          repeatRestrictionPeriod: 'DAILY',
-          repeatIdentityMode: 'CUSTOM_FIELD',
-          repeatIdentityFieldKey: 'nid',
-          timezone: 'Asia/Dhaka',
-        })}
-      />,
-    );
+  it('no longer offers the old fixed periods or a timezone picker', async () => {
+    renderPolicy();
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
 
-    expect(screen.getByText('Once per day')).toBeInTheDocument();
-    expect(screen.getByText(/Asia\/Dhaka/)).toBeInTheDocument();
+    expect(screen.queryByText('Once per day')).not.toBeInTheDocument();
+    expect(screen.queryByText('Once per week')).not.toBeInTheDocument();
+    expect(screen.queryByText('Once per month')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Which timezone does this queue run in/i)).not.toBeInTheDocument();
+  });
+
+  it('summarises a duration window as a sentence', () => {
+    renderPolicy({
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'DURATION',
+      repeatRestrictionAmount: 30,
+      repeatRestrictionUnit: 'DAY',
+      repeatIdentityMode: 'CUSTOM_FIELD',
+      repeatIdentityFieldKey: 'nid',
+    });
+
+    expect(screen.getByText(/may return 30 days after being served/i)).toBeInTheDocument();
     expect(screen.getByText(/NID Number/)).toBeInTheDocument();
   });
 
+  it('summarises a once-ever queue', () => {
+    renderPolicy({
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'ONCE_EVER',
+      repeatIdentityMode: 'CUSTOM_FIELD',
+      repeatIdentityFieldKey: 'nid',
+    });
+
+    expect(screen.getByText(/once, ever/i)).toBeInTheDocument();
+  });
+
+  it('names the queue’s clock for a fixed cutoff', () => {
+    renderPolicy({
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'UNTIL_DATETIME',
+      // 17:59 UTC is 23:59 in Dhaka.
+      repeatRestrictionUntil: '2026-12-31T17:59:00.000Z',
+      repeatIdentityMode: 'CUSTOM_FIELD',
+      repeatIdentityFieldKey: 'nid',
+    });
+
+    expect(screen.getByText(/Nobody may return until/i)).toBeInTheDocument();
+    expect(screen.getByText(/Asia\/Dhaka/)).toBeInTheDocument();
+  });
+
   it('warns that a queue restricted before this feature is refusing customers', () => {
-    render(<RepeatVisitPolicy queue={queue({ allowRepeatVisits: false })} />);
+    renderPolicy({ allowRepeatVisits: false });
 
     expect(screen.getByText(/not accepting customers/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /set up identification/i })).toBeInTheDocument();
   });
 
+  it('sends a custom duration window', async () => {
+    renderPolicy();
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText('Allow again after'));
+    await userEvent.clear(screen.getByLabelText('Amount'));
+    await userEvent.type(screen.getByLabelText('Amount'), '90');
+    await userEvent.selectOptions(screen.getByLabelText('Unit'), 'DAY');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'DURATION',
+      repeatRestrictionAmount: 90,
+      repeatRestrictionUnit: 'DAY',
+      repeatRestrictionUntilLocal: null,
+      repeatIdentityMode: 'CUSTOM_FIELD',
+      repeatIdentityFieldKey: 'nid',
+    });
+  });
+
+  it('sends a once-ever window with no amount or cutoff', async () => {
+    renderPolicy();
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText('Only once ever'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'ONCE_EVER',
+      repeatRestrictionAmount: null,
+      repeatRestrictionUnit: null,
+      repeatRestrictionUntilLocal: null,
+      repeatIdentityMode: 'CUSTOM_FIELD',
+      repeatIdentityFieldKey: 'nid',
+    });
+  });
+
+  it('sends a fixed cutoff on the queue’s own clock', async () => {
+    renderPolicy();
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText('Block until a date and time'));
+    await userEvent.type(screen.getByLabelText('Restriction ends'), '2026-12-31T23:59');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutateAsync).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repeatRestrictionType: 'UNTIL_DATETIME',
+        repeatRestrictionUntilLocal: '2026-12-31T23:59',
+      }),
+    );
+  });
+
+  it('will not save a month window when the queue has no timezone', async () => {
+    renderPolicy({}, null);
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText('Allow again after'));
+    await userEvent.selectOptions(screen.getByLabelText('Unit'), 'MONTH');
+
+    expect(screen.getByText(/has no timezone yet/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('needs no timezone for a window measured in hours', async () => {
+    renderPolicy({}, null);
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText('Allow again after'));
+    await userEvent.selectOptions(screen.getByLabelText('Unit'), 'HOUR');
+
+    expect(screen.queryByText(/has no timezone yet/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save' })).not.toBeDisabled();
+  });
+
   it('offers only questions that can actually identify a person', async () => {
-    render(<RepeatVisitPolicy queue={queue()} />);
+    renderPolicy();
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
 
@@ -122,50 +239,13 @@ describe('RepeatVisitPolicy', () => {
     expect(select).not.toHaveTextContent('Agree');
   });
 
-  it('sends the whole policy together when a restriction is saved', async () => {
-    render(<RepeatVisitPolicy queue={queue()} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(
-      screen.getByLabelText(/How often may one customer use this queue/i),
-      'MONTHLY',
-    );
-    await userEvent.selectOptions(screen.getByLabelText(/Which timezone/i), 'Asia/Dhaka');
-    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(mutateAsync).toHaveBeenCalledWith({
+  it('clears the restriction without sending stale window settings', async () => {
+    renderPolicy({
       allowRepeatVisits: false,
-      repeatRestrictionPeriod: 'MONTHLY',
+      repeatRestrictionType: 'ONCE_EVER',
       repeatIdentityMode: 'CUSTOM_FIELD',
       repeatIdentityFieldKey: 'nid',
-      timezone: 'Asia/Dhaka',
     });
-  });
-
-  it('will not save a recurring limit with no timezone chosen', async () => {
-    render(<RepeatVisitPolicy queue={queue()} />);
-    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(
-      screen.getByLabelText(/How often may one customer use this queue/i),
-      'WEEKLY',
-    );
-
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    expect(mutateAsync).not.toHaveBeenCalled();
-  });
-
-  it('clears the restriction without sending stale identity settings', async () => {
-    render(
-      <RepeatVisitPolicy
-        queue={queue({
-          allowRepeatVisits: false,
-          repeatRestrictionPeriod: 'ONCE_EVER',
-          repeatIdentityMode: 'CUSTOM_FIELD',
-          repeatIdentityFieldKey: 'nid',
-        })}
-      />,
-    );
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Unlimited visits/i));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -177,7 +257,7 @@ describe('RepeatVisitPolicy', () => {
     vi.mocked(useFormFields).mockReturnValue({
       data: { formVersion: 1, fields: [field({ key: 'agree', type: 'checkbox' })] },
     } as unknown as ReturnType<typeof useFormFields>);
-    render(<RepeatVisitPolicy queue={queue()} />);
+    renderPolicy();
     await userEvent.click(screen.getByRole('button', { name: 'Change' }));
     await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
 

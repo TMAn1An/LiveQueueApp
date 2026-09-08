@@ -10,7 +10,10 @@
 class QueueIdentityRequirements {
   const QueueIdentityRequirements({
     this.repeatRestricted = false,
-    this.restrictionPeriod,
+    this.restrictionType,
+    this.restrictionAmount,
+    this.restrictionUnit,
+    this.restrictionUntil,
     this.identityMode,
     this.identityFieldKey,
     this.requiresVerifiedPhone = false,
@@ -20,9 +23,16 @@ class QueueIdentityRequirements {
   /// Whether this queue limits how often one customer may return.
   final bool repeatRestricted;
 
-  /// ONCE_EVER / DAILY / WEEKLY / MONTHLY — null when unrestricted, or when
-  /// the queue still needs configuring.
-  final String? restrictionPeriod;
+  /// ONCE_EVER / DURATION / UNTIL_DATETIME — null when unrestricted, or when
+  /// the queue still needs configuring (ADR-035).
+  final String? restrictionType;
+
+  /// For a DURATION window: how long, and in what unit (MINUTE…YEAR).
+  final int? restrictionAmount;
+  final String? restrictionUnit;
+
+  /// For an UNTIL_DATETIME window: the shared cutoff instant.
+  final DateTime? restrictionUntil;
 
   /// VERIFIED_PHONE / CUSTOM_FIELD / VERIFIED_PHONE_AND_CUSTOM_FIELD.
   final String? identityMode;
@@ -43,7 +53,12 @@ class QueueIdentityRequirements {
   factory QueueIdentityRequirements.fromJson(Map<String, dynamic> json) {
     return QueueIdentityRequirements(
       repeatRestricted: json['repeatRestricted'] as bool? ?? false,
-      restrictionPeriod: json['restrictionPeriod'] as String?,
+      restrictionType: json['restrictionType'] as String?,
+      restrictionAmount: json['restrictionAmount'] as int?,
+      restrictionUnit: json['restrictionUnit'] as String?,
+      restrictionUntil: json['restrictionUntil'] == null
+          ? null
+          : DateTime.parse(json['restrictionUntil'] as String),
       identityMode: json['identityMode'] as String?,
       identityFieldKey: json['identityFieldKey'] as String?,
       requiresVerifiedPhone: json['requiresVerifiedPhone'] as bool? ?? false,

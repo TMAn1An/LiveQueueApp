@@ -19,14 +19,22 @@ export interface RegisteredContext {
 }
 
 export async function registerOwner(
-  overrides: Partial<{ organizationName: string; email: string; password: string }> = {},
+  overrides: Partial<{
+    organizationName: string;
+    email: string;
+    password: string;
+    /** ADR-035 — the organization's zone, which its queues inherit. */
+    timezone: string;
+  }> = {},
 ): Promise<RegisteredContext> {
   const organizationName =
     overrides.organizationName ?? `Test Org ${Math.random().toString(36).slice(2, 8)}`;
   const email = overrides.email ?? `owner-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const password = overrides.password ?? 'Password123';
 
-  const res = await api().post('/api/auth/register').send({ organizationName, email, password });
+  const res = await api()
+    .post('/api/auth/register')
+    .send({ organizationName, email, password, ...(overrides.timezone ? { timezone: overrides.timezone } : {}) });
 
   if (res.status !== 201) {
     throw new Error(`registerOwner failed: ${res.status} ${JSON.stringify(res.body)}`);

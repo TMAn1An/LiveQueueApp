@@ -72,7 +72,7 @@ Map<String, dynamic> _tokenJson() => {
 
 Map<String, dynamic> _phoneIdentity() => {
       'repeatRestricted': true,
-      'restrictionPeriod': 'ONCE_EVER',
+      'restrictionType': 'ONCE_EVER',
       'identityMode': 'VERIFIED_PHONE',
       'identityFieldKey': null,
       'requiresVerifiedPhone': true,
@@ -134,14 +134,16 @@ void main() {
 
       expect(provider.requiresPhoneVerification, isTrue);
       expect(provider.canSubmitJoin, isFalse);
-      expect(provider.queueConfig!.identity.restrictionPeriod, 'ONCE_EVER');
+      expect(provider.queueConfig!.identity.restrictionType, 'ONCE_EVER');
     });
 
     test('names the question that identifies the customer', () async {
       final provider = _buildProvider(
         MockClient((_) async => _ok(_queueJson(identity: {
               'repeatRestricted': true,
-              'restrictionPeriod': 'DAILY',
+              'restrictionType': 'DURATION',
+              'restrictionAmount': 30,
+              'restrictionUnit': 'DAY',
               'identityMode': 'CUSTOM_FIELD',
               'identityFieldKey': 'nid',
               'requiresVerifiedPhone': false,
@@ -161,7 +163,7 @@ void main() {
       final provider = _buildProvider(
         MockClient((_) async => _ok(_queueJson(identity: {
               'repeatRestricted': true,
-              'restrictionPeriod': null,
+              'restrictionType': null,
               'identityMode': null,
               'identityFieldKey': null,
               'requiresVerifiedPhone': false,
@@ -349,7 +351,9 @@ void main() {
         if (request.url.path.contains('/config')) {
           return _ok(_queueJson(identity: {
             'repeatRestricted': true,
-            'restrictionPeriod': 'DAILY',
+            'restrictionType': 'DURATION',
+              'restrictionAmount': 30,
+              'restrictionUnit': 'DAY',
             'identityMode': 'CUSTOM_FIELD',
             'identityFieldKey': 'nid',
             'requiresVerifiedPhone': false,
@@ -372,18 +376,34 @@ void main() {
       return provider;
     }
 
-    test('says when the customer may come back, and never blames the phone', () async {
-      final provider = await providerRejecting({'restrictionPeriod': 'DAILY'});
+    test('keeps the exact moment the customer may return, and never blames the phone', () async {
+      final provider = await providerRejecting({
+        'reason': 'ALREADY_USED',
+        'restrictionEndsAt': '2026-10-08T04:00:00.000Z',
+      });
 
       expect(await provider.submitJoin(), isFalse);
-      expect(provider.errorMessage, 'You have already used this queue today. Please come back tomorrow.');
+      expect(provider.restrictionEndsAt, DateTime.parse('2026-10-08T04:00:00.000Z'));
+      expect(provider.errorMessage, contains('join again after'));
       expect(provider.errorMessage, isNot(contains('device')));
+      expect(provider.errorMessage, isNot(contains('phone')));
     });
 
-    test('falls back to the server wording when no period is given', () async {
-      final provider = await providerRejecting(null);
+    test('falls back to the server wording when there is no return date', () async {
+      // A once-ever queue: no future instant makes them eligible, so there is
+      // nothing to show on a clock.
+      final provider = await providerRejecting({'reason': 'ALREADY_USED'});
 
       expect(await provider.submitJoin(), isFalse);
+      expect(provider.restrictionEndsAt, isNull);
+      expect(provider.errorMessage, contains('already used this queue'));
+    });
+
+    test('says nothing about a return date when they are simply already in the queue', () async {
+      final provider = await providerRejecting({'reason': 'ALREADY_IN_QUEUE'});
+
+      expect(await provider.submitJoin(), isFalse);
+      expect(provider.restrictionEndsAt, isNull);
       expect(provider.errorMessage, contains('already used this queue'));
     });
 

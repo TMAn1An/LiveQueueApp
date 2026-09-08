@@ -1,6 +1,7 @@
 import type { Organization } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
+import { isValidTimezone } from '../utils/customerIdentity';
 import { recordAuditEvent } from './audit.service';
 
 function requireOwner(role: string): void {
@@ -14,6 +15,8 @@ function serializeOrganization(organization: Organization) {
     id: organization.id,
     name: organization.name,
     status: organization.status,
+    /// ADR-035: the clock every queue inherits unless it overrides one.
+    timezone: organization.timezone,
     createdAt: organization.createdAt,
     updatedAt: organization.updatedAt,
   };
@@ -36,11 +39,23 @@ export async function getOrganization(organizationId: string) {
  * — see ADR-019 for why Phase 6 does not add organization-wide duplicates of
  * those fields).
  */
-export async function updateOrganization(organizationId: string, role: string, name: string) {
+export async function updateOrganization(
+  organizationId: string,
+  role: string,
+  input: { name?: string; timezone?: string | null },
+) {
   requireOwner(role);
+  // ADR-035: an unrecognized zone is refused rather than stored, because
+  // every later date calculation would fail on it instead.
+  if (input.timezone && !isValidTimezone(input.timezone)) {
+    throw new AppError(422, 'INVALID_TIMEZONE', 'That is not a recognized timezone.');
+  }
   const organization = await prisma.organization.update({
     where: { id: organizationId },
-    data: { name },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.timezone !== undefined ? { timezone: input.timezone || null } : {}),
+    },
   });
   return serializeOrganization(organization);
 }

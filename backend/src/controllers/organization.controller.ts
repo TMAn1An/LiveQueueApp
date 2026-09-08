@@ -10,7 +10,7 @@ export async function update(req: Request, res: Response) {
   const organization = await organizationService.updateOrganization(
     req.auth!.organizationId,
     req.auth!.role,
-    req.body.name,
+    { name: req.body.name, timezone: req.body.timezone },
   );
   res.status(200).json({ success: true, data: organization });
 }

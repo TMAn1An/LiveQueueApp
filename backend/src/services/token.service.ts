@@ -4,7 +4,8 @@ import type {
   Queue,
   QueueFormField,
   RepeatIdentityMode,
-  RepeatRestrictionPeriod,
+  RepeatRestrictionType,
+  RepeatRestrictionUnit,
   Token,
   TokenStatus,
 } from '@prisma/client';
@@ -16,12 +17,17 @@ import { findCounterScoped } from './counter.service';
 import { requireOwnedQueue } from '../utils/tenantScope';
 import { registerDevice } from './device.service';
 import {
+  computeEligibleAgainAt,
   computeIdentityFingerprint,
-  computePeriodKey,
   normalizeCustomIdentity,
   verifyPhoneVerificationProof,
+  type RepeatWindow,
 } from '../utils/customerIdentity';
-import { describeJoinRequirements, repeatPolicyHelpers } from './queueIdentityPolicy.service';
+import {
+  describeJoinRequirements,
+  repeatPolicyHelpers,
+  resolveQueueTimezone,
+} from './queueIdentityPolicy.service';
 import type { AuthContext } from '../utils/authContext';
 import {
   decryptOtpCode,
@@ -54,8 +60,9 @@ const QUEUE_NOT_ACTIVE_MSG = 'This queue is currently not accepting new customer
 interface ResolvedCustomerIdentity {
   fingerprint: string;
   mode: RepeatIdentityMode;
-  period: RepeatRestrictionPeriod;
-  periodKey: string;
+  /** The queue's window, carried through so a rejection can say when the
+   * customer may come back and settlement can compute it (ADR-035). */
+  window: RepeatWindow;
 }
 
 function resolveCustomerIdentity(
@@ -63,10 +70,12 @@ function resolveCustomerIdentity(
     Queue,
     | 'id'
     | 'allowRepeatVisits'
-    | 'repeatRestrictionPeriod'
+    | 'repeatRestrictionType'
+    | 'repeatRestrictionAmount'
+    | 'repeatRestrictionUnit'
+    | 'repeatRestrictionUntil'
     | 'repeatIdentityMode'
     | 'repeatIdentityFieldKey'
-    | 'timezone'
   >,
   input: CreateTokenInput,
   formData: Record<string, unknown>,
@@ -88,7 +97,6 @@ function resolveCustomerIdentity(
   }
 
   const mode = requirements.identityMode!;
-  const period = requirements.restrictionPeriod!;
 
   let normalizedPhone: string | null = null;
   if (repeatPolicyHelpers.needsVerifiedPhone(mode)) {
@@ -136,8 +144,12 @@ function resolveCustomerIdentity(
       normalizedCustomValue,
     }),
     mode,
-    period,
-    periodKey: computePeriodKey(period, queue.timezone),
+    window: {
+      type: requirements.restrictionType!,
+      amount: requirements.restrictionAmount,
+      unit: requirements.restrictionUnit,
+      until: requirements.restrictionUntil,
+    },
   };
 }
 
@@ -516,46 +528,23 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         // Snapshot of the identity this token was admitted under. The claim
         // below is the live enforcement, but it is deleted on skip/cancel —
         // and a skipped token can be recalled and served, so the token has to
-        // remember who it belongs to (ADR-034 follow-up).
+        // remember who it belongs to (ADR-034 follow-up). The window itself
+        // is deliberately NOT snapshotted: it is read from the queue when the
+        // visit completes, so a policy an admin corrects mid-shift takes
+        // effect the way the dashboard says it does.
         identityFingerprint: identity?.fingerprint ?? null,
-        identityPeriodKey: identity?.periodKey ?? null,
         identityMode: identity?.mode ?? null,
         tokenServices: { create: input.serviceIds.map((serviceId) => ({ serviceId })) },
       },
     });
 
     if (identity) {
-      // The claim, not a preceding SELECT, is the enforcement point. Its
-      // unique (queue, fingerprint, period) constraint rejects both a repeat
-      // visit within the period and a second simultaneous join by the same
-      // person from another installation — the two cases a read-then-write
-      // check cannot separate reliably. The whole transaction rolls back on
-      // conflict, so no token or sequence number is consumed.
-      try {
-        await tx.queueIdentityClaim.create({
-          data: {
-            organizationId: lockedQueue.organizationId,
-            queueId: input.queueId,
-            identityFingerprint: identity.fingerprint,
-            periodKey: identity.periodKey,
-            mode: identity.mode,
-            status: 'RESERVED',
-            tokenId: token.id,
-          },
-        });
-      } catch (err) {
-        if (isIdentityClaimConflict(err)) {
-          throw new AppError(
-            409,
-            'REPEAT_VISIT_NOT_ALLOWED',
-            repeatRejectionMessage(identity.period),
-            // Safe context only — the period, never the other visit's
-            // identity, form answers or token.
-            { restrictionPeriod: identity.period },
-          );
-        }
-        throw err;
-      }
+      await claimIdentityForNewToken(tx, {
+        organizationId: lockedQueue.organizationId,
+        queueId: input.queueId,
+        tokenId: token.id,
+        identity,
+      });
     }
 
     return token;
@@ -765,10 +754,15 @@ const TOKEN_SERVICES_INCLUDE = {
 function toCustomerView(
   token: Token & { counter?: Counter | null } & TokenWithSelectedServices,
   computed: ComputedFields,
+  /** ADR-035: the queue's own zone, so the app can show the queue's clock
+   * beside the customer's when they differ. A fact about the queue, never
+   * derived from the device reading it. */
+  queueTimezone: string | null = null,
 ) {
   return {
     id: token.id,
     queueId: token.queueId,
+    queueTimezone,
     /// LEGACY — the first selected service, kept for an old mobile client
     /// still parsing this field directly (V2 Checkpoint 5, ADR-027).
     serviceId: token.serviceId,
@@ -809,10 +803,14 @@ function toStaffView(
 export async function getTokenCustomerView(tokenId: string) {
   const token = await prisma.token.findUniqueOrThrow({
     where: { id: tokenId },
-    include: { counter: true, ...TOKEN_SERVICES_INCLUDE },
+    include: {
+      counter: true,
+      ...TOKEN_SERVICES_INCLUDE,
+      queue: { select: { timezone: true, organization: { select: { timezone: true } } } },
+    },
   });
   const computed = await computeComputedFields(token);
-  return toCustomerView(token, computed);
+  return toCustomerView(token, computed, resolveQueueTimezone(token.queue, token.queue.organization));
 }
 
 /**
@@ -1620,18 +1618,17 @@ function isIdentityClaimConflict(err: unknown): boolean {
 
 /** Wording a customer can act on, without implying their phone or device is
  * blocked — it is the visit that is spent, not the equipment. */
-function repeatRejectionMessage(period: RepeatRestrictionPeriod): string {
-  switch (period) {
-    case 'DAILY':
-      return 'You have already used this queue today. Please come back tomorrow.';
-    case 'WEEKLY':
-      return 'You have already used this queue this week.';
-    case 'MONTHLY':
-      return 'You have already used this queue during the current month.';
-    default:
-      return 'You have already used this queue, and it can only be used once.';
+function repeatRejectionMessage(restrictionEndsAt: Date | null): string {
+  if (!restrictionEndsAt) {
+    return 'You have already used this queue, and it can only be used once.';
   }
+  return 'You have already used this queue. You can join again after the time shown.';
 }
+
+/** The message for the other case entirely: not a spent visit, but a visit
+ * already in progress somewhere else. */
+const ACTIVE_ELSEWHERE_MESSAGE =
+  'You are already in this queue. Check your existing token rather than joining again.';
 
 /**
  * Moves a token's identity claim as its visit resolves.
@@ -1657,55 +1654,111 @@ async function settleIdentityClaim(
   tokenId: string,
   status: TokenStatus,
 ): Promise<void> {
-  if (status === 'COMPLETED') {
-    const updated = await tx.queueIdentityClaim.updateMany({
-      where: { tokenId },
-      data: { status: 'CONSUMED' },
-    });
-    if (updated.count > 0) {
-      return;
-    }
-    // No claim to consume. For an unrestricted queue that is simply correct.
-    // For a restricted one it means the claim was released earlier and the
-    // token came back — a skip followed by a Recall. The visit has now
-    // actually been delivered, so it must be recorded whatever route the
-    // token took to get here; this is the invariant that matters, and it is
-    // asserted directly rather than inferred from the recall path having run.
-    const token = await tx.token.findUniqueOrThrow({
-      where: { id: tokenId },
-      select: { organizationId: true, queueId: true, ...IDENTITY_SNAPSHOT_SELECT },
-    });
-    const snapshot = identitySnapshotOf(token);
-    if (!snapshot) {
-      return;
-    }
-    await tx.queueIdentityClaim.create({
-      data: {
-        organizationId: token.organizationId,
-        queueId: token.queueId,
-        identityFingerprint: snapshot.fingerprint,
-        periodKey: snapshot.periodKey,
-        mode: snapshot.mode,
-        status: 'CONSUMED',
-        tokenId,
-      },
-    });
-    return;
-  }
   if (status === 'CANCELLED' || status === 'SKIPPED') {
     await tx.queueIdentityClaim.deleteMany({ where: { tokenId } });
+    return;
   }
+  if (status !== 'COMPLETED') {
+    return;
+  }
+
+  // The visit happened, so this is where the wait actually starts. Reading
+  // the queue now — rather than a window snapshotted at join — is what makes
+  // the dashboard's "applies to customers joining from now on" true for the
+  // next customer, without stranding this one under a policy nobody can see
+  // any more. A token's life is minutes, so the two can barely diverge.
+  const token = await tx.token.findUniqueOrThrow({
+    where: { id: tokenId },
+    select: {
+      organizationId: true,
+      queueId: true,
+      ...IDENTITY_SNAPSHOT_SELECT,
+      queue: {
+        select: {
+          repeatRestrictionType: true,
+          repeatRestrictionAmount: true,
+          repeatRestrictionUnit: true,
+          repeatRestrictionUntil: true,
+          timezone: true,
+          organization: { select: { timezone: true } },
+        },
+      },
+    },
+  });
+
+  const consumedAt = new Date();
+  const eligibleAgainAt = eligibilityAfterVisit(token.queue, consumedAt);
+
+  const updated = await tx.queueIdentityClaim.updateMany({
+    where: { tokenId },
+    data: { status: 'CONSUMED', consumedAt, eligibleAgainAt },
+  });
+  if (updated.count > 0) {
+    return;
+  }
+
+  // No claim to consume. For an unrestricted queue that is simply correct.
+  // For a restricted one it means the claim was released earlier and the
+  // token came back — a skip followed by a Recall. The visit has now actually
+  // been delivered, so it must be recorded whatever route the token took to
+  // get here; this is the invariant that matters, and it is asserted directly
+  // rather than inferred from the recall path having run.
+  const snapshot = identitySnapshotOf(token);
+  if (!snapshot) {
+    return;
+  }
+  await tx.queueIdentityClaim.create({
+    data: {
+      organizationId: token.organizationId,
+      queueId: token.queueId,
+      identityFingerprint: snapshot.fingerprint,
+      mode: snapshot.mode,
+      status: 'CONSUMED',
+      consumedAt,
+      eligibleAgainAt,
+      tokenId,
+    },
+  });
+}
+
+/**
+ * When a customer served now may return, or null for never. Null is also the
+ * answer for a queue whose restriction has since been switched off — the
+ * claim is still recorded, but nothing is waiting on it.
+ */
+function eligibilityAfterVisit(
+  queue: {
+    repeatRestrictionType: RepeatRestrictionType | null;
+    repeatRestrictionAmount: number | null;
+    repeatRestrictionUnit: RepeatRestrictionUnit | null;
+    repeatRestrictionUntil: Date | null;
+    timezone: string | null;
+    organization: { timezone: string | null } | null;
+  },
+  consumedAt: Date,
+): Date | null {
+  if (!queue.repeatRestrictionType) {
+    return null;
+  }
+  return computeEligibleAgainAt(
+    {
+      type: queue.repeatRestrictionType,
+      amount: queue.repeatRestrictionAmount,
+      unit: queue.repeatRestrictionUnit,
+      until: queue.repeatRestrictionUntil,
+    },
+    consumedAt,
+    resolveQueueTimezone(queue, queue.organization),
+  );
 }
 
 const IDENTITY_SNAPSHOT_SELECT = {
   identityFingerprint: true,
-  identityPeriodKey: true,
   identityMode: true,
 } as const;
 
 interface TokenIdentitySnapshot {
   fingerprint: string;
-  periodKey: string;
   mode: RepeatIdentityMode;
 }
 
@@ -1715,17 +1768,12 @@ interface TokenIdentitySnapshot {
  * "no identity" rather than guessed at. */
 function identitySnapshotOf(token: {
   identityFingerprint: string | null;
-  identityPeriodKey: string | null;
   identityMode: RepeatIdentityMode | null;
 }): TokenIdentitySnapshot | null {
-  if (!token.identityFingerprint || !token.identityPeriodKey || !token.identityMode) {
+  if (!token.identityFingerprint || !token.identityMode) {
     return null;
   }
-  return {
-    fingerprint: token.identityFingerprint,
-    periodKey: token.identityPeriodKey,
-    mode: token.identityMode,
-  };
+  return { fingerprint: token.identityFingerprint, mode: token.identityMode };
 }
 
 /**
@@ -1763,7 +1811,6 @@ async function reserveIdentityClaimForRecall(
         organizationId: token.organizationId,
         queueId: token.queueId,
         identityFingerprint: snapshot.fingerprint,
-        periodKey: snapshot.periodKey,
         mode: snapshot.mode,
         status: 'RESERVED',
         tokenId: token.id,
@@ -1779,4 +1826,84 @@ async function reserveIdentityClaimForRecall(
     }
     throw err;
   }
+}
+
+/**
+ * Decides whether this customer may join, and takes their hold if so
+ * (ADR-035).
+ *
+ * The old model asked a unique index a yes/no question, because eligibility
+ * was a discrete window and "same window" was the whole rule. A custom window
+ * is not discrete — it is an instant — so the decision is read explicitly
+ * here and the index's job narrows to guaranteeing that only one claim per
+ * identity is ever the governing one.
+ *
+ * Reading before writing is safe precisely here: every join to a queue is
+ * serialized by the `SELECT ... FOR UPDATE` on the queue row taken at the top
+ * of this transaction, so no second joiner can slip between the read and the
+ * write. The unique index remains as the backstop that would turn a future
+ * mistake into a failed request rather than a silently doubled entitlement.
+ */
+async function claimIdentityForNewToken(
+  tx: Prisma.TransactionClient,
+  input: {
+    organizationId: string;
+    queueId: string;
+    tokenId: string;
+    identity: ResolvedCustomerIdentity;
+  },
+): Promise<void> {
+  const { identity } = input;
+  const governing = await tx.queueIdentityClaim.findFirst({
+    where: {
+      queueId: input.queueId,
+      identityFingerprint: identity.fingerprint,
+      supersededAt: null,
+    },
+  });
+
+  if (governing) {
+    // Held by a token that is still being served — the same person cannot be
+    // in the queue twice at once, from any number of installations.
+    if (governing.status === 'RESERVED') {
+      throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', ACTIVE_ELSEWHERE_MESSAGE, {
+        reason: 'ALREADY_IN_QUEUE',
+      });
+    }
+
+    const eligibleAgainAt = governing.eligibleAgainAt;
+    if (!eligibleAgainAt) {
+      // A consumed once-ever visit: no future instant makes them eligible.
+      throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', repeatRejectionMessage(null), {
+        reason: 'ALREADY_USED',
+      });
+    }
+    if (eligibleAgainAt.getTime() > Date.now()) {
+      throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', repeatRejectionMessage(eligibleAgainAt), {
+        reason: 'ALREADY_USED',
+        // Safe context only: when they may return. Never the other visit's
+        // identity, form answers or token.
+        restrictionEndsAt: eligibleAgainAt.toISOString(),
+      });
+    }
+
+    // The wait is over. The spent claim becomes history rather than being
+    // deleted, so the record of that visit survives (ADR-034 §historical
+    // claims); its slot is freed by taking its own id, which cannot collide.
+    await tx.queueIdentityClaim.update({
+      where: { id: governing.id },
+      data: { claimSlot: governing.id, supersededAt: new Date() },
+    });
+  }
+
+  await tx.queueIdentityClaim.create({
+    data: {
+      organizationId: input.organizationId,
+      queueId: input.queueId,
+      identityFingerprint: identity.fingerprint,
+      mode: identity.mode,
+      status: 'RESERVED',
+      tokenId: input.tokenId,
+    },
+  });
 }

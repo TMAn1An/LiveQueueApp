@@ -1,7 +1,14 @@
 import { apiFetch } from './client';
 import type { AuthResult } from '../types/auth';
 
-export function register(input: { organizationName: string; email: string; password: string }) {
+export function register(input: {
+  organizationName: string;
+  email: string;
+  password: string;
+  /** ADR-035: the browser's zone, which becomes the organization's starting
+   * timezone so nobody has to pick one from a list of hundreds. */
+  timezone?: string;
+}) {
   return apiFetch<AuthResult>('/api/auth/register', { method: 'POST', body: input });
 }
 
@@ -41,4 +48,14 @@ export function verifyEmail(token: string) {
 
 export function resendVerificationEmail() {
   return apiFetch<void>('/api/auth/email-verification/resend', { method: 'POST' });
+}
+
+/** ADR-035: an invited staff member redeems their emailed link. Public — the
+ * token is the credential — and returns no session, so signing in stays the
+ * one place a session is created. */
+export function acceptInvitation(token: string, password: string) {
+  return apiFetch<{ email: string }>('/api/auth/accept-invitation', {
+    method: 'POST',
+    body: { token, password },
+  });
 }

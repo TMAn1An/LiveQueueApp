@@ -51,6 +51,11 @@ class QueueJoinProvider extends ChangeNotifier {
   Map<String, String> formErrors = {};
   LiveQueueToken? createdToken;
 
+  /// ADR-035: when a repeat restriction turned this customer away, the exact
+  /// moment they may return — shown on the queue's clock and their own.
+  /// Null when there is none (a once-ever queue), or nothing was refused.
+  DateTime? restrictionEndsAt;
+
   /* ---- Phone verification (ADR-034) ------------------------------------
      Only used by queues that recognise customers by a verified number. The
      app holds a server-issued proof, never a "verified" flag of its own:
@@ -312,6 +317,7 @@ class QueueJoinProvider extends ChangeNotifier {
 
     isSubmitting = true;
     errorMessage = null;
+    restrictionEndsAt = null;
     notifyListeners();
 
     try {
@@ -391,18 +397,20 @@ class QueueJoinProvider extends ChangeNotifier {
   /// where the queue's period makes that knowable (ADR-034; the backend
   /// sends the period, never anything identifying).
   String _repeatVisitMessage(ApiException e) {
-    switch (e.details['restrictionPeriod'] as String?) {
-      case 'DAILY':
-        return 'You have already used this queue today. Please come back tomorrow.';
-      case 'WEEKLY':
-        return 'You have already used this queue this week.';
-      case 'MONTHLY':
-        return 'You have already used this queue this month.';
-      case 'ONCE_EVER':
-        return 'You have already used this queue, and it can only be used once.';
-      default:
-        return e.message;
+    // ADR-035: the server sends the exact instant this customer becomes
+    // eligible again, when there is one. Keeping it lets the screen show the
+    // moment on both clocks instead of a vague "come back later".
+    final endsAt = e.details['restrictionEndsAt'] as String?;
+    restrictionEndsAt = endsAt == null ? null : DateTime.tryParse(endsAt);
+    if (e.details['reason'] == 'ALREADY_IN_QUEUE') {
+      return e.message;
     }
+    if (restrictionEndsAt == null) {
+      // No future instant: a once-ever queue, or a server that sent no
+      // detail. Either way the server's own wording is the honest one.
+      return e.message;
+    }
+    return 'You have already used this queue. You can join again after:';
   }
 
   void reset() {
@@ -422,6 +430,7 @@ class QueueJoinProvider extends ChangeNotifier {
     isConfirmingCode = false;
     verificationError = null;
     resendAvailableAt = null;
+    restrictionEndsAt = null;
     notifyListeners();
   }
 }

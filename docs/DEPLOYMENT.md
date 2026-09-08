@@ -122,6 +122,49 @@ WHERE allow_repeat_visits = false AND repeat_identity_mode IS NULL
   AND deleted_at IS NULL;
 ```
 
+#### Third identity migration (`20260909090000_custom_repeat_window_and_invitations`)
+
+Replaces the four fixed repeat periods with a custom window, adds an
+organization-level timezone that queues inherit, and adds the staff
+invitation token slot. It **rewrites data as well as adding columns**, so
+read this before deploying:
+
+- Queues configured DAILY/WEEKLY/MONTHLY become a 1 day / 1 week / 1 month
+  duration. This holds a customer *longer* than the old rule (a full day
+  after their visit, rather than until the next local midnight) and never
+  shorter. Tell any organization relying on the old midnight rollover.
+- Every already-recorded visit keeps its exact old expiry, computed from its
+  own period key in the queue's timezone — nobody currently waiting is moved.
+- Where a customer had several claims in one queue (one per period, which the
+  old index allowed) the newest governs and the rest are marked superseded.
+  **No claim row is deleted**, and `repeat_restriction_period` and
+  `period_key` are both retained as history.
+
+To see what will be translated before applying it:
+
+```sql
+SELECT repeat_restriction_period, COUNT(*)
+FROM queues
+WHERE repeat_restriction_period IS NOT NULL AND deleted_at IS NULL
+GROUP BY repeat_restriction_period;
+```
+
+**Timezones.** Organizations created before this have none, and neither do
+their queues. That matters only for a monthly/yearly window, a fixed cutoff,
+and showing queue-local times in the app — everything else works untouched.
+Owners set it under Organization Settings; new organizations get it from the
+browser at registration. To find organizations that should set one:
+
+```sql
+SELECT o.id, o.name FROM organizations o WHERE o.timezone IS NULL;
+```
+
+**Staff invitations** need `RESEND_API_KEY`, `EMAIL_FROM` and `APP_BASE_URL`
+to be correct — the same three the verification email already needs (§3b).
+Without them an invited colleague never receives their setup link; the
+account is still created and the dashboard offers Resend, and an
+administrator can set a password directly to activate them.
+
 #### Second identity migration (`20260908160000_add_token_identity_snapshot`)
 
 Adds three nullable columns to `tokens` so a recalled token can re-establish

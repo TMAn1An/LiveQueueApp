@@ -9,6 +9,7 @@ import { PermissionRoute } from './layouts/PermissionRoute';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
+import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { QueuesPage } from './pages/QueuesPage';
 import { QueueDetailsPage } from './pages/QueueDetailsPage';
@@ -38,6 +39,7 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
+              <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
             </Route>
 
             <Route element={<ProtectedRoute />}>

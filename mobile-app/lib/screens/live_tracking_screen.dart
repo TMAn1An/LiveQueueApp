@@ -8,6 +8,7 @@ import '../providers/token_tracking_provider.dart';
 import '../theme/app_colors.dart';
 import '../widgets/connection_indicator.dart';
 import '../widgets/eta_update_dialog.dart';
+import '../widgets/dual_time_row.dart';
 import '../widgets/status_badge.dart';
 import 'home_screen.dart';
 
@@ -130,8 +131,18 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   const SizedBox(height: 24),
                   if (token.status == TokenStatus.waiting) ...[
                     _InfoRow(label: 'Position', value: '${token.position ?? '-'}'),
-                    if (token.estimatedReadyAt != null)
-                      _CountdownRow(label: 'Estimated Wait', estimatedReadyAt: token.estimatedReadyAt!)
+                    if (token.estimatedReadyAt != null) ...[
+                      // The countdown is timezone-independent and stays the
+                      // headline. The absolute time beneath it is what needs
+                      // both clocks — a customer abroad reads the queue's
+                      // working day, then their own (ADR-035).
+                      _CountdownRow(label: 'Estimated Wait', estimatedReadyAt: token.estimatedReadyAt!),
+                      DualTimeRow(
+                        label: 'Expected service',
+                        instant: token.estimatedReadyAt!,
+                        timezoneName: token.queueTimezone,
+                      ),
+                    ]
                     else
                       // No estimate is ever invented when nobody is serving —
                       // but the customer is told which of the two situations

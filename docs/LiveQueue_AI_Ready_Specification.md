@@ -228,6 +228,28 @@ Full dashboard/queue access
 
 If the owner does not verify within **1 hour** of registration (independent of how many 15-minute links were sent or expired within that window), the pending organization and owner are deleted together — the email becomes available for a fresh registration. See ADR-024 for the full design (token shape, the `requireVerified` access boundary, and the cleanup job).
 
+## 4.1b Staff invitation
+
+As of ADR-035, an owner or admin adding a colleague **invites** them rather than choosing a password on their behalf:
+
+```text
+Admin enters name, email and role
+        ↓
+Account is created with no usable password,
+status = PENDING_EMAIL_VERIFICATION
+        ↓
+Invitation email is sent (Resend) with a one-time setup link
+        ↓
+If delivery fails, the account still exists and the dashboard
+offers "Resend invite" (60-second cooldown)
+        ↓
+Colleague opens the link and chooses their own password
+        ↓
+Status becomes ACTIVE; they sign in normally
+```
+
+The link is high-entropy, stored only as a hash, expires in 7 days, and works once. No password, hash or token beyond the link itself appears in the email. An administrator setting a password directly on an unaccepted invitation activates that account — the deliberate escape hatch for a broken mailbox.
+
 ## 4.2 Staff login
 
 ```text
@@ -263,8 +285,9 @@ queue disallows multiple services — V2 Checkpoint 5/6, ADR-027/ADR-028)
 Customer verifies a phone number, when the queue identifies people that
 way (ADR-034)
         ↓
-Backend rejects the join if this *customer* has already used their visit
-for the current period (ADR-034 — no longer a per-device rule)
+Backend rejects the join if this *customer* is still inside the queue
+restriction window, and says when they may return (ADR-034/ADR-035 — no
+longer a per-device rule)
         ↓
 Customer fills dynamic form
         ↓
@@ -282,7 +305,9 @@ As of V2 Checkpoint 5, a customer may select multiple services in one join — t
 
 As of V2 Checkpoint 6, each queue carries two independent settings, both defaulting to `true` for every existing queue: `allowRepeatVisits` and `allowMultipleServices` (when `false`, exactly one service must be selected).
 
-**ADR-034 replaced how `allowRepeatVisits = false` is enforced.** It was keyed on the device identifier, which meant reinstalling the app reset the limit — the documented "accepted limitation" of Checkpoint 6 turned out to defeat the feature's actual purpose, so it was fixed rather than kept. A queue that limits repeat visits must now say **how often** a customer may return (`ONCE_EVER`, `DAILY`, `WEEKLY`, `MONTHLY`, evaluated in the queue's own timezone) and **how a customer is recognised**: a phone number verified by SMS, a required form question they answer (a national ID, student number and so on), or both. The server computes a queue-scoped HMAC fingerprint of the normalized value — it never stores the raw answer, never accepts a fingerprint from a client, and never correlates identities across organizations. The limit is held by a unique constraint on `(queue, fingerprint, period)`, so two simultaneous joins from two phones cannot both succeed. Only a `COMPLETED` visit spends the allowance; `CANCELLED` and `SKIPPED` release it, exactly as before.
+**ADR-034 replaced how `allowRepeatVisits = false` is enforced, and ADR-035 replaced what it can express.** It was originally keyed on the device identifier, which meant reinstalling the app reset the limit — the documented "accepted limitation" of Checkpoint 6 turned out to defeat the feature purpose, so it was fixed rather than kept. A restricted queue must say **how a customer is recognised** — a phone number verified by SMS, a required form question they answer (a national ID, student number and so on), or both — and **how long they must wait**. The server computes a queue-scoped HMAC fingerprint of the normalized value: it never stores the raw answer, never accepts a fingerprint from a client, and never correlates identities across organizations. Only a `COMPLETED` visit spends the allowance; `CANCELLED` and `SKIPPED` release it, exactly as before.
+
+The wait is written by the operator rather than chosen from presets (ADR-035): **once ever**, a **duration** (`n` minutes/hours/days/weeks/months/years measured from the delivered visit), or a **fixed cutoff instant** shared by everyone. Minutes through weeks are exact elapsed time and need no timezone; months and years are calendar increments evaluated in the queue own zone, with month-end clamped rather than rolled over. Exactly one claim per (queue, identity) governs eligibility at a time — older ones are retained as history — and the join reads that decision under the queue row lock that already serializes joins, with a unique index behind it, so two simultaneous joins from two phones still cannot both succeed. A rejection tells the customer when they may return.
 
 The one-active-token-per-installation rule is unchanged and still keyed on the device identifier, which is the right identity for that particular question. A queue restricted before ADR-034 has no identity method and refuses joins until an admin configures one — it does not silently keep running the old rule. Verified-phone queues additionally require an SMS provider, which this repository does not ship; until one is configured that identity mode cannot be selected at all. See ADR-034 and ADR-028 for the full design.
 

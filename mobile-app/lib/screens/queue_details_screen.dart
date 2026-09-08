@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/queue_config.dart';
 import '../providers/queue_join_provider.dart';
+import '../utils/queue_time.dart';
 import 'service_selection_screen.dart';
 
 /// Spec section 4.3: "Customer sees queue details -> Customer selects
@@ -42,8 +44,8 @@ class QueueDetailsScreen extends StatelessWidget {
                     const _Notice(
                       text: 'This queue is not accepting customers yet. Please contact staff.',
                     )
-                  else if (_repeatNotice(config.identity.restrictionPeriod) != null)
-                    _Notice(text: _repeatNotice(config.identity.restrictionPeriod)!),
+                  else if (_repeatNotice(config) != null)
+                    _Notice(text: _repeatNotice(config)!),
                   const Spacer(),
                   SizedBox(
                     width: double.infinity,
@@ -66,19 +68,43 @@ class QueueDetailsScreen extends StatelessWidget {
 
 /// Told before anyone fills anything in, so a limit is never a surprise at
 /// the end of the flow. Says nothing about who has already visited (ADR-034).
-String? _repeatNotice(String? restrictionPeriod) {
-  switch (restrictionPeriod) {
+String? _repeatNotice(QueueConfig config) {
+  final identity = config.identity;
+  switch (identity.restrictionType) {
     case 'ONCE_EVER':
       return 'Each customer may use this queue once.';
-    case 'DAILY':
-      return 'Each customer may use this queue once per day.';
-    case 'WEEKLY':
-      return 'Each customer may use this queue once per week.';
-    case 'MONTHLY':
-      return 'Each customer may use this queue once per month.';
+    case 'DURATION':
+      final amount = identity.restrictionAmount;
+      final unit = _unitLabel(identity.restrictionUnit, amount);
+      if (amount == null || unit == null) return 'Repeat visits are limited.';
+      return 'After being served, you can use this queue again in $amount $unit.';
+    case 'UNTIL_DATETIME':
+      final until = identity.restrictionUntil;
+      if (until == null) return 'Repeat visits are limited.';
+      // A shared cutoff is a single moment for everyone, so it is worth
+      // naming the queue's clock when the customer is on a different one.
+      final when = dualTime(until, timezoneName: config.timezone, dateAndTime: true);
+      return when.differs
+          ? 'One visit per customer until ${when.queue} (${when.timezoneName}).'
+          : 'One visit per customer until ${when.local}.';
     default:
       return null;
   }
+}
+
+/// Singular or plural, so the sentence reads naturally.
+String? _unitLabel(String? unit, int? amount) {
+  const labels = {
+    'MINUTE': ['minute', 'minutes'],
+    'HOUR': ['hour', 'hours'],
+    'DAY': ['day', 'days'],
+    'WEEK': ['week', 'weeks'],
+    'MONTH': ['month', 'months'],
+    'YEAR': ['year', 'years'],
+  };
+  final pair = labels[unit];
+  if (pair == null || amount == null) return null;
+  return amount == 1 ? pair[0] : pair[1];
 }
 
 class _Notice extends StatelessWidget {

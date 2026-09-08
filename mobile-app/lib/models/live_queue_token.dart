@@ -36,6 +36,7 @@ class LiveQueueToken {
   const LiveQueueToken({
     required this.id,
     required this.queueId,
+    this.queueTimezone,
     required this.serviceId,
     required this.serialNumber,
     required this.status,
@@ -55,6 +56,11 @@ class LiveQueueToken {
 
   final String id;
   final String queueId;
+
+  /// ADR-035 — the queue's own IANA zone, so live tracking can show the
+  /// queue's clock beside the customer's. Null when the organization has
+  /// not set one.
+  final String? queueTimezone;
   final String serviceId;
   final String serialNumber;
   final TokenStatus status;
@@ -98,6 +104,7 @@ class LiveQueueToken {
     return LiveQueueToken(
       id: json['id'] as String,
       queueId: json['queueId'] as String,
+      queueTimezone: json['queueTimezone'] as String?,
       serviceId: json['serviceId'] as String,
       serialNumber: json['serialNumber'] as String,
       status: parseTokenStatus(json['status'] as String),
@@ -137,6 +144,7 @@ class LiveQueueToken {
     return LiveQueueToken(
       id: id,
       queueId: queueId,
+      queueTimezone: queueTimezone,
       serviceId: serviceId,
       serialNumber: serialNumber,
       status: status ?? this.status,

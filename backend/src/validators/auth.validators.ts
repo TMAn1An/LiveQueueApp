@@ -14,6 +14,12 @@ export const registerSchema = {
     organizationName: z.string().trim().min(2, 'Organization name is required.').max(120),
     email: emailSchema,
     password: passwordSchema,
+    // ADR-035: the browser's own IANA zone, so an organization starts on a
+    // sensible clock without anyone picking from a list of hundreds. It is
+    // the admin's computer, not a surveyed location, so it is stored as a
+    // starting value they can correct in settings — never presented as
+    // authoritative. Optional: an older dashboard simply does not send it.
+    timezone: z.string().trim().min(1).max(64).optional(),
   }),
 };
 

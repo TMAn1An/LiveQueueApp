@@ -53,10 +53,17 @@ describe('POST /api/staff', () => {
     expect(res.status).toBe(422);
   });
 
-  it('rejects a weak password', async () => {
+  // ADR-035 moved password choice to the invitee, so creation no longer takes
+  // one at all. The strength rule now applies where a password is actually
+  // set — accepting an invitation (staffInvitation.test.ts) and this update.
+  it('rejects a weak password when an administrator sets one', async () => {
     const ctx = await registerOwner();
+    const created = await createStaff(ctx.accessToken);
 
-    const res = await createStaff(ctx.accessToken, { password: 'short' });
+    const res = await api()
+      .put(`/api/staff/${created.body.data.id}`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ password: 'short' });
 
     expect(res.status).toBe(422);
   });
@@ -205,10 +212,13 @@ describe('PUT /api/staff/:staffId', () => {
 
   it('suspended staff cannot log in after being suspended via this endpoint', async () => {
     const ctx = await registerOwner();
-    const created = await createStaff(ctx.accessToken, {
-      email: 'to-suspend@example.com',
-      password: 'Password123',
-    });
+    const created = await createStaff(ctx.accessToken, { email: 'to-suspend@example.com' });
+    // ADR-035: an invited account has no usable password until someone sets
+    // one, so give it a working login before proving suspension blocks it.
+    await api()
+      .put(`/api/staff/${created.body.data.id}`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ password: 'Password123' });
 
     await api()
       .put(`/api/staff/${created.body.data.id}`)

@@ -5,8 +5,14 @@ export function getOrganization() {
   return apiFetch<Organization>('/api/organizations/me');
 }
 
-export function updateOrganization(name: string) {
-  return apiFetch<Organization>('/api/organizations/me', { method: 'PUT', body: { name } });
+export interface UpdateOrganizationInput {
+  name?: string;
+  /** ADR-035: null clears it back to unset. */
+  timezone?: string | null;
+}
+
+export function updateOrganization(input: UpdateOrganizationInput) {
+  return apiFetch<Organization>('/api/organizations/me', { method: 'PUT', body: input });
 }
 
 export function deleteOrganization(confirmName: string) {

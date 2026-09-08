@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
 import * as auditService from '../services/audit.service';
 import * as emailVerificationService from '../services/emailVerification.service';
+import * as staffInvitationService from '../services/staffInvitation.service';
 import type { SessionMeta } from '../services/session.service';
 
 function sessionMeta(req: Request): SessionMeta {
@@ -97,4 +98,16 @@ export async function verifyEmail(req: Request, res: Response) {
 export async function resendVerificationEmail(req: Request, res: Response) {
   await emailVerificationService.resendVerificationEmail(req.auth!.staffId);
   res.status(204).send();
+}
+
+/**
+ * ADR-035: an invited staff member chooses their own password. Public — the
+ * emailed link is the credential — and deliberately returns nothing but a
+ * confirmation: the new member signs in through the normal login form, so
+ * this endpoint never mints a session from a link that may have sat in an
+ * inbox for days.
+ */
+export async function acceptInvitation(req: Request, res: Response) {
+  const staff = await staffInvitationService.acceptInvitation(req.body.token, req.body.password);
+  res.status(200).json({ success: true, data: { email: staff.email } });
 }

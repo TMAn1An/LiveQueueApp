@@ -3,7 +3,8 @@ import type {
   Queue,
   QueueStatus,
   RepeatIdentityMode,
-  RepeatRestrictionPeriod,
+  RepeatRestrictionType,
+  RepeatRestrictionUnit,
 } from '../types/queue';
 
 export function listQueues() {
@@ -26,7 +27,12 @@ export interface CreateQueueInput {
   /** ADR-034. Sent together with allowRepeatVisits: false — the backend
    * rejects a restriction that does not say how customers are identified,
    * and clears all four when repeats are allowed again. */
-  repeatRestrictionPeriod?: RepeatRestrictionPeriod | null;
+  repeatRestrictionType?: RepeatRestrictionType | null;
+  repeatRestrictionAmount?: number | null;
+  repeatRestrictionUnit?: RepeatRestrictionUnit | null;
+  /** Queue-local wall clock as YYYY-MM-DDTHH:mm — the server converts it to
+   * an instant, because only the server knows the queue's zone. */
+  repeatRestrictionUntilLocal?: string | null;
   repeatIdentityMode?: RepeatIdentityMode | null;
   repeatIdentityFieldKey?: string | null;
   timezone?: string | null;

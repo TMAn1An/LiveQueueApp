@@ -9,15 +9,26 @@ export function listStaff(page = 1, pageSize = 20, search?: string) {
   });
 }
 
+// ADR-035: no password. The new colleague sets their own through the
+// emailed setup link, so nobody else ever knows it.
 export interface CreateStaffInput {
   name: string;
   email: string;
-  password: string;
   role: Exclude<StaffRole, 'OWNER'>;
 }
 
+/** The response says whether the invitation actually reached the provider,
+ * so the page can offer Resend instead of claiming it was delivered. */
+export type CreatedStaff = Staff & { invitationEmailSent: boolean };
+
 export function createStaff(input: CreateStaffInput) {
-  return apiFetch<Staff>('/api/staff', { method: 'POST', body: input });
+  return apiFetch<CreatedStaff>('/api/staff', { method: 'POST', body: input });
+}
+
+export function resendStaffInvitation(staffId: string) {
+  return apiFetch<{ emailSent: boolean }>(`/api/staff/${staffId}/resend-invitation`, {
+    method: 'POST',
+  });
 }
 
 export interface UpdateStaffInput {

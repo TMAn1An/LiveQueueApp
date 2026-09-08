@@ -2,7 +2,9 @@ import { z } from 'zod';
 
 export const updateOrganizationSchema = {
   body: z.object({
-    name: z.string().trim().min(2, 'Organization name is required.').max(120),
+    name: z.string().trim().min(2, 'Organization name is required.').max(120).optional(),
+    // ADR-035: the organization's clock. Null clears it back to unset.
+    timezone: z.string().trim().min(1).max(64).nullable().optional(),
   }),
 };
 
