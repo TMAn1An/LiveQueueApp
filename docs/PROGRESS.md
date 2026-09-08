@@ -223,6 +223,15 @@ A dashboard-usability-only checkpoint: the four management lists became searchab
 - **Mobile got the three places that still looked frozen:** the QR screen now shows "Loading queue…" over a scrim while the scanned queue resolves, Join shows a spinner beside "Joining queue…" instead of replacing the label, and OTP reissue reports "Getting a new code…" instead of silently greying out. Cancel and history already had proper feedback and were left alone; the startup sequence was not touched.
 - **Verification:** backend 595/595 tests (66 files, 14 new), typecheck/lint/build clean, `prisma migrate status` up to date; dashboard 122/122 (24 files, 10 new), typecheck/lint/build clean; mobile 164/164 (2 new), `flutter analyze` clean, debug APK builds.
 
+### V2 Setup-page branding + Device Blocking withdrawn from the dashboard (2026-09-10)
+
+**Status: implemented and verified. Dashboard only — no backend, mobile, schema or migration change.**
+
+- **The invitation setup page showed two LiveQueue logos, and the cause was composition, not styling.** `AcceptInvitationPage` was written as a standalone screen — its own centred wrapper, its own `Card`, its own logo — and then mounted inside `AuthLayout`, which already supplies all three. So the page rendered a card inside a card with a lockup above each, and two `<h1>`s besides. Fixed at the root: the page now renders only its own contents, like every other auth page, and `AuthLayout` gained a `brand` prop saying whether its single lockup sits above the card or inside it. Sign-in, registration and email verification keep the outer placement — there it doubles as the page heading, since those pages have none — and only the setup route asks for the inside one.
+- **Device Blocking is no longer offered in the dashboard.** It blocks an *installation*, not a person, and leaving it on screen next to the new verified-identity repeat rules implied a person-level ban the product cannot make good on. The sidebar entry and the `/devices` route are gone, so the old URL now falls through to the same catch-all redirect as any other unknown path rather than rendering a fully interactive page.
+- **Hidden, not deleted.** The Prisma model, the migrations, the blocked-device rows, the backend routes, controller, service, audit events and security tests are all untouched, as is the `manage_blocked_devices` permission the backend still enforces. `BlockedDevicesPage`, its hook and its API client stay in the repository too — unrouted, not removed — so a better person-level design can pick this up rather than rebuild it. Person-level blocking may be reconsidered later on top of verified customer identity.
+- **Verification:** dashboard 180/180 (29 files, 21 new tests in 3 new files), `tsc -b` and lint clean, production build succeeds. Backend and mobile were not touched and were not rebuilt. No migration, no production database access, no deployment.
+
 ### V2 Verified email identity — the verified channel that actually works (2026-09-10)
 
 **Status: implemented and verified. One additive migration; nothing dropped.**

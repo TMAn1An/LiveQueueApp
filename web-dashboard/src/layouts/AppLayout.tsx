@@ -36,11 +36,10 @@ export function AppLayout() {
               Staff
             </NavLink>
           )}
-          {hasPermission('manage_blocked_devices') && (
-            <NavLink to="/devices" className={navLinkClass}>
-              Device Blocking
-            </NavLink>
-          )}
+          {/* No Device Blocking link: the feature is withdrawn from the
+              dashboard (see App.tsx). The permission still exists and the
+              backend still enforces it — nothing was deleted, it is just no
+              longer offered here. */}
           {hasPermission('view_reports') && (
             <NavLink to="/reports" className={navLinkClass}>
               Reports

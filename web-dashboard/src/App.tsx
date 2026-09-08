@@ -16,7 +16,6 @@ import { QueueDetailsPage } from './pages/QueueDetailsPage';
 import { QueueCountersPage } from './pages/QueueCountersPage';
 import { QueueLivePage } from './pages/QueueLivePage';
 import { StaffPage } from './pages/StaffPage';
-import { BlockedDevicesPage } from './pages/BlockedDevicesPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { AuditLogsPage } from './pages/AuditLogsPage';
 import { ServiceHistoryPage } from './pages/ServiceHistoryPage';
@@ -40,6 +39,11 @@ function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route path="/register" element={<RegisterPage />} />
               <Route path="/verify-email" element={<VerifyEmailPage />} />
+            </Route>
+
+            {/* Same chrome, one lockup, placed inside the card instead of
+                above it — see AuthLayout. */}
+            <Route element={<AuthLayout brand="inside" />}>
               <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
             </Route>
 
@@ -52,9 +56,6 @@ function App() {
                 <Route path="/queues/:queueId/counters" element={<QueueCountersPage />} />
                 <Route element={<PermissionRoute permission="manage_staff" />}>
                   <Route path="/staff" element={<StaffPage />} />
-                </Route>
-                <Route element={<PermissionRoute permission="manage_blocked_devices" />}>
-                  <Route path="/devices" element={<BlockedDevicesPage />} />
                 </Route>
                 <Route path="/reports" element={<ReportsPage />} />
                 <Route element={<PermissionRoute permission="view_reports" />}>
@@ -70,6 +71,13 @@ function App() {
               </Route>
             </Route>
 
+            {/* Device Blocking is withdrawn from the dashboard: it blocks an
+                installation, not a person, and leaving it on screen next to
+                the verified-identity repeat rules implied a person-level ban
+                the product cannot make good on. The backend, the data and
+                BlockedDevicesPage are all still here — only the route is
+                gone, so /devices falls through to the catch-all below and
+                lands on the dashboard like any other unknown path. */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
