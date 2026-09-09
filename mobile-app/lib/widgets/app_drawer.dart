@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/active_token_provider.dart';
 import '../providers/queue_join_provider.dart';
-import '../screens/active_token_screen.dart';
+import '../screens/active_tokens_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/qr_scanner_screen.dart';
 import '../screens/settings_screen.dart';
@@ -21,7 +21,7 @@ class AppDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = context.watch<ActiveTokenProvider>();
-    final ref = active.activeToken;
+    final tokens = active.activeTokens;
 
     return Drawer(
       child: SafeArea(
@@ -57,17 +57,23 @@ class AppDrawer extends StatelessWidget {
               },
             ),
             // Shown only when there is somewhere to go: an entry that opens
-            // an empty screen is worse than no entry at all.
-            if (ref != null)
+            // an empty screen is worse than no entry at all. Label and
+            // subtitle both adapt to how many tokens are actually remembered
+            // (V2 Product Completion checkpoint) — a lone token keeps the
+            // singular wording and its own label; two or more collapse to a
+            // count, since no single subtitle line could name them all.
+            if (tokens.isNotEmpty)
               ListTile(
                 leading: Icon(Icons.confirmation_number, color: Theme.of(context).colorScheme.primary),
-                title: const Text('Active Token'),
-                subtitle: Text(
-                  [ref.serialNumber, if (ref.queueName.isNotEmpty) ref.queueName]
-                      .where((part) => part.isNotEmpty)
-                      .join(' · '),
-                ),
-                onTap: () => _goTo(context, const ActiveTokenScreen()),
+                title: Text(tokens.length == 1 ? 'Active Token' : 'Active Tokens · ${tokens.length}'),
+                subtitle: tokens.length == 1
+                    ? Text(
+                        [tokens.first.serialNumber, tokens.first.queueName]
+                            .where((part) => part.isNotEmpty)
+                            .join(' · '),
+                      )
+                    : null,
+                onTap: () => _goTo(context, const ActiveTokensScreen()),
               ),
             ListTile(
               leading: const Icon(Icons.history),

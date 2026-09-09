@@ -129,7 +129,7 @@ void main() {
     await activeToken.restore();
 
     // The resync that would normally follow — started, and never finishing.
-    unawaited(activeToken.resync());
+    unawaited(activeToken.resyncOne('token-1'));
 
     await tester.pumpWidget(_homeUnder(apiClient, activeToken));
     await tester.pump();
@@ -158,7 +158,7 @@ void main() {
     final activeToken = _activeTokenProvider(apiClient);
     await activeToken.restore();
 
-    expect(await activeToken.resync(), isNull);
+    expect(await activeToken.resyncOne('token-1'), isNull);
     expect(activeToken.hasActiveToken, isTrue,
         reason: 'not reaching the server says nothing about whether the customer is still queued');
 

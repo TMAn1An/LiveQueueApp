@@ -24,11 +24,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// The menu exists so a customer can move around the app without abandoning
 /// their place in a queue (ADR-036).
 
-LiveQueueToken _token() => LiveQueueToken.fromJson({
-      'id': 'token-1',
-      'queueId': 'queue-1',
+LiveQueueToken _token({String id = 'token-1', String queueId = 'queue-1', String serial = 'A023'}) =>
+    LiveQueueToken.fromJson({
+      'id': id,
+      'queueId': queueId,
       'serviceId': 'service-1',
-      'serialNumber': 'A023',
+      'serialNumber': serial,
       'status': 'WAITING',
       'formData': <String, dynamic>{},
       'position': 3,
@@ -122,10 +123,41 @@ void main() {
     await _pumpDrawer(tester, active);
     expect(find.text('Active Token'), findsOneWidget);
 
-    await active.clear();
+    await active.remove('token-1');
     await tester.pumpAndSettle();
 
     expect(find.text('Active Token'), findsNothing);
     expect(find.text('History'), findsOneWidget);
+  });
+
+  testWidgets('two remembered tokens collapse the label to a count', (tester) async {
+    final active = _provider();
+    await active.remember(_token(id: 'token-a', queueId: 'queue-a', serial: 'A023'),
+        queueName: 'Pharmacy');
+    await active.remember(_token(id: 'token-b', queueId: 'queue-b', serial: 'B014'),
+        queueName: 'Billing');
+
+    await _pumpDrawer(tester, active);
+
+    expect(find.text('Active Tokens · 2'), findsOneWidget);
+    // Two tokens named different things — no single subtitle line could
+    // represent both, so unlike the single-token case there is no subtitle.
+    expect(find.text('A023 · Pharmacy'), findsNothing);
+  });
+
+  testWidgets('removing one of two remembered tokens falls back to the singular label',
+      (tester) async {
+    final active = _provider();
+    await active.remember(_token(id: 'token-a', queueId: 'queue-a', serial: 'A023'),
+        queueName: 'Pharmacy');
+    await active.remember(_token(id: 'token-b', queueId: 'queue-b', serial: 'B014'),
+        queueName: 'Billing');
+    await _pumpDrawer(tester, active);
+
+    await active.remove('token-b');
+    await tester.pumpAndSettle();
+
+    expect(find.text('Active Token'), findsOneWidget);
+    expect(find.text('A023 · Pharmacy'), findsOneWidget);
   });
 }

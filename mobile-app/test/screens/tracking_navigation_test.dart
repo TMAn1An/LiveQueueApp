@@ -166,7 +166,8 @@ void main() {
     // The customer is still in the queue, and the app still knows how to
     // take them back to it.
     expect(active.hasActiveToken, isTrue);
-    expect(active.activeToken!.serialNumber, 'A023');
+    expect(active.activeTokens, hasLength(1));
+    expect(active.activeTokens.single.serialNumber, 'A023');
   });
 
   testWidgets('the Android system back does the same thing', (tester) async {
