@@ -7,7 +7,9 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
 import 'services/fcm_service.dart';
 
+import 'models/live_queue_token.dart';
 import 'providers/history_provider.dart';
+import 'providers/notification_center_provider.dart';
 import 'providers/notification_preferences_provider.dart';
 import 'providers/active_token_provider.dart';
 import 'providers/queue_join_provider.dart';
@@ -26,6 +28,7 @@ import 'services/app_version_api_service.dart';
 import 'services/device_api_service.dart';
 import 'services/device_identity_service.dart';
 import 'services/history_storage_service.dart';
+import 'services/notification_center_storage_service.dart';
 import 'services/notification_service.dart';
 import 'services/email_verification_api_service.dart';
 import 'services/preferences_storage_service.dart';
@@ -83,6 +86,9 @@ class LiveQueueApp extends StatelessWidget {
         ),
         Provider<HistoryStorageService>(create: (_) => HistoryStorageService()),
         Provider<ActiveTokenStorageService>(create: (_) => ActiveTokenStorageService()),
+        Provider<NotificationCenterStorageService>(
+          create: (_) => NotificationCenterStorageService(),
+        ),
         Provider<PreferencesStorageService>(
           create: (_) => PreferencesStorageService(),
         ),
@@ -152,12 +158,27 @@ class LiveQueueApp extends StatelessWidget {
             emailVerificationRepository: context.read<EmailVerificationRepository>(),
           ),
         ),
+        // V2 Product Completion checkpoint, Part D: local-only, read at
+        // startup same as the other on-device stores — never blocks Home.
+        ChangeNotifierProvider<NotificationCenterProvider>(
+          create: (context) => NotificationCenterProvider(
+            storage: context.read<NotificationCenterStorageService>(),
+          )..load(),
+        ),
         // ADR-036: outlives every screen, so a running token stays reachable
         // however the customer moves around the app.
         ChangeNotifierProvider<ActiveTokenProvider>(
           create: (context) => ActiveTokenProvider(
             tokenRepository: context.read<TokenRepository>(),
             storage: context.read<ActiveTokenStorageService>(),
+            // V2 Product Completion checkpoint, Part D: a resync of any
+            // remembered token — not only the one currently open in Live
+            // Tracking — records a Notification Center entry when its
+            // status genuinely changed, which is what makes a status change
+            // in a token the customer isn't looking at still show up here.
+            onTokenStatusChanged: (token, {required queueName}) => context
+                .read<NotificationCenterProvider>()
+                .recordStatusChange(token, queueName: queueName),
           )..restore(),
         ),
         ChangeNotifierProvider<TokenTrackingProvider>(
@@ -171,8 +192,45 @@ class LiveQueueApp extends StatelessWidget {
             // ADR-036: a finished visit stops being the active token and
             // becomes history. Nothing about navigation triggers this — only
             // the token actually reaching a terminal state does.
-            ..onTokenSettled = (token) =>
-                context.read<ActiveTokenProvider>().syncFromTracked(token),
+            ..onTokenSettled = ((LiveQueueToken token) {
+              context.read<ActiveTokenProvider>().syncFromTracked(token);
+            })
+            // V2 Product Completion checkpoint, Part D: the actively-tracked
+            // token's own transitions, ETA changes and reminders, recorded
+            // to the Notification Center the moment they happen while the
+            // app is open — the fast path alongside the resync-based one
+            // above, which is what catches everything else.
+            ..onStatusNotification = ((LiveQueueToken token, {required String queueName}) {
+              context
+                  .read<NotificationCenterProvider>()
+                  .recordStatusChange(token, queueName: queueName);
+            })
+            ..onEtaNotification = (({
+              required String tokenId,
+              required String serialNumber,
+              required String queueName,
+              required String body,
+            }) {
+              context.read<NotificationCenterProvider>().recordEtaChanged(
+                    tokenId: tokenId,
+                    serialNumber: serialNumber,
+                    queueName: queueName,
+                    body: body,
+                  );
+            })
+            ..onReminderNotification = (({
+              required String tokenId,
+              required String serialNumber,
+              required String queueName,
+              required int estimatedWaitMinutes,
+            }) {
+              context.read<NotificationCenterProvider>().recordReminder(
+                    tokenId: tokenId,
+                    serialNumber: serialNumber,
+                    queueName: queueName,
+                    estimatedWaitMinutes: estimatedWaitMinutes,
+                  );
+            }),
         ),
         ChangeNotifierProvider<HistoryProvider>(
           create: (context) => HistoryProvider(

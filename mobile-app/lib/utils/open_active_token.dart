@@ -50,7 +50,8 @@ Future<void> openActiveToken(BuildContext context, String tokenId) async {
   }
 
   final preferences = context.read<NotificationPreferencesProvider>().preferences;
-  context.read<TokenTrackingProvider>().start(token, preferences);
+  final queueName = activeTokenProvider.summaryFor(tokenId)?.queueName ?? '';
+  context.read<TokenTrackingProvider>().start(token, preferences, queueName: queueName);
   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveTrackingScreen()));
 }
 

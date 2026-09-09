@@ -52,7 +52,7 @@ class _TokenHistoryScreenState extends State<TokenHistoryScreen> {
       final preferences = context.read<NotificationPreferencesProvider>().preferences;
 
       final freshToken = await tokenRepository.getToken(entry.tokenId);
-      trackingProvider.start(freshToken, preferences);
+      trackingProvider.start(freshToken, preferences, queueName: entry.queueName);
       if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),

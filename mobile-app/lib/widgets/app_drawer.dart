@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/active_token_provider.dart';
+import '../providers/notification_center_provider.dart';
 import '../providers/queue_join_provider.dart';
 import '../screens/active_tokens_screen.dart';
 import '../screens/home_screen.dart';
+import '../screens/notification_center_screen.dart';
 import '../screens/qr_scanner_screen.dart';
 import '../screens/settings_screen.dart';
 import '../screens/token_history_screen.dart';
@@ -22,6 +24,7 @@ class AppDrawer extends StatelessWidget {
   Widget build(BuildContext context) {
     final active = context.watch<ActiveTokenProvider>();
     final tokens = active.activeTokens;
+    final unread = context.watch<NotificationCenterProvider>().unreadCount;
 
     return Drawer(
       child: SafeArea(
@@ -79,6 +82,12 @@ class AppDrawer extends StatelessWidget {
               leading: const Icon(Icons.history),
               title: const Text('History'),
               onTap: () => _goTo(context, const TokenHistoryScreen()),
+            ),
+            // V2 Product Completion checkpoint, Part D.
+            ListTile(
+              leading: const Icon(Icons.notifications_outlined),
+              title: Text(unread > 0 ? 'Notifications · $unread' : 'Notifications'),
+              onTap: () => _goTo(context, const NotificationCenterScreen()),
             ),
             const Divider(),
             ListTile(

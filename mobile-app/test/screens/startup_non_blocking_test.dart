@@ -21,6 +21,8 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:mobile_app/providers/active_token_provider.dart';
+import 'package:mobile_app/providers/notification_center_provider.dart';
+import 'package:mobile_app/services/notification_center_storage_service.dart';
 import 'package:mobile_app/providers/queue_join_provider.dart';
 import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/email_verification_repository.dart';
@@ -54,6 +56,9 @@ ActiveTokenProvider _activeTokenProvider(ApiClient apiClient) => ActiveTokenProv
 Widget _homeUnder(ApiClient apiClient, ActiveTokenProvider activeToken) {
   return MultiProvider(
     providers: [
+      ChangeNotifierProvider<NotificationCenterProvider>(
+        create: (_) => NotificationCenterProvider(storage: NotificationCenterStorageService()),
+      ),
       ChangeNotifierProvider<ActiveTokenProvider>.value(value: activeToken),
       ChangeNotifierProvider<QueueJoinProvider>(
         create: (_) => QueueJoinProvider(

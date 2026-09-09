@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 
 import '../providers/active_token_provider.dart';
+import '../providers/notification_center_provider.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/queue_join_provider.dart';
 import '../providers/token_tracking_provider.dart';
@@ -53,14 +54,17 @@ class TokenConfirmationScreen extends StatelessWidget {
                     // ADR-036: remembered before tracking starts, so the token
                     // stays reachable from anywhere in the app from this
                     // moment on — not only while this one screen is open.
+                    final queueName =
+                        context.read<QueueJoinProvider>().queueConfig?.name ?? '';
                     unawaited(
-                      context.read<ActiveTokenProvider>().remember(
-                            token,
-                            queueName:
-                                context.read<QueueJoinProvider>().queueConfig?.name ?? '',
-                          ),
+                      context.read<ActiveTokenProvider>().remember(token, queueName: queueName),
                     );
-                    context.read<TokenTrackingProvider>().start(token, preferences);
+                    context
+                        .read<NotificationCenterProvider>()
+                        .recordJoin(token, queueName: queueName);
+                    context
+                        .read<TokenTrackingProvider>()
+                        .start(token, preferences, queueName: queueName);
                     Navigator.of(context).pushReplacement(
                       MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
                     );

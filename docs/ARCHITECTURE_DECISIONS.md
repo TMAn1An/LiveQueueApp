@@ -1079,3 +1079,43 @@ The dashboard offers exactly the three workable modes with one sentence of help 
 **A defect the new tests found:** the resend countdown only rebuilt while seconds remained, so the tick that reached zero never repainted — the Resend button stayed disabled, reading "Resend in 1s", for as long as the screen stayed open. It now rebuilds while a cooldown exists at all.
 
 **Verification:** backend 69 files / 716 tests, typecheck/lint/build clean; dashboard 26 files / 160 tests, typecheck/lint/build clean; mobile 210 tests, `flutter analyze` clean apart from the pre-existing style hints, debug APK builds. Migration reviewed as SQL before applying — two `ALTER TYPE ... ADD VALUE`, one `CREATE TABLE`, two indexes, one foreign key; no `DROP`, `DELETE` or `TRUNCATE`. No production database was accessed and nothing was deployed.
+
+## ADR-038: A pointer collection, not a singleton; onboarding as a nullable timestamp; notifications derived, not stored (2026-09-10)
+
+**Status:** Implemented, tested, committed. One additive migration (`20260910100000_add_organization_onboarding`).
+
+### Multiple active tokens
+
+ADR-036 gave the mobile app a persistent pointer back to a running token, but modelled it as exactly one — `ActiveTokenStorageService` held a single `tokenId`/`serialNumber`/`queueName` triple, and `remember()` unconditionally overwrote it. The backend has never had a one-token-per-installation rule; it has always been one-token-per-installation-**per-queue**. Joining Queue B while still WAITING in Queue A was always backend-legal and always silently destructive on the client.
+
+The fix generalises the pointer to a list, keyed by token id, with `upsert`/`remove` instead of a single `save`/`clear`. `resyncOne(tokenId)` and `resyncAll()` replace the old singular `resync()`; each id is checked independently, and one token's 404 or network failure cannot affect any other — `resyncAll` is a `Future.wait` over independently-guarded calls, not a loop that could abort partway.
+
+A second, unrelated gap surfaced during this same work: SKIPPED was treated as terminal (`isActiveTokenStatus` excludes it), so a skipped token's local entry was dropped the moment it happened — but the backend's `/recall` endpoint moves SKIPPED back to CALLED with no time limit, so a customer's own still-recoverable token could disappear from the app entirely if no push notification happened to arrive in the meantime. `isRecoverableTokenStatus` (active *or* skipped) now governs what the collection keeps; only COMPLETED and CANCELLED remove an entry.
+
+### Onboarding as a nullable timestamp, not a flag plus a "seen" table
+
+The dashboard tutorial's completion state lives on `Organization.onboardingCompletedAt` rather than a boolean or a separate per-owner table. Null is both "never shown" and "shown but abandoned" — the product does not need to distinguish those, so one field does the job a flag-plus-timestamp pair would otherwise need two for. The migration backfills every existing organization to its own `createdAt`: a real, harmless value (never displayed) that makes every pre-checkpoint organization read as already-onboarded without a special-case "existed before this shipped" branch anywhere in application code — the same backward-compatibility pattern ADR-034's identity-mode migration and ADR-037's phone-mode retirement both already used.
+
+Both onboarding mutations enforce `requireOwner`, the exact helper `updateOrganization` already uses — not the more permissive `manage_organization` permission ADMIN also holds. The tutorial is specifically the *account that registered this organization*'s own walkthrough; an ADMIN restarting or completing it on the owner's behalf would be a stranger deciding someone else's onboarding state.
+
+The guide itself is a floating panel, not a modal: eleven steps, informational rather than gated on detecting that each one's action actually happened, since several of them (services, counters, the customer form, the QR code) live on pages that do not exist as navigable targets until an earlier step is done. Trying to poll for that completion would mean either blocking on data that may never arrive or pretending to verify something it can't. A contextual "Go to Queues" link per relevant step is the compromise: real navigation, without false completion tracking.
+
+### In-app notifications, derived rather than stored
+
+The mobile Notification Center introduces no new backend model. Every entry is built from data the app already has a right to fetch — the customer-safe token view, safe to return to anyone holding the token's high-entropy id (approved Phase 3 decision 8) — rather than inventing a server-side inbox with its own ownership question to answer for a client that has no account system to scope it to.
+
+Three feeds populate it, all client-side: the actively-tracked token's own transitions (`TokenTrackingProvider`, foregrounded and fast), any *other* remembered token's resync noticing a status change (`ActiveTokenProvider`, catching everything the first feed misses — a token not currently open, or the app having been closed with no push delivered), and the join itself. Deduplication is structural rather than time-windowed: each entry's id is built from the token id, the status, and that status's own timestamp field on the token (`calledAt`, `completedAt`, `skippedAt`, ...) — a value the backend sets once per genuine transition and never touches otherwise. The same logical event recorded twice, once from a live socket update and once from a later resync, produces the identical id and is therefore a no-op insert, not a duplicate row. A recall (SKIPPED → CALLED again) gets a fresh `calledAt` and is therefore, correctly, a new entry.
+
+Every notification carries its own `tokenId`; there is no global "current token" anywhere in this feature. Tapping one opens exactly the token it names, through the same `openActiveToken` helper Home's own multi-token rows already use — one code path for "the customer picked a specific remembered token," not three near-copies.
+
+### Confirmation policy
+
+A dashboard audit found two destructive actions (service delete, counter delete) with no confirmation at all, and two more (queue delete, staff delete) with page-specific ad-hoc inline confirmation text. All four now share one `ConfirmDialog`. Organization deletion's "type the name to confirm" flow is deliberately untouched — a stronger safeguard than this checkpoint's generic one, kept exactly as designed. Mobile's Clear Token History gained the same treatment, having previously cleared on the first tap.
+
+### customerIdentity.ts readability
+
+Two literal NUL bytes — HMAC domain separators inside template literals — made the file binary to git since ADR-034. Replaced with `\0` escapes, which are lexically distinct source but evaluate to the identical runtime character; a new golden-value test computed four HMAC outputs against the pre-cleanup implementation and confirms they are unchanged.
+
+### Verification
+
+Backend 730/730 (70 files), typecheck/lint/build clean, `prisma validate` clean, `migrate status` up to date — one additive migration, one nullable column, backfilled, no `DROP`/`DELETE`/`TRUNCATE`. Dashboard 203/203 (32 files), typecheck/lint/build clean. Mobile 278/278 (8 new files), `flutter analyze` clean apart from the pre-existing style hints, debug and release-configured APKs both build. Installed on a Pixel 8 and confirmed running with no crash in logcat; on-screen interaction could not be completed this session, since the device was fingerprint-locked with no unlock credential available — the new screens are verified through widget tests, not claimed as visually confirmed on-device. No production database was accessed and nothing was deployed.

@@ -7,6 +7,7 @@ import '../providers/queue_join_provider.dart';
 import '../utils/open_active_token.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/dev_backend_banner.dart';
+import '../widgets/notification_bell.dart';
 import '../theme/app_colors.dart';
 import 'qr_scanner_screen.dart';
 import 'settings_screen.dart';
@@ -34,6 +35,8 @@ class HomeScreen extends StatelessWidget {
             const Text('LiveQueue'),
           ],
         ),
+        // V2 Product Completion checkpoint, Part D.
+        actions: const [NotificationBell()],
         // A strip under the app bar, above everything else on the first
         // screen — because it explains every other thing that is about to
         // fail. Occupies no height at all in a configured build.

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/models/live_queue_token.dart';
 import 'package:mobile_app/providers/active_token_provider.dart';
+import 'package:mobile_app/providers/notification_center_provider.dart';
+import 'package:mobile_app/services/notification_center_storage_service.dart';
 import 'package:mobile_app/providers/queue_join_provider.dart';
 import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
@@ -47,6 +49,9 @@ Future<void> _pumpDrawer(WidgetTester tester, ActiveTokenProvider active) async 
   await tester.pumpWidget(
     MultiProvider(
       providers: [
+      ChangeNotifierProvider<NotificationCenterProvider>(
+        create: (_) => NotificationCenterProvider(storage: NotificationCenterStorageService()),
+      ),
         ChangeNotifierProvider<ActiveTokenProvider>.value(value: active),
         ChangeNotifierProvider<QueueJoinProvider>(
           create: (_) => QueueJoinProvider(

@@ -13,6 +13,8 @@ import 'package:http/testing.dart';
 import 'package:mobile_app/models/live_queue_token.dart';
 import 'package:mobile_app/models/notification_preferences.dart';
 import 'package:mobile_app/providers/active_token_provider.dart';
+import 'package:mobile_app/providers/notification_center_provider.dart';
+import 'package:mobile_app/services/notification_center_storage_service.dart';
 import 'package:mobile_app/providers/notification_preferences_provider.dart';
 import 'package:mobile_app/providers/queue_join_provider.dart';
 import 'package:mobile_app/providers/token_tracking_provider.dart';
@@ -88,7 +90,7 @@ class _StubTracking extends TokenTrackingProvider {
         );
 
   @override
-  void start(LiveQueueToken initialToken, NotificationPreferences preferences) {
+  void start(LiveQueueToken initialToken, NotificationPreferences preferences, {String queueName = ''}) {
     token = initialToken;
     notifyListeners();
   }
@@ -116,6 +118,9 @@ Future<ActiveTokenProvider> _twoTokenProvider(ApiClient apiClient) async {
 Widget _appUnder(ApiClient apiClient, ActiveTokenProvider activeToken) {
   return MultiProvider(
     providers: [
+      ChangeNotifierProvider<NotificationCenterProvider>(
+        create: (_) => NotificationCenterProvider(storage: NotificationCenterStorageService()),
+      ),
       ChangeNotifierProvider<ActiveTokenProvider>.value(value: activeToken),
       ChangeNotifierProvider<TokenTrackingProvider>(
         create: (_) => _StubTracking(apiClient),

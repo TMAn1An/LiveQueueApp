@@ -73,6 +73,10 @@ class TokenTrackingProvider extends ChangeNotifier {
   NotificationPreferences _preferences = const NotificationPreferences();
   bool _reminderShown = false;
 
+  /// Display context only, for the Notification Center entries this session
+  /// records — never sent anywhere, never part of any request.
+  String _queueName = '';
+
   StreamSubscription<bool>? _connectionSub;
   StreamSubscription<LiveQueueToken>? _lifecycleSub;
   StreamSubscription<PositionUpdate>? _positionSub;
@@ -80,10 +84,15 @@ class TokenTrackingProvider extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>>? _fcmDataSub;
   StreamSubscription<RemoteMessage>? _fcmTapSub;
 
-  void start(LiveQueueToken initialToken, NotificationPreferences preferences) {
+  void start(
+    LiveQueueToken initialToken,
+    NotificationPreferences preferences, {
+    String queueName = '',
+  }) {
     token = initialToken;
     _preferences = preferences;
     _reminderShown = false;
+    _queueName = queueName;
 
     _tokenRepository.connectSocket();
     _tokenRepository.joinTokenRoom(initialToken.id);
@@ -201,6 +210,18 @@ class TokenTrackingProvider extends ChangeNotifier {
     );
     if (notice == null) return;
     etaUpdateNotice = notice;
+
+    final current = token;
+    if (current != null) {
+      onEtaNotification?.call(
+        tokenId: current.id,
+        serialNumber: current.serialNumber,
+        queueName: _queueName,
+        body: notice.estimatedWaitMinutes != null
+            ? 'now about ${notice.estimatedWaitMinutes} min'
+            : 'your estimated time changed',
+      );
+    }
   }
 
   /// Called when the customer closes the notice. Nothing else clears it, so
@@ -312,6 +333,8 @@ class TokenTrackingProvider extends ChangeNotifier {
   }
 
   void _onStatusTransition(LiveQueueToken updated) {
+    onStatusNotification?.call(updated, queueName: _queueName);
+
     switch (updated.status) {
       case TokenStatus.called:
         _notificationService.showTurnAlert(
@@ -343,6 +366,24 @@ class TokenTrackingProvider extends ChangeNotifier {
   /// not also reach into app-level navigation state.
   void Function(LiveQueueToken token)? onTokenSettled;
 
+  /// Told on every status transition worth a Notification Center entry
+  /// (V2 Product Completion checkpoint, Part D) — a callback for the same
+  /// reason as [onTokenSettled]: this provider should not depend on the
+  /// Notification Center directly.
+  void Function(LiveQueueToken token, {required String queueName})? onStatusNotification;
+  void Function({
+    required String tokenId,
+    required String serialNumber,
+    required String queueName,
+    required String body,
+  })? onEtaNotification;
+  void Function({
+    required String tokenId,
+    required String serialNumber,
+    required String queueName,
+    required int estimatedWaitMinutes,
+  })? onReminderNotification;
+
   void _maybeShowReminder() {
     if (_reminderShown) return;
     final current = token;
@@ -357,6 +398,12 @@ class TokenTrackingProvider extends ChangeNotifier {
         estimatedWaitMinutes: wait,
         soundEnabled: _preferences.soundEnabled,
         vibrationEnabled: _preferences.vibrationEnabled,
+      );
+      onReminderNotification?.call(
+        tokenId: current.id,
+        serialNumber: current.serialNumber,
+        queueName: _queueName,
+        estimatedWaitMinutes: wait,
       );
     }
   }
