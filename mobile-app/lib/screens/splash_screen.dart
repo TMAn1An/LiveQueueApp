@@ -97,6 +97,28 @@ class _SplashScreenState extends State<SplashScreen> {
     RemoteMessage? pendingTap;
     final tapSub = fcmService.onNotificationTapped.listen((message) => pendingTap = message);
 
+    // V2 UX + Token Lifecycle checkpoint, Part A: this used to be
+    // subscribed inside _initializeInBackground, AFTER fcmService.initialize()
+    // and the device-registration network calls that follow it. Device
+    // registration talks to the production backend and has no bound on how
+    // long it can take (a cold free-tier instance can take many seconds to
+    // wake) — any foreground push that arrived during that window was
+    // silently dropped, since this is a broadcast stream with no replay for
+    // late subscribers. That is almost certainly why a physical foreground
+    // banner test could see nothing: the listener simply didn't exist yet.
+    // Moved here, subscribed before any awaited work at all — the same fix
+    // already applied to tapSub above, for the same reason.
+    fcmService.onDataMessage.listen((data) {
+      final tokenId = tokenIdToResyncFor(
+        data: data,
+        currentlyTrackedTokenId: trackingProvider.token?.id,
+        isRemembered: (id) => activeTokenProvider.summaryFor(id) != null,
+      );
+      if (tokenId != null) {
+        unawaited(activeTokenProvider.resyncOne(tokenId));
+      }
+    });
+
     // Local storage only — no network, so this stays on the blocking path:
     // TokenConfirmationScreen and TokenTrackingProvider must read the
     // customer's real saved preferences, not in-memory defaults.
@@ -116,7 +138,6 @@ class _SplashScreenState extends State<SplashScreen> {
         deviceRepository: deviceRepository,
         tokenRepository: tokenRepository,
         trackingProvider: trackingProvider,
-        activeTokenProvider: activeTokenProvider,
         preferencesProvider: preferencesProvider,
         tapSub: tapSub,
         readPendingTap: () => pendingTap,
@@ -135,7 +156,6 @@ class _SplashScreenState extends State<SplashScreen> {
     required DeviceRepository deviceRepository,
     required TokenRepository tokenRepository,
     required TokenTrackingProvider trackingProvider,
-    required ActiveTokenProvider activeTokenProvider,
     required NotificationPreferencesProvider preferencesProvider,
     required StreamSubscription<RemoteMessage> tapSub,
     required RemoteMessage? Function() readPendingTap,
@@ -173,33 +193,6 @@ class _SplashScreenState extends State<SplashScreen> {
     // session, not just at startup.
     fcmService.onTokenRefreshed.listen((newToken) {
       unawaited(_registerFcmTokenSafely(deviceRepository, newToken));
-    });
-
-    // V2 Physical Validation + Foreground Notification checkpoint, Part J:
-    // closes the cross-token gap without a permanent per-token Socket.io
-    // subscription. TokenTrackingProvider already has its own FCM listener,
-    // but it only ever acts on the one token it is currently tracking — a
-    // status change on any *other* remembered token previously went
-    // unnoticed by the app until its next incidental resync (Home/Active
-    // Tokens reopening). This listener is kept alive for the app's whole
-    // lifetime, same as the token-refresh one above, and does the smallest
-    // thing that closes it: on a foreground push naming a token that is (a)
-    // one this installation actually remembers and (b) not the one already
-    // being live-tracked (which has a faster path via its own socket
-    // session), resync just that one token — never every remembered one.
-    // ActiveTokenProvider.resyncOne already records the Notification Center
-    // entry and raises the foreground banner on a genuine status change
-    // (see main.dart's onTokenStatusChanged/onNotificationAdded wiring), so
-    // there is nothing else to wire here.
-    fcmService.onDataMessage.listen((data) {
-      final tokenId = tokenIdToResyncFor(
-        data: data,
-        currentlyTrackedTokenId: trackingProvider.token?.id,
-        isRemembered: (id) => activeTokenProvider.summaryFor(id) != null,
-      );
-      if (tokenId != null) {
-        unawaited(activeTokenProvider.resyncOne(tokenId));
-      }
     });
 
     await tapSub.cancel();

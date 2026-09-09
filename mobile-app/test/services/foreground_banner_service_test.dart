@@ -65,7 +65,8 @@ void main() {
     service.dispose();
   });
 
-  testWidgets('a second show() replaces the first rather than stacking', (tester) async {
+  testWidgets('a second show() queues behind the first rather than replacing or stacking it',
+      (tester) async {
     await tester.pumpWidget(appUnder());
     final service = ForegroundBannerService(navigatorKey);
 
@@ -74,13 +75,34 @@ void main() {
     service.show(title: 'B014 has been called', body: 'Billing', onTap: () {});
     await tester.pump();
 
+    // The first is still showing — never silently overwritten — and only
+    // one is visible at once (no stacking).
+    expect(find.text('A002 has been called'), findsOneWidget);
+    expect(find.text('B014 has been called'), findsNothing);
+
+    service.dispose();
+  });
+
+  testWidgets('dismissing the current banner shows the next queued one', (tester) async {
+    await tester.pumpWidget(appUnder());
+    final service = ForegroundBannerService(navigatorKey);
+
+    service.show(title: 'A002 has been called', body: 'Pharmacy', onTap: () {});
+    await tester.pump();
+    service.show(title: 'B014 has been called', body: 'Billing', onTap: () {});
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pump();
+
     expect(find.text('A002 has been called'), findsNothing);
     expect(find.text('B014 has been called'), findsOneWidget);
 
     service.dispose();
   });
 
-  testWidgets('auto-dismisses after its visible duration', (tester) async {
+  testWidgets('never auto-dismisses — stays visible indefinitely until explicitly dismissed',
+      (tester) async {
     await tester.pumpWidget(appUnder());
     final service = ForegroundBannerService(navigatorKey);
 
@@ -88,8 +110,8 @@ void main() {
     await tester.pump();
     expect(find.text('A002 has been called'), findsOneWidget);
 
-    await tester.pump(const Duration(seconds: 6));
-    expect(find.text('A002 has been called'), findsNothing);
+    await tester.pump(const Duration(minutes: 5));
+    expect(find.text('A002 has been called'), findsOneWidget);
 
     service.dispose();
   });

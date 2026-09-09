@@ -390,8 +390,18 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('Your service has started'), findsOneWidget);
+    // Both are already recorded — nothing is lost — but the banner is
+    // persistent now, so the second one queues behind the first rather than
+    // replacing it or stacking visually.
     expect(notificationCenter.notifications, hasLength(2));
+    expect(find.text('Your token was called'), findsOneWidget);
+    expect(find.text('Your service has started'), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pump();
+
+    expect(find.text('Your token was called'), findsNothing);
+    expect(find.text('Your service has started'), findsOneWidget);
 
     bannerService.dispose();
   });

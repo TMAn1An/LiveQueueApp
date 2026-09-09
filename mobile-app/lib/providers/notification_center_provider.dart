@@ -95,9 +95,17 @@ class NotificationCenterProvider extends ChangeNotifier {
     final where = queueName.isEmpty ? '' : ' · $queueName';
     switch (token.status) {
       case TokenStatus.called:
+        // V2 UX + Token Lifecycle checkpoint, Part A #7: CALLED is exactly
+        // the moment the backend also generates a fresh service-start
+        // verification code (see backend/src/services/token.service.ts
+        // callToken) — a separate "your code is ready" notification would be
+        // a second banner for the same logical event, which the dedup rule
+        // forbids. The body says the code is ready; View already opens Live
+        // Tracking, the one existing ownership-checked surface that shows
+        // the digits — never repeated here, in FCM, or in this stored text.
         return (
           'Your token was called',
-          '${token.serialNumber}$where',
+          '${token.serialNumber}$where — your verification code is ready',
           token.calledAt ?? DateTime.now(),
         );
       case TokenStatus.inProgress:

@@ -82,6 +82,19 @@ void main() {
       ]));
     });
 
+    test('CALLED tells the customer their verification code is ready, without ever including the code', () {
+      final provider = _provider();
+      provider.recordStatusChange(
+        _token(status: 'CALLED', calledAt: '2026-01-01T10:00:00.000Z'),
+        queueName: 'Pharmacy',
+      );
+
+      final entry = provider.notifications.single;
+      expect(entry.body, contains('verification code is ready'));
+      // Never the digits themselves — only ever that a code exists.
+      expect(entry.body, isNot(matches(RegExp(r'\d{4,}'))));
+    });
+
     test('WAITING produces no entry — nothing new to announce', () {
       final provider = _provider();
       provider.recordStatusChange(_token(status: 'WAITING'), queueName: 'Pharmacy');
@@ -89,14 +102,15 @@ void main() {
       expect(provider.notifications, isEmpty);
     });
 
-    test('SKIPPED is worded to say the token can still be recalled', () {
+    test('SKIPPED is worded to say the customer must scan the queue QR again, not that staff can recall it', () {
       final provider = _provider();
       provider.recordStatusChange(
         _token(status: 'SKIPPED', skippedAt: '2026-01-01T10:00:00.000Z'),
         queueName: 'Pharmacy',
       );
 
-      expect(provider.notifications.single.body, contains('recall'));
+      expect(provider.notifications.single.body, contains('scan the queue QR code again'));
+      expect(provider.notifications.single.body, isNot(contains('recall')));
     });
 
     test('never includes a form answer, email, or any field beyond serial/queue/status', () {
@@ -125,7 +139,7 @@ void main() {
       expect(provider.notifications, hasLength(1));
     });
 
-    test('a recall — CALLED again with a new calledAt — is a genuinely new entry', () {
+    test('a second CALLED entry with a fresh calledAt is a genuinely new entry', () {
       final provider = _provider();
       provider.recordStatusChange(
         _token(status: 'CALLED', calledAt: '2026-01-01T10:00:00.000Z'),
@@ -276,7 +290,7 @@ void main() {
       expect(added, hasLength(1));
     });
 
-    test('fires again for a genuinely new event — a recall with a fresh timestamp', () {
+    test('fires again for a genuinely new event — a fresh timestamp on the same status', () {
       final added = <String>[];
       final provider = NotificationCenterProvider(
         storage: NotificationCenterStorageService(),

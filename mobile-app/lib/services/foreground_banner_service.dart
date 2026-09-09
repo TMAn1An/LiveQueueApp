@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 /// A small, non-blocking "🔔 A002 has been called" banner that can appear
@@ -18,25 +16,39 @@ import 'package:flutter/material.dart';
 /// can never hold a stale or already-disposed context.
 ///
 /// Not an [AlertDialog]: this must never block the current screen or demand
-/// a response — it auto-dismisses, and the customer can keep using
-/// whatever they were doing underneath it.
+/// a response — the customer can keep using whatever they were doing
+/// underneath it.
+///
+/// Persistent, not auto-dismissing (V2 UX + Token Lifecycle checkpoint,
+/// Part A #2): a customer who glances away for a few seconds must not have
+/// missed it. It stays up until explicitly dismissed (the × or a tap). A
+/// second event arriving while one is already showing is queued rather than
+/// silently dropped or overwritten — every genuinely new event still gets
+/// its own banner, just never more than one visible at once (no stacking).
 class ForegroundBannerService {
   ForegroundBannerService(this._navigatorKey);
 
   final GlobalKey<NavigatorState> _navigatorKey;
 
   OverlayEntry? _current;
-  Timer? _dismissTimer;
+  final List<_QueuedBanner> _queue = [];
 
-  static const _visibleFor = Duration(seconds: 5);
-
-  /// Shows a banner, replacing whatever is currently shown. Silently does
-  /// nothing if the app has no attached [Overlay] yet (e.g. called before
-  /// the first frame) — a missed banner costs nothing, since the event is
-  /// already durably recorded in the Notification Center regardless.
+  /// Shows a banner, or queues it behind whatever is currently shown.
+  /// Silently does nothing (not even queueing) if the app has no attached
+  /// [Overlay] yet (e.g. called before the first frame) — a missed banner
+  /// costs nothing, since the event is already durably recorded in the
+  /// Notification Center regardless.
   void show({required String title, required String body, required VoidCallback onTap}) {
-    dismiss();
+    if (_navigatorKey.currentState?.overlay == null) return;
 
+    if (_current != null) {
+      _queue.add(_QueuedBanner(title: title, body: body, onTap: onTap));
+      return;
+    }
+    _showNow(title: title, body: body, onTap: onTap);
+  }
+
+  void _showNow({required String title, required String body, required VoidCallback onTap}) {
     final overlay = _navigatorKey.currentState?.overlay;
     if (overlay == null) return;
 
@@ -53,17 +65,32 @@ class ForegroundBannerService {
     );
     _current = entry;
     overlay.insert(entry);
-    _dismissTimer = Timer(_visibleFor, dismiss);
   }
 
+  /// Dismisses whatever is currently shown and, if another event arrived in
+  /// the meantime, immediately shows it next.
   void dismiss() {
-    _dismissTimer?.cancel();
-    _dismissTimer = null;
+    _current?.remove();
+    _current = null;
+
+    if (_queue.isNotEmpty) {
+      final next = _queue.removeAt(0);
+      _showNow(title: next.title, body: next.body, onTap: next.onTap);
+    }
+  }
+
+  void dispose() {
+    _queue.clear();
     _current?.remove();
     _current = null;
   }
+}
 
-  void dispose() => dismiss();
+class _QueuedBanner {
+  const _QueuedBanner({required this.title, required this.body, required this.onTap});
+  final String title;
+  final String body;
+  final VoidCallback onTap;
 }
 
 class _ForegroundBanner extends StatelessWidget {

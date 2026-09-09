@@ -176,6 +176,22 @@ void main() {
     expect(find.text('Active Token · A002'), findsNothing);
   });
 
+  testWidgets('every active-token row is a filled button — visually primary, matching the single-token style',
+      (tester) async {
+    final apiClient = ApiClient(
+      httpClient: MockClient((_) async => _ok(_tokenJson(id: 'x', queueId: 'x', serial: 'x'))),
+      baseUrl: 'http://localhost:4000',
+    );
+    final active = await _twoTokenProvider(apiClient);
+
+    await tester.pumpWidget(_appUnder(apiClient, active));
+
+    expect(find.widgetWithText(FilledButton, 'A002 · Pharmacy'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'B014 · Billing'), findsOneWidget);
+    // Scan QR/History/Settings stay outlined — active tokens alone are primary.
+    expect(find.widgetWithText(OutlinedButton, 'Scan QR Code'), findsOneWidget);
+  });
+
   testWidgets('tapping the second row opens live tracking for that token, not the first',
       (tester) async {
     final apiClient = ApiClient(

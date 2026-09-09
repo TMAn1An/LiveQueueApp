@@ -180,8 +180,13 @@ class HomeScreen extends StatelessWidget {
       for (final token in activeTokens) ...[
         SizedBox(
           width: double.infinity,
-          child: OutlinedButton.icon(
-            icon: const Icon(Icons.confirmation_number_outlined),
+          // V2 UX + Token Lifecycle checkpoint, Part C: filled/primary, the
+          // same visual language as the single-token case above — an active
+          // token is the most important thing on this screen and must read
+          // that way regardless of how many there are. Scan QR/History/
+          // Settings stay outlined, deliberately secondary to this.
+          child: FilledButton.icon(
+            icon: const Icon(Icons.confirmation_number),
             label: Text(activeTokenSummaryLabel(token)),
             onPressed: () => openActiveToken(context, token.tokenId),
           ),
