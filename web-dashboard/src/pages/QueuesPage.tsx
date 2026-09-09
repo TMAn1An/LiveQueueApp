@@ -6,6 +6,7 @@ import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState } from '../components/Spinner';
 import { Modal } from '../components/Modal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { SearchInput } from '../components/SearchInput';
@@ -130,30 +131,27 @@ function QueueRow({ queue }: { queue: Queue }) {
                     ? 'Pause'
                     : 'Resume'}
               </Button>
-              {!confirmingDelete ? (
-                <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-                  Delete
-                </Button>
-              ) : (
-                <>
-                  <span className="self-center text-xs text-red-600">
-                    {queue.services.length > 0 ? 'Has services — confirm?' : 'Confirm?'}
-                  </span>
-                  <Button
-                    variant="danger"
-                    loading={deleteQueue.isPending}
-                    onClick={() => deleteQueue.mutate(queue.id)}
-                  >
-                    {deleteQueue.isPending ? 'Deleting…' : 'Yes, delete'}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setConfirmingDelete(false)}>
-                    Cancel
-                  </Button>
-                </>
-              )}
+              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+                Delete
+              </Button>
             </div>
           )}
         </PermissionGate>
+        {confirmingDelete && (
+          <ConfirmDialog
+            title={`Delete queue "${queue.name}"?`}
+            message={
+              queue.services.length > 0
+                ? `This queue has ${queue.services.length} service${queue.services.length === 1 ? '' : 's'} configured. Deleting it cannot be undone.`
+                : 'This cannot be undone.'
+            }
+            confirming={deleteQueue.isPending}
+            onConfirm={() =>
+              deleteQueue.mutate(queue.id, { onSuccess: () => setConfirmingDelete(false) })
+            }
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        )}
       </td>
     </tr>
   );

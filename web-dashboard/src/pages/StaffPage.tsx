@@ -11,6 +11,7 @@ import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Modal } from '../components/Modal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { Pagination } from '../components/Pagination';
@@ -180,27 +181,23 @@ function StaffRow({ staff }: { staff: Staff }) {
                     ? 'Suspend'
                     : 'Reactivate'}
               </Button>
-              {!confirmingDelete ? (
-                <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-                  Delete
-                </Button>
-              ) : (
-                <>
-                  <Button
-                    variant="danger"
-                    loading={deleteStaff.isPending}
-                    onClick={() => deleteStaff.mutate(staff.id)}
-                  >
-                    {deleteStaff.isPending ? 'Deleting…' : 'Confirm'}
-                  </Button>
-                  <Button variant="ghost" onClick={() => setConfirmingDelete(false)}>
-                    Cancel
-                  </Button>
-                </>
-              )}
+              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+                Delete
+              </Button>
             </div>
           )}
         </PermissionGate>
+        {confirmingDelete && (
+          <ConfirmDialog
+            title={`Remove staff member "${staff.name}"?`}
+            message="They will immediately lose access to the dashboard. This cannot be undone."
+            confirming={deleteStaff.isPending}
+            onConfirm={() =>
+              deleteStaff.mutate(staff.id, { onSuccess: () => setConfirmingDelete(false) })
+            }
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        )}
       </td>
     </tr>
   );

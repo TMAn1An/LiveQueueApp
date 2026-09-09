@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../repositories/device_repository.dart';
 import '../repositories/history_repository.dart';
+import '../widgets/confirm_dialog.dart';
 import 'notification_settings_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -25,7 +26,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
+  /// V2 Product Completion checkpoint, Part B: clearing history is a
+  /// permanent local deletion and must ask first. Active tokens are a
+  /// separate record (ActiveTokenStorageService, not HistoryStorageService)
+  /// and are never touched by this — the dialog says so explicitly, since
+  /// "history" and "the queue I'm currently standing in" are easy to
+  /// conflate from the customer's side even though nothing here can affect
+  /// the latter.
   Future<void> _clearHistory(BuildContext context) async {
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Clear token history?',
+      message: 'This will remove your saved token history from this device. '
+          'Active tokens will not be removed.',
+      confirmLabel: 'Clear',
+    );
+    if (!confirmed) return;
+    if (!context.mounted) return;
+
     await context.read<HistoryRepository>().clear();
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(

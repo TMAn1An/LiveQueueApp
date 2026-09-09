@@ -13,6 +13,7 @@ import {
 import { useStaffList } from '../hooks/useStaff';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState, InlineSpinner } from '../components/Spinner';
 import { PermissionGate } from '../components/PermissionGate';
@@ -41,6 +42,9 @@ function CounterRow({
   const setStatus = useSetCounterStatus(queueId);
   const assignCounter = useAssignCounter(queueId);
   const deleteCounter = useDeleteCounter(queueId);
+  // V2 Product Completion checkpoint, Part B: Delete previously called the
+  // mutation directly on click, with no way to back out of a mis-click.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Only staff who could actually take this counter: free ones, plus whoever
   // currently holds it. The backend decides — a client-side filter over the
   // full staff list would go stale the moment another admin assigned someone.
@@ -173,20 +177,29 @@ function CounterRow({
                 )}
               </div>
             </PermissionGate>
-            <Button
-              variant="danger"
-              loading={deleteCounter.isPending}
-              onClick={() => {
-                onError('');
-                deleteCounter.mutate(counter.id, {
-                  onError: (err) => onError(errorMessage(err, 'Failed to delete counter.')),
-                });
-              }}
-            >
-              {deleteCounter.isPending ? 'Deleting…' : 'Delete'}
+            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+              Delete
             </Button>
           </div>
         </PermissionGate>
+        {confirmingDelete && (
+          <ConfirmDialog
+            title={`Delete counter "${counter.name}"?`}
+            message="Staff will no longer be able to serve customers from this counter. This cannot be undone."
+            confirming={deleteCounter.isPending}
+            onConfirm={() => {
+              onError('');
+              deleteCounter.mutate(counter.id, {
+                onSuccess: () => setConfirmingDelete(false),
+                onError: (err) => {
+                  setConfirmingDelete(false);
+                  onError(errorMessage(err, 'Failed to delete counter.'));
+                },
+              });
+            }}
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        )}
       </td>
     </tr>
   );

@@ -159,3 +159,50 @@ describe('QueuesPage — search', () => {
     expect(screen.getByText('Front Desk')).toBeInTheDocument();
   });
 });
+
+// V2 Product Completion checkpoint, Part B: deleting a queue must ask first,
+// through the shared ConfirmDialog rather than the page's own ad-hoc
+// inline confirm text it used to show.
+describe('QueuesPage — delete confirmation', () => {
+  it('does not call the delete mutation until Delete is clicked and confirmed', () => {
+    const mutate = vi.fn();
+    vi.mocked(useDeleteQueue).mockReturnValue({ mutate } as unknown as ReturnType<
+      typeof useDeleteQueue
+    >);
+    vi.mocked(useQueues).mockReturnValue({
+      data: [mockQueue({ id: 'q1', name: 'Pharmacy' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueues>);
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(screen.getByText('Delete queue "Pharmacy"?')).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Delete queue "Pharmacy"?')).not.toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('calls the existing delete mutation once Delete is confirmed', () => {
+    const mutate = vi.fn();
+    vi.mocked(useDeleteQueue).mockReturnValue({ mutate } as unknown as ReturnType<
+      typeof useDeleteQueue
+    >);
+    vi.mocked(useQueues).mockReturnValue({
+      data: [mockQueue({ id: 'q1', name: 'Pharmacy' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueues>);
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    // Two "Delete" buttons exist once the dialog is open: the row's original
+    // trigger, and the dialog's own confirm button — the second one.
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+    fireEvent.click(deleteButtons[deleteButtons.length - 1]);
+
+    expect(mutate).toHaveBeenCalledWith('q1', expect.anything());
+  });
+});

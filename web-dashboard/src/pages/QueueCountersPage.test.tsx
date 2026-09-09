@@ -210,3 +210,39 @@ describe('QueueCountersPage — who may assign staff', () => {
     expect(useAssignableStaff).toHaveBeenCalledWith(expect.any(String), false);
   });
 });
+
+// V2 Product Completion checkpoint, Part B: deleting a counter must ask
+// first — it previously called the mutation directly on click.
+describe('QueueCountersPage — delete confirmation', () => {
+  it('does not call the delete mutation until Delete is clicked and confirmed', async () => {
+    const mutate = vi.fn();
+    vi.mocked(useDeleteCounter).mockReturnValue({ mutate } as unknown as ReturnType<
+      typeof useDeleteCounter
+    >);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(screen.getByText('Delete counter "Counter 1"?')).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Delete counter "Counter 1"?')).not.toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('calls the existing delete mutation once confirmed', async () => {
+    const mutate = vi.fn();
+    vi.mocked(useDeleteCounter).mockReturnValue({ mutate } as unknown as ReturnType<
+      typeof useDeleteCounter
+    >);
+    renderPage();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+    await userEvent.click(deleteButtons[deleteButtons.length - 1]);
+
+    expect(mutate).toHaveBeenCalledWith('c1', expect.anything());
+  });
+});

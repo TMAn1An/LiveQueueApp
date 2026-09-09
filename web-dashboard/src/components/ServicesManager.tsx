@@ -6,6 +6,7 @@ import {
   useUpdateService,
 } from '../hooks/useServices';
 import { Button } from './Button';
+import { ConfirmDialog } from './ConfirmDialog';
 import { StatusBadge } from './StatusBadge';
 import { PermissionGate } from './PermissionGate';
 import { EmptyState } from './Spinner';
@@ -18,6 +19,9 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(service.serviceName);
   const [duration, setDuration] = useState(service.durationMinutes);
+  // V2 Product Completion checkpoint, Part B: this Delete previously called
+  // the mutation directly on click, with no way to back out of a mis-click.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   if (editing) {
     return (
@@ -81,15 +85,22 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             >
               {setStatus.isPending ? 'Updating…' : service.isActive ? 'Deactivate' : 'Activate'}
             </Button>
-            <Button
-              variant="danger"
-              loading={deleteService.isPending}
-              onClick={() => deleteService.mutate(service.id)}
-            >
-              {deleteService.isPending ? 'Deleting…' : 'Delete'}
+            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+              Delete
             </Button>
           </div>
         </PermissionGate>
+        {confirmingDelete && (
+          <ConfirmDialog
+            title={`Delete service "${service.serviceName}"?`}
+            message="Customers will no longer be able to select this service. This cannot be undone."
+            confirming={deleteService.isPending}
+            onConfirm={() =>
+              deleteService.mutate(service.id, { onSuccess: () => setConfirmingDelete(false) })
+            }
+            onCancel={() => setConfirmingDelete(false)}
+          />
+        )}
       </td>
     </tr>
   );

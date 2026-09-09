@@ -128,3 +128,44 @@ describe('StaffPage — invitations', () => {
     expect(await screen.findByText('Could not send the email.')).toBeInTheDocument();
   });
 });
+
+// V2 Product Completion checkpoint, Part B: removing a staff member must
+// ask first, through the shared ConfirmDialog rather than the page's own
+// ad-hoc inline "Confirm"/"Cancel" it used to show.
+describe('StaffPage — delete confirmation', () => {
+  it('does not call the delete mutation until Delete is clicked and confirmed', async () => {
+    const mutate = vi.fn();
+    vi.mocked(useDeleteStaff).mockReturnValue({
+      mutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useDeleteStaff>);
+    mockList([staff({ id: 's1', name: 'Jane Doe', role: 'STAFF' })]);
+    render(<StaffPage />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(screen.getByText('Remove staff member "Jane Doe"?')).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Remove staff member "Jane Doe"?')).not.toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it('calls the existing delete mutation once removal is confirmed', async () => {
+    const mutate = vi.fn();
+    vi.mocked(useDeleteStaff).mockReturnValue({
+      mutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useDeleteStaff>);
+    mockList([staff({ id: 's1', name: 'Jane Doe', role: 'STAFF' })]);
+    render(<StaffPage />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+    await userEvent.click(deleteButtons[deleteButtons.length - 1]);
+
+    expect(mutate).toHaveBeenCalledWith('s1', expect.anything());
+  });
+});
