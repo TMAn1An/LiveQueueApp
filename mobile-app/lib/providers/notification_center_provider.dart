@@ -115,7 +115,7 @@ class NotificationCenterProvider extends ChangeNotifier {
       case TokenStatus.skipped:
         return (
           'Your token was skipped',
-          '${token.serialNumber}$where — staff can still recall it',
+          '${token.serialNumber}$where — scan the queue QR code again if you still need service',
           token.skippedAt ?? DateTime.now(),
         );
       case TokenStatus.cancelled:

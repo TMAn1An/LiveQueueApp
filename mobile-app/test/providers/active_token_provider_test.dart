@@ -242,43 +242,29 @@ void main() {
     expect(provider.hasActiveToken, isTrue);
   });
 
-  group('SKIPPED — recoverable, not removed', () {
-    test('a resync that finds SKIPPED keeps the token, updating its status', () async {
+  group('SKIPPED — terminal (Recall removed)', () {
+    test('a resync that finds SKIPPED removes the token, same as COMPLETED/CANCELLED', () async {
       final provider = _build(MockClient((_) async => _ok(_tokenJson(status: 'SKIPPED'))));
       await provider.remember(_token(), queueName: 'Pharmacy');
 
       final token = await provider.resyncOne('token-1');
 
-      // SKIPPED is not "isActive" — recall/live-tracking is a separate
-      // concern from "is it still worth remembering" — but it must not be
-      // dropped from the collection: staff can still recall it.
-      expect(token, isNotNull);
-      expect(token!.status, TokenStatus.skipped);
-      expect(provider.summaryFor('token-1'), isNotNull);
-      expect(provider.summaryFor('token-1')!.status, TokenStatus.skipped);
+      expect(token, isNull);
+      expect(provider.summaryFor('token-1'), isNull);
     });
 
-    test('syncFromTracked keeps a SKIPPED token instead of removing it', () async {
+    test('syncFromTracked removes a SKIPPED token instead of keeping it', () async {
       final provider = _build(MockClient((_) async => _ok(_tokenJson())));
       await provider.remember(_token(), queueName: 'Pharmacy');
 
       await provider.syncFromTracked(_token(status: 'SKIPPED'));
 
-      expect(provider.hasActiveToken, isTrue);
-      expect(provider.summaryFor('token-1')!.status, TokenStatus.skipped);
+      expect(provider.hasActiveToken, isFalse);
+      expect(provider.summaryFor('token-1'), isNull);
     });
 
-    test('a recall back to CALLED after SKIPPED updates the same entry', () async {
-      final provider = _build(MockClient((_) async => _ok(_tokenJson(status: 'CALLED'))));
-      await provider.remember(_token(status: 'SKIPPED'), queueName: 'Pharmacy');
-
-      await provider.resyncOne('token-1');
-
-      expect(provider.summaryFor('token-1')!.status, TokenStatus.called);
-    });
-
-    test('COMPLETED after SKIPPED does finally remove it', () async {
-      final provider = _build(MockClient((_) async => _ok(_tokenJson(status: 'COMPLETED'))));
+    test('a stale locally-stored SKIPPED entry (from before this behavior shipped) is cleared on resync', () async {
+      final provider = _build(MockClient((_) async => _ok(_tokenJson(status: 'SKIPPED'))));
       await provider.remember(_token(status: 'SKIPPED'), queueName: 'Pharmacy');
 
       await provider.resyncOne('token-1');

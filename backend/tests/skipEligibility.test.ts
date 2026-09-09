@@ -166,17 +166,17 @@ describe('WAITING skip eligibility', () => {
     }
   });
 
-  it('leaves Recall of a skipped token working as before', async () => {
+  it('leaves a skipped token terminal — no route back to CALLED', async () => {
     const org = await setupQueue();
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     expect((await skip(org.accessToken, first.id)).status).toBe(200);
 
-    const recall = await api()
-      .post(`/api/tokens/${first.id}/recall`)
+    const callRes = await api()
+      .post(`/api/tokens/${first.id}/call`)
       .set('Authorization', `Bearer ${org.accessToken}`)
       .send({ counterId: org.counters[0]!.id });
 
-    expect(recall.status).toBe(200);
-    expect(recall.body.data.status).toBe('CALLED');
+    expect(callRes.status).toBe(422);
+    expect(callRes.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
 });

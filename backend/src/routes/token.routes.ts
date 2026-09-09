@@ -112,14 +112,6 @@ router.post(
   validate(tokenIdOnlySchema),
   tokenController.skip,
 );
-router.post(
-  '/:tokenId/recall',
-  authenticate,
-  requireVerified,
-  requirePermission('operate_tokens'),
-  validate(callTokenSchema),
-  tokenController.recall,
-);
 router.patch(
   '/:tokenId/duration',
   authenticate,

@@ -140,7 +140,7 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     expect(called).toHaveLength(1);
   });
 
-  it('Test 7: recall is exempt from the FCFS-order check but still bounded by counter capacity', async () => {
+  it('Test 7: a skipped token cannot be called again, and rejoining goes to the end of the line', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
@@ -154,14 +154,22 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     await api().post(`/api/tokens/${a001.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`);
     await call(ctx.accessToken, a002.id, counter.id);
 
-    // Recalling a001 (earlier sequence number than the now-CALLED a002)
-    // must not be rejected as an FCFS violation — recall only applies to
-    // SKIPPED tokens, which are never part of the WAITING order check.
-    const recallRes = await api()
-      .post(`/api/tokens/${a001.id}/recall`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ counterId: counter.id });
-    expect(recallRes.status).toBe(409);
-    expect(recallRes.body.error.code).toBe('COUNTER_NOT_AVAILABLE');
+    // Recall no longer exists — a001 is terminal and can never be called.
+    const callRes = await call(ctx.accessToken, a001.id, counter.id);
+    expect(callRes.status).toBe(422);
+    expect(callRes.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
+
+    // The same device rejoining gets a brand new token at the END of the
+    // line — never restored to its old (earlier) sequence position.
+    const rejoined = await createToken({
+      queueId: queue.id,
+      serviceId: service.id,
+      deviceIdentifier: a001.deviceIdentifier,
+    });
+    const [a002Row, rejoinedRow] = await Promise.all([
+      prisma.token.findUniqueOrThrow({ where: { id: a002.id } }),
+      prisma.token.findUniqueOrThrow({ where: { id: rejoined.id } }),
+    ]);
+    expect(rejoinedRow.sequenceNumber).toBeGreaterThan(a002Row.sequenceNumber);
   });
 });

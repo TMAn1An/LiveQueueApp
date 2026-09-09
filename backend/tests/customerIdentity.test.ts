@@ -555,13 +555,12 @@ describe('repeat enforcement by customer identity', () => {
   });
 
   /**
-   * A skipped customer who turns up is recalled onto the same token, so the
-   * hold released at the skip has to be taken again — and the visit has to be
-   * recorded when it is finally delivered. Before this was handled, an
-   * ordinary "skip the no-show, recall them when they arrive" shift bypassed
-   * the restriction entirely.
+   * Recall no longer exists — a skipped customer's only path back to service
+   * is a brand new token via a fresh join, which takes its own claim. This
+   * confirms the rejoined token's own visit is what gets recorded and
+   * consumed, and the restriction correctly re-applies to a third join after.
    */
-  it('records the visit when a skipped customer is recalled and served', async () => {
+  it('records the visit when a skipped customer rejoins and is served on the new token', async () => {
     const org = await setupQueue(restrictByNid());
     const counter = await createCounter(org.accessToken, org.queue.id);
     await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
@@ -570,39 +569,34 @@ describe('repeat enforcement by customer identity', () => {
       .post(`/api/tokens/${first.body.data.id}/skip`)
       .set('Authorization', `Bearer ${org.accessToken}`);
 
-    const recalled = await api()
-      .post(`/api/tokens/${first.body.data.id}/recall`)
+    const second = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
+    expect(second.status).toBe(201);
+
+    // Holding the identity now: a third installation cannot also join.
+    const whileActive = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd3');
+    expect(whileActive.status).toBe(409);
+    expect(whileActive.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
+
+    await api()
+      .post(`/api/tokens/${second.body.data.id}/call`)
       .set('Authorization', `Bearer ${org.accessToken}`)
       .send({ counterId: counter.id });
-    expect(recalled.status).toBe(200);
-
-    // Recalled and about to be served: the hold is back, so the same person
-    // cannot also join from another installation.
-    const whileRecalled = await join(
-      org.queue.id,
-      org.service.id,
-      { formData: { nid: 'A-1' } },
-      'd2',
-    );
-    expect(whileRecalled.status).toBe(409);
-    expect(whileRecalled.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
-
-    await startToken(org.accessToken, first.body.data.id, 'd1');
+    await startToken(org.accessToken, second.body.data.id, 'd2');
     await api()
-      .post(`/api/tokens/${first.body.data.id}/complete`)
+      .post(`/api/tokens/${second.body.data.id}/complete`)
       .set('Authorization', `Bearer ${org.accessToken}`);
 
     const claim = await prisma.queueIdentityClaim.findFirstOrThrow({
-      where: { queueId: org.queue.id },
+      where: { queueId: org.queue.id, tokenId: second.body.data.id },
     });
     expect(claim.status).toBe('CONSUMED');
 
-    const afterVisit = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd3');
+    const afterVisit = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd4');
     expect(afterVisit.status).toBe(409);
     expect(afterVisit.body.error.code).toBe('REPEAT_VISIT_NOT_ALLOWED');
   });
 
-  it('refuses a recall once the skipped customer has rejoined elsewhere', async () => {
+  it('the rejoined token holds the identity; the stale skipped token has none of its own', async () => {
     const org = await setupQueue(restrictByNid());
     const counter = await createCounter(org.accessToken, org.queue.id);
     await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
@@ -615,35 +609,20 @@ describe('repeat enforcement by customer identity', () => {
     const rejoined = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
     expect(rejoined.status).toBe(201);
 
-    const recalled = await api()
-      .post(`/api/tokens/${first.body.data.id}/recall`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
-      .send({ counterId: counter.id });
+    const claims = await prisma.queueIdentityClaim.findMany({ where: { queueId: org.queue.id } });
+    expect(claims).toHaveLength(1);
+    expect(claims[0]!.tokenId).toBe(rejoined.body.data.id);
 
-    // The newer token holds the identity; recalling the stale one would serve
-    // the same person twice.
-    expect(recalled.status).toBe(409);
-    expect(recalled.body.error.code).toBe('IDENTITY_ALREADY_CLAIMED');
     const stale = await prisma.token.findUniqueOrThrow({ where: { id: first.body.data.id } });
     expect(stale.status).toBe('SKIPPED');
-  });
 
-  it('still recalls freely on a queue that does not limit repeat visits', async () => {
-    const org = await setupQueue({}, []);
-    const counter = await createCounter(org.accessToken, org.queue.id);
-    await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
-    const first = await join(org.queue.id, org.service.id, { formData: {} }, 'd1');
-    await api()
-      .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${org.accessToken}`);
-
-    const recalled = await api()
-      .post(`/api/tokens/${first.body.data.id}/recall`)
+    // The old, now-terminal token cannot be called back into service.
+    const callStale = await api()
+      .post(`/api/tokens/${first.body.data.id}/call`)
       .set('Authorization', `Bearer ${org.accessToken}`)
       .send({ counterId: counter.id });
-
-    expect(recalled.status).toBe(200);
-    expect(await prisma.queueIdentityClaim.count()).toBe(0);
+    expect(callStale.status).toBe(422);
+    expect(callStale.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
 
   it('never returns the identity snapshot in a staff token response', async () => {

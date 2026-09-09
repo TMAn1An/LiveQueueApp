@@ -137,7 +137,7 @@ class NotificationService {
     await _show(
       channel: _generalChannel,
       title: 'Token skipped',
-      body: 'Token $serialNumber was skipped.',
+      body: 'Token $serialNumber was skipped. Scan the queue QR code again if you still need service.',
       soundEnabled: false,
       vibrationEnabled: false,
     );

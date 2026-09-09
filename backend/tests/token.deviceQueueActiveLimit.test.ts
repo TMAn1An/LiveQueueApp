@@ -45,13 +45,6 @@ function skipToken(accessToken: string, tokenId: string) {
   return api().post(`/api/tokens/${tokenId}/skip`).set('Authorization', `Bearer ${accessToken}`);
 }
 
-function recallToken(accessToken: string, tokenId: string, counterId: string) {
-  return api()
-    .post(`/api/tokens/${tokenId}/recall`)
-    .set('Authorization', `Bearer ${accessToken}`)
-    .send({ counterId });
-}
-
 describe('One active token per device per queue', () => {
   it('rejects a second create (different idempotency key) while the first is WAITING', async () => {
     const org = await setupOrgQueue();
@@ -199,36 +192,27 @@ describe('One active token per device per queue', () => {
     expect(activeCount).toBe(1);
   });
 
-  it('rejects Recall when the device has since created a new active token in the same queue (Recall Option A)', async () => {
+  it('SKIPPED frees the device+queue slot immediately, and the old skipped token is left in place', async () => {
     const org = await setupOrgQueue();
-    const deviceIdentifier = 'device-recall-conflict';
+    const deviceIdentifier = 'device-skip-rejoin';
 
     const firstReq = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     const firstId = firstReq.body.data.id;
     const skipRes = await skipToken(org.accessToken, firstId);
     expect(skipRes.status).toBe(200);
 
-    // The slot is free again — the device takes a brand new active token in
-    // the same queue before staff gets around to recalling the old one.
+    // Recall no longer exists — the only way back to service is a brand new
+    // token, subject to the queue's normal FCFS/repeat rules like anyone else.
     const secondReq = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     expect(secondReq.status).toBe(201);
+    expect(secondReq.body.data.id).not.toBe(firstId);
 
-    const recallRes = await recallToken(org.accessToken, firstId, org.counter.id);
-    expect(recallRes.status).toBe(409);
-    expect(recallRes.body.error.code).toBe('DEVICE_ALREADY_IN_QUEUE');
-  });
-
-  it('allows Recall when the device has no other active token in the queue (unaffected regression case)', async () => {
-    const org = await setupOrgQueue();
-    const deviceIdentifier = 'device-recall-ok';
-
-    const firstReq = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    const firstId = firstReq.body.data.id;
-    const skipRes = await skipToken(org.accessToken, firstId);
-    expect(skipRes.status).toBe(200);
-
-    const recallRes = await recallToken(org.accessToken, firstId, org.counter.id);
-    expect(recallRes.status).toBe(200);
-    expect(recallRes.body.data.status).toBe('CALLED');
+    const rows = await prisma.token.findMany({
+      where: { deviceId: (await prisma.device.findFirst({ where: { deviceIdentifier } }))!.id, queueId: org.queue.id },
+    });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.id === firstId)?.status).toBe('SKIPPED');
+    const activeCount = rows.filter((r) => ['WAITING', 'CALLED', 'IN_PROGRESS'].includes(r.status)).length;
+    expect(activeCount).toBe(1);
   });
 });

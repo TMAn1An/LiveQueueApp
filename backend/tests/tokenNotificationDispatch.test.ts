@@ -107,13 +107,6 @@ function skipToken(setup: Setup) {
   return api().post(`/api/tokens/${setup.tokenId}/skip`).set('Authorization', `Bearer ${setup.accessToken}`);
 }
 
-function recallToken(setup: Setup) {
-  return api()
-    .post(`/api/tokens/${setup.tokenId}/recall`)
-    .set('Authorization', `Bearer ${setup.accessToken}`)
-    .send({ counterId: setup.counterId });
-}
-
 function nextToken(setup: Setup) {
   return api()
     .post(`/api/queues/${setup.queueId}/next`)
@@ -203,24 +196,20 @@ describe('Issue #5 — token status-change FCM notifications', () => {
     });
   });
 
-  it('Test 5: Recall (SKIPPED -> CALLED) sends the CALLED FCM notification', async () => {
+  it('Test 5: a rejected call on a SKIPPED (terminal) token sends no FCM notification', async () => {
     const setup = await setupToken();
     const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
     expect((await skipToken(setup)).status).toBe(200);
     await waitForCallCount(send, 1);
     send.mockClear();
 
-    const res = await recallToken(setup);
+    const res = await callToken(setup);
 
-    expect(res.status).toBe(200);
-    expect(res.body.data.status).toBe('CALLED');
-    const calls = await waitForCallCount(send, 1);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]![1].data).toEqual({
-      type: 'token_status_changed',
-      tokenId: setup.tokenId,
-      status: 'CALLED',
-    });
+    expect(res.status).toBe(422);
+    // Give any (incorrect) async dispatch a chance to have fired before
+    // asserting its absence.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('Test 6: /next (WAITING -> CALLED) sends the CALLED FCM notification', async () => {

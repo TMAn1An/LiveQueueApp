@@ -7,14 +7,14 @@ import '../providers/active_token_provider.dart';
 import '../utils/open_active_token.dart';
 import '../widgets/app_drawer.dart';
 
-/// Every token this installation is currently in a queue with — or may still
-/// be, if one of them was skipped and could yet be recalled (ADR-036,
+/// Every token this installation is currently in a queue with (ADR-036,
 /// extended by the V2 Product Completion checkpoint from a single token to
-/// a collection).
+/// a collection). A skipped token is terminal and is removed from this
+/// collection, not shown here.
 ///
 /// Always resyncs every remembered token before showing anything as
 /// current: a locally remembered summary is only a pointer — staff may have
-/// called, served, skipped or recalled any of these customers while the app
+/// called, served, skipped or completed any of these customers while the app
 /// was closed, and the backend is the only thing that knows. One token's
 /// resync failing (network, a stale 404) never blocks the others from
 /// showing correctly — see [ActiveTokenProvider.resyncAll].

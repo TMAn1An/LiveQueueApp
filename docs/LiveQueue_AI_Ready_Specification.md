@@ -73,7 +73,7 @@ A queue is an independent line. Within one organization, nothing about Queue A m
 - **Assignment is persistent, not workload-based.** A staff member assigned to a counter in Queue A stays operationally bound to Queue A. Their counter being idle, ON_BREAK or OFFLINE — or the queue being empty — does not make them available anywhere else.
 - **Only an explicit unassignment frees them.** Moving someone to another queue is two deliberate steps: unassign from the old counter, then assign to the new one. Nothing transfers a person implicitly.
 - **One staff member holds at most one counter** across the organization, enforced by a unique index as well as a service check, so two simultaneous assignments in different queues cannot both succeed.
-- **Only OWNER and ADMIN may assign, unassign or reassign staff.** This requires the `manage_staff` permission and is enforced by the backend, not only hidden in the UI. Ordinary STAFF keep every operational capability they had — viewing their queue, Call, Skip, Recall, Start, Complete, and managing counters including their own counter's status — but not the decision about who stands where.
+- **Only OWNER and ADMIN may assign, unassign or reassign staff.** This requires the `manage_staff` permission and is enforced by the backend, not only hidden in the UI. Ordinary STAFF keep every operational capability they had — viewing their queue, Call, Skip, Start, Complete, and managing counters including their own counter's status — but not the decision about who stands where.
 
 ## 4.3b Mobile navigation and the active token (ADR-036)
 

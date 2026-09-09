@@ -245,9 +245,9 @@ class TokenTrackingProvider extends ChangeNotifier {
 
     if (previousStatus != updated.status) {
       // V2 Checkpoint 7 (ADR-029): a fresh code exists only while CALLED —
-      // entering CALLED (a first call, or Recall) always fetches the
-      // current one; leaving it (started/skipped/cancelled/expired-away)
-      // always clears the local copy, matching the backend's own lifecycle.
+      // entering CALLED always fetches the current one; leaving it
+      // (started/skipped/cancelled/expired-away) always clears the local
+      // copy, matching the backend's own lifecycle.
       if (updated.status == TokenStatus.called) {
         unawaited(_refreshVerificationCode());
       } else {

@@ -92,15 +92,3 @@ class ActiveTokenSummary {
     return TokenStatus.unknown;
   }
 }
-
-/// What counts as "still worth keeping in the Active Tokens collection".
-///
-/// Wider than [isActiveTokenStatus]: a SKIPPED token has left the counter,
-/// but the backend can still bring it back with no time limit (`/recall`,
-/// SKIPPED -> CALLED — see backend/src/services/token.service.ts callToken).
-/// Removing it here the moment it is skipped would make a token the
-/// customer can legitimately still be served on unreachable from the app
-/// until a push notification happened to arrive. Only COMPLETED and
-/// CANCELLED are genuinely final — nothing transitions out of either.
-bool isRecoverableTokenStatus(TokenStatus status) =>
-    isActiveTokenStatus(status) || status == TokenStatus.skipped;

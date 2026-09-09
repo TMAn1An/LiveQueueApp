@@ -35,7 +35,6 @@ export async function call(req: Request, res: Response) {
     req.auth!.organizationId,
     req.params.tokenId as string,
     req.body.counterId,
-    'WAITING',
   );
   res.status(200).json({ success: true, data: token });
   await auditService.recordAuditEventSafely({
@@ -166,39 +165,6 @@ export async function skip(req: Request, res: Response) {
   // waiting set, but a CALLED/IN_PROGRESS -> SKIPPED transition frees a
   // counter — both shift the ETA simulation, unlike the pre-Checkpoint-4
   // position-only model where only the former mattered.
-  await realtime.broadcastQueueEtaUpdate(token.queueId);
-  await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
-}
-
-/**
- * Recall (spec: Skipped Token Recall) — SKIPPED -> CALLED. Reuses callToken
- * itself (same counter lock/busy-check/compare-and-swap; see its doc
- * comment) since the mechanics are identical to a normal call; only the
- * audit action differs, so the trail distinguishes a deliberate recall from
- * an ordinary first call.
- */
-export async function recall(req: Request, res: Response) {
-  const token = await tokenService.callToken(
-    req.auth!.organizationId,
-    req.params.tokenId as string,
-    req.body.counterId,
-    'SKIPPED',
-  );
-  res.status(200).json({ success: true, data: token });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'token_recalled',
-    entityType: 'token',
-    entityId: token.id,
-    metadata: { counterId: req.body.counterId },
-    ipAddress: req.ip,
-  });
-  await realtime.emitTokenCalled(token.id);
-  // Recall's source is always SKIPPED, never WAITING, so it never removes
-  // anyone from the waiting set — but it does occupy a counter, which can
-  // still shift every WAITING token's simulated ETA (V2 Checkpoint 4,
-  // ADR-026 — pre-Checkpoint-4 this call was correctly skipped, since only
-  // position, not counter occupancy, mattered then).
   await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
 }

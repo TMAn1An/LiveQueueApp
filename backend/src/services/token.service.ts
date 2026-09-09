@@ -494,14 +494,13 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
       return existing;
     }
 
-    // One device may hold at most one non-terminal-for-this-rule token per
-    // queue at a time (approved design). Scoped by (deviceId, queueId) only
-    // — queueId already determines organizationId, so adding it would be
-    // redundant. SKIPPED is deliberately excluded from the blocking set even
-    // though it isn't graph-terminal (SKIPPED -> CALLED via Recall exists) —
-    // the approved rule frees the slot immediately on skip; see the matching
-    // guard in callToken's recall path for the resulting Recall interaction.
-    // Checked under the queue row lock acquired above, so this is race-free
+    // One device may hold at most one active token per queue at a time
+    // (approved design). Scoped by (deviceId, queueId) only — queueId
+    // already determines organizationId, so adding it would be redundant.
+    // SKIPPED (and CANCELLED) are excluded from the blocking set because
+    // they are terminal — the slot frees the moment either happens, and the
+    // customer may rejoin immediately with a brand new token. Checked under
+    // the queue row lock acquired above, so this is race-free
     // against another concurrent createToken call for the same queue —
     // backed by a DB partial unique index (tokens_device_queue_active_key)
     // as a defense-in-depth backstop.
@@ -553,10 +552,9 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         formData: formData as Prisma.InputJsonValue,
         formVersion: lockedQueue.formVersion,
         idempotencyKey,
-        // Snapshot of the identity this token was admitted under. The claim
-        // below is the live enforcement, but it is deleted on skip/cancel —
-        // and a skipped token can be recalled and served, so the token has to
-        // remember who it belongs to (ADR-034 follow-up). The window itself
+        // Snapshot of the identity this token was admitted under, kept for
+        // the settlement read at COMPLETED (ADR-034 follow-up) even though
+        // the live claim itself is deleted on skip/cancel. The window itself
         // is deliberately NOT snapshotted: it is read from the queue when the
         // visit completes, so a policy an admin corrects mid-shift takes
         // effect the way the dashboard says it does.
@@ -731,8 +729,8 @@ async function computeComputedFields(token: Token): Promise<ComputedFields> {
  * token in one queue at once — used by the realtime layer to recompute
  * ETAs after anything that could shift them (approved Phase 4 decision 4,
  * broadened in V2 Checkpoint 4: not just a token leaving WAITING, but any
- * change to counter occupancy — call/start/complete/skip/recall/a staff
- * duration override — since every WAITING token's ETA now depends on the
+ * change to counter occupancy — call/start/complete/skip/a staff duration
+ * override — since every WAITING token's ETA now depends on the
  * state of every active counter, not just its own position).
  */
 export async function listWaitingTokenPositions(queueId: string): Promise<QueueEtaEntry[]> {
@@ -897,28 +895,10 @@ export async function getTokenStatus(tokenId: string) {
  * "lock the token row appropriately" step — Postgres implicitly locks the
  * row for the duration of that UPDATE statement.
  *
- * Shared by both /call (WAITING -> CALLED) and /recall (SKIPPED -> CALLED —
- * see tokenStateMachine.ts) — the mechanics are identical, and reusing this
- * exact function is what keeps recall safe: a token skipped from
- * CALLED/IN_PROGRESS keeps its old counterId (skipToken never clears it),
- * but this function always re-verifies the target counter fresh and
- * unconditionally overwrites counterId, so a stale prior assignment can
- * never leak into an invalid double-served-counter state.
- *
- * `requireSourceStatus` narrows the otherwise-generic
- * assertValidTransition(token.status, 'CALLED') check to exactly the source
- * status the calling endpoint means to represent — WAITING: [CALLED] and
- * SKIPPED: [CALLED] are both valid *transitions*, but /call and /recall are
- * deliberately distinct *operations* (different audit action, different
- * product meaning), so each must reject the other's source state rather
- * than silently accepting it just because the table permits it generically.
+ * Only WAITING -> CALLED. Recall (the former SKIPPED -> CALLED path) has
+ * been removed — SKIPPED is now terminal (see tokenStateMachine.ts).
  */
-export async function callToken(
-  organizationId: string,
-  tokenId: string,
-  counterId: string,
-  requireSourceStatus: 'WAITING' | 'SKIPPED',
-) {
+export async function callToken(organizationId: string, tokenId: string, counterId: string) {
   const token = await findTokenScoped(organizationId, tokenId);
   const counter = await findCounterScoped(organizationId, counterId);
 
@@ -926,7 +906,7 @@ export async function callToken(
     throw new AppError(409, 'COUNTER_QUEUE_MISMATCH', "Counter does not belong to the token's queue.");
   }
 
-  if (token.status !== requireSourceStatus) {
+  if (token.status !== 'WAITING') {
     throw new AppError(
       422,
       'INVALID_TOKEN_TRANSITION',
@@ -934,35 +914,6 @@ export async function callToken(
     );
   }
   assertValidTransition(token.status, 'CALLED');
-
-  // Recall-only guard (approved design, Option A): skipping a token frees
-  // its device+queue slot immediately, so the device may have gone on to
-  // create a brand new active token in this same queue in the meantime.
-  // Recalling the old skipped token would then produce two active tokens
-  // for the same device in the same queue — reject it instead. Not needed
-  // on the plain /call (WAITING) path: the one-active-token-per-device-per-
-  // queue invariant already guarantees a WAITING token has no other active
-  // sibling to conflict with. The DB partial unique index
-  // (tokens_device_queue_active_key) remains the authoritative backstop for
-  // the narrow race window this pre-check doesn't fully close (this
-  // function holds no lock analogous to createToken's queue-row lock).
-  if (requireSourceStatus === 'SKIPPED') {
-    const conflicting = await prisma.token.findFirst({
-      where: {
-        deviceId: token.deviceId,
-        queueId: token.queueId,
-        status: { in: ['WAITING', 'CALLED', 'IN_PROGRESS'] },
-        id: { not: tokenId },
-      },
-    });
-    if (conflicting) {
-      throw new AppError(
-        409,
-        'DEVICE_ALREADY_IN_QUEUE',
-        'This device already has another active token in this queue; recall is not allowed.',
-      );
-    }
-  }
 
   return prisma.$transaction(async (tx) => {
     const counterRows = await tx.$queryRaw<{ id: string; status: string }[]>`
@@ -973,50 +924,35 @@ export async function callToken(
       throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is not active.');
     }
 
-    // V2 Checkpoint 3 (ADR-025): strict FCFS, WAITING path only — a manually
-    // chosen tokenId must be the earliest WAITING token in its queue, or
-    // staff could bypass arrival order entirely (the exact V1 gap this
-    // checkpoint closes). Recall (SKIPPED -> CALLED) is deliberately exempt:
-    // a skipped token isn't WAITING, so it can never be "out of order" among
-    // waiting tokens — its own capacity constraint is the counter-busy check
-    // below, shared with this same path.
+    // V2 Checkpoint 3 (ADR-025): strict FCFS — a manually chosen tokenId
+    // must be the earliest WAITING token in its queue, or staff could bypass
+    // arrival order entirely (the exact V1 gap this checkpoint closes).
     //
     // A plain (non-locking) EXISTS read is sufficient here, not a race: a
     // token's sequenceNumber is assigned once at creation and never reused,
-    // and nothing in the state machine transitions a token back *into*
-    // WAITING (SKIPPED -> CALLED goes straight to CALLED). So the set of
-    // "WAITING tokens with a smaller sequence number than this one" can only
+    // and nothing in the state machine transitions a token back into
+    // WAITING. So the set of "WAITING tokens with a smaller sequence number
+    // than this one" can only
     // ever shrink over time, never gain a new, smaller member after this
     // check runs — there is no window in which a concurrent transaction can
     // turn a true "no earlier token" result into a false one before this
     // transaction's own compare-and-swap UPDATE commits.
-    if (requireSourceStatus === 'WAITING') {
-      const earlierWaitingRows = await tx.$queryRaw<{ exists: boolean }[]>`
-        SELECT EXISTS (
-          SELECT 1 FROM tokens
-          WHERE queue_id = ${token.queueId}
-            AND status = 'WAITING'
-            AND sequence_number < ${token.sequenceNumber}
-        ) AS "exists"
-      `;
-      if (earlierWaitingRows[0]?.exists) {
-        throw new AppError(
-          409,
-          'FCFS_VIOLATION',
-          'An earlier customer is still waiting. The earliest eligible customer must be called first.',
-        );
-      }
+    const earlierWaitingRows = await tx.$queryRaw<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM tokens
+        WHERE queue_id = ${token.queueId}
+          AND status = 'WAITING'
+          AND sequence_number < ${token.sequenceNumber}
+      ) AS "exists"
+    `;
+    if (earlierWaitingRows[0]?.exists) {
+      throw new AppError(
+        409,
+        'FCFS_VIOLATION',
+        'An earlier customer is still waiting. The earliest eligible customer must be called first.',
+      );
     }
 
-    // Excludes this same tokenId: without it, two racing requests for the
-    // *same already-CALLED-then-skipped* token/counter pair (only possible
-    // via recall — a fresh WAITING token could never already occupy this
-    // counter) would have the loser misread its own winning twin's
-    // just-committed row as "a different token is busy" instead of
-    // correctly falling through to the TOKEN_STATE_CHANGED check below. This
-    // same check is what bounds Recall to available counter capacity
-    // (checkpoint requirement 7) — recall shares this exact function, so a
-    // busy counter rejects a recall attempt identically to a normal call.
     const busy = await tx.token.findFirst({
       where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] }, id: { not: tokenId } },
     });
@@ -1024,14 +960,8 @@ export async function callToken(
       throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is already serving another token.');
     }
 
-    // V2 Checkpoint 7 (ADR-029): every legitimate entry into CALLED — a
-    // plain /call and a Recall alike, since both paths converge here — gets
-    // a brand new service-start verification code. Recall never reuses a
-    // stale prior code (section 18 of the checkpoint spec); this is also
-    // what makes "customer cancels while staff is mid-Recall" behave
-    // correctly, since a fresh CALLED entry always starts a fresh OTP
-    // lifecycle rather than inheriting whatever a much-earlier CALLED period
-    // left behind.
+    // V2 Checkpoint 7 (ADR-029): every legitimate entry into CALLED gets a
+    // brand new service-start verification code.
     const otpCode = generateOtpCode();
     const otpCipher = encryptOtpCode(tokenId, otpCode);
     const otpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60_000);
@@ -1051,17 +981,8 @@ export async function callToken(
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
     }
 
-    // Recall is the one path back out of a released state, so it is where the
-    // customer's hold has to be taken again (ADR-034 follow-up). Skipping
-    // deleted the claim — correctly, since a skipped customer was never
-    // served and must be free to rejoin — but this token is now going to be
-    // served, so it must hold the identity again for as long as it is active.
-    if (requireSourceStatus === 'SKIPPED') {
-      await reserveIdentityClaimForRecall(tx, token);
-    }
-
     // otpCode itself is deliberately discarded here, never returned — this
-    // function's caller is staff (the one clicking Call/Recall), who must
+    // function's caller is staff (the one clicking Call), who must
     // never be able to read the code (checkpoint section 20). The customer
     // retrieves it separately and directly via
     // getServiceStartVerificationCode, ownership-checked against their own
@@ -1632,18 +1553,6 @@ export async function setRequiredDuration(
   return omitInternalFields(updated);
 }
 
-/** Prisma reports a violated unique constraint as P2002; on the claim table
- * that can only mean the (queue, fingerprint, period) index, i.e. this
- * customer already holds this queue for this window. */
-function isIdentityClaimConflict(err: unknown): boolean {
-  return (
-    typeof err === 'object' &&
-    err !== null &&
-    'code' in err &&
-    (err as { code?: unknown }).code === 'P2002'
-  );
-}
-
 /** Wording a customer can act on, without implying their phone or device is
  * blocked — it is the visit that is spent, not the equipment. */
 function repeatRejectionMessage(restrictionEndsAt: Date | null): string {
@@ -1726,11 +1635,13 @@ async function settleIdentityClaim(
   }
 
   // No claim to consume. For an unrestricted queue that is simply correct.
-  // For a restricted one it means the claim was released earlier and the
-  // token came back — a skip followed by a Recall. The visit has now actually
-  // been delivered, so it must be recorded whatever route the token took to
-  // get here; this is the invariant that matters, and it is asserted directly
-  // rather than inferred from the recall path having run.
+  // For a restricted one this token's own claim should already exist and be
+  // matched by the updateMany above — SKIPPED/CANCELLED are both terminal
+  // (Recall, the one path that used to delete-then-need-this, is removed),
+  // so a token reaching COMPLETED should never have had its claim released.
+  // Recreated from the snapshot as a defensive fallback rather than assumed
+  // impossible: a visit that was actually delivered must be recorded however
+  // this token got here.
   const snapshot = identitySnapshotOf(token);
   if (!snapshot) {
     return;
@@ -1802,58 +1713,6 @@ function identitySnapshotOf(token: {
     return null;
   }
   return { fingerprint: token.identityFingerprint, mode: token.identityMode };
-}
-
-/**
- * Takes the customer's hold again as a skipped token is recalled.
- *
- * A conflict here is meaningful rather than exceptional: it means this
- * person's identity is already claimed for this period — they rejoined from
- * another installation after being skipped, or already completed a visit.
- * Recalling would put them at a counter for a visit they are no longer
- * entitled to, so the recall is refused and the newer token stands. Staff get
- * a reason they can act on, not a raw constraint error.
- */
-async function reserveIdentityClaimForRecall(
-  tx: Prisma.TransactionClient,
-  token: Token,
-): Promise<void> {
-  const snapshot = identitySnapshotOf(token);
-  if (!snapshot) {
-    return;
-  }
-  // A claim may already exist if this token was recalled once before without
-  // an intervening skip; re-reserving it is then all that is needed.
-  const existing = await tx.queueIdentityClaim.findUnique({ where: { tokenId: token.id } });
-  if (existing) {
-    await tx.queueIdentityClaim.update({
-      where: { tokenId: token.id },
-      data: { status: 'RESERVED' },
-    });
-    return;
-  }
-
-  try {
-    await tx.queueIdentityClaim.create({
-      data: {
-        organizationId: token.organizationId,
-        queueId: token.queueId,
-        identityFingerprint: snapshot.fingerprint,
-        mode: snapshot.mode,
-        status: 'RESERVED',
-        tokenId: token.id,
-      },
-    });
-  } catch (err) {
-    if (isIdentityClaimConflict(err)) {
-      throw new AppError(
-        409,
-        'IDENTITY_ALREADY_CLAIMED',
-        'This customer has already used or rejoined this queue since being skipped, so this token can no longer be recalled.',
-      );
-    }
-    throw err;
-  }
 }
 
 /**

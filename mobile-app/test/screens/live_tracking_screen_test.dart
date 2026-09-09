@@ -237,7 +237,23 @@ void main() {
       await _pump(tester, provider);
 
       expect(find.text('You cancelled this token.'), findsOneWidget);
-      expect(find.text('This token was skipped.'), findsNothing);
+      expect(
+        find.text('This token was skipped. Scan the queue QR code again if you still need service.'),
+        findsNothing,
+      );
+    });
+
+    testWidgets('a SKIPPED token tells the customer to scan the queue QR again, not that staff can recall it',
+        (tester) async {
+      final provider = _FakeTokenTrackingProvider();
+      provider.pushState(token: _token(status: TokenStatus.skipped));
+      await _pump(tester, provider);
+
+      expect(
+        find.text('This token was skipped. Scan the queue QR code again if you still need service.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('recall'), findsNothing);
     });
   });
 }

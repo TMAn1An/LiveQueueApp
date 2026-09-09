@@ -234,7 +234,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
       case TokenStatus.called:
       case TokenStatus.inProgress:
       case TokenStatus.unknown:
-        return 'This token was skipped.';
+        return 'This token was skipped. Scan the queue QR code again if you still need service.';
     }
   }
 

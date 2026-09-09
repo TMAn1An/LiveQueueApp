@@ -115,15 +115,12 @@ describe('V2 Checkpoint 7 — customer cancellation', () => {
     expect(second.status).toBe(201);
   });
 
-  it('Test 7: a CANCELLED token cannot be recalled', async () => {
+  it('Test 7: a CANCELLED token can never be called again', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     await cancelTokenRequest(token.id, token.deviceIdentifier);
 
-    const res = await api()
-      .post(`/api/tokens/${token.id}/recall`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
-      .send({ counterId: org.counter.id });
+    const res = await callToken(org.accessToken, token.id, org.counter.id);
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
@@ -317,27 +314,22 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
     expect(newCodeAttempt.status).toBe(200);
   });
 
-  it('Test 18: Recall issues a brand new code, never reusing the pre-skip one', async () => {
+  it('Test 18: a skipped token has no retrievable verification code and its pre-skip code no longer starts service', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     await callToken(org.accessToken, token.id, org.counter.id);
     const firstCode = (await getVerificationCode(token.id, token.deviceIdentifier)).body.data.code;
 
     await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`);
-    await api()
-      .post(`/api/tokens/${token.id}/recall`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
-      .send({ counterId: org.counter.id });
 
-    const secondCode = (await getVerificationCode(token.id, token.deviceIdentifier)).body.data.code;
-    // Not asserting the two codes differ (a random collision, while
-    // vanishingly unlikely, isn't the actual property under test) — the
-    // property that matters is that the PRE-skip code was invalidated and no
-    // longer starts service.
+    // Recall no longer exists — a skipped token can never be CALLED again,
+    // so its verification code is simply unavailable, not merely rotated.
+    const codeAfterSkip = await getVerificationCode(token.id, token.deviceIdentifier);
+    expect(codeAfterSkip.status).toBe(409);
+    expect(codeAfterSkip.body.error.code).toBe('TOKEN_NOT_CALLED');
+
     const oldCodeAttempt = await submitStart(org.accessToken, token.id, firstCode);
     expect(oldCodeAttempt.status).toBe(422);
-    const newCodeAttempt = await submitStart(org.accessToken, token.id, secondCode);
-    expect(newCodeAttempt.status).toBe(200);
   });
 
   it('Test 19: a concurrent cancel and a valid start on the same CALLED token produce exactly one winner', async () => {

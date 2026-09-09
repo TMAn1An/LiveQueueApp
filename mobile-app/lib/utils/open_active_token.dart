@@ -13,10 +13,15 @@ import '../screens/live_tracking_screen.dart';
 /// three behave identically rather than three near-copies drifting apart.
 ///
 /// Always resyncs [tokenId] first. A locally remembered summary is only a
-/// pointer — staff may have called, served, skipped or recalled this
+/// pointer — staff may have called, served, skipped or completed this
 /// customer while the app was closed, and the backend is the only thing
 /// that knows. Never uses any other token's state to decide this one's fate
 /// (V2 Product Completion checkpoint, Part A/D: no global "current token").
+///
+/// SKIPPED is terminal (Recall was removed) exactly like COMPLETED/
+/// CANCELLED — [ActiveTokenProvider.resyncOne] already removes it from the
+/// active collection and returns null, so a skipped token always falls into
+/// the "not active any more" branch below rather than opening Live Tracking.
 Future<void> openActiveToken(BuildContext context, String tokenId) async {
   final activeTokenProvider = context.read<ActiveTokenProvider>();
   final messenger = ScaffoldMessenger.of(context);
@@ -33,17 +38,6 @@ Future<void> openActiveToken(BuildContext context, String tokenId) async {
               ? 'Could not check this token just now. Please try again.'
               : 'That visit is finished. You can find it in History.',
         ),
-      ),
-    );
-    return;
-  }
-
-  if (!token.isActive) {
-    // SKIPPED: recoverable, but there is no live session to open until
-    // staff recalls it — see isRecoverableTokenStatus.
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('This token was skipped. Staff can still recall it — check back later.'),
       ),
     );
     return;

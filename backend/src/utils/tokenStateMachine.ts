@@ -13,16 +13,18 @@ const ALLOWED_TRANSITIONS: Record<TokenStatus, TokenStatus[]> = {
   CALLED: ['IN_PROGRESS', 'SKIPPED', 'CANCELLED'],
   IN_PROGRESS: ['COMPLETED', 'SKIPPED'],
   COMPLETED: [],
-  // A deliberate staff Recall (spec: Skipped Token Recall) — the only path
-  // back out of SKIPPED. Goes straight to CALLED, not WAITING: the customer
-  // already earned their position; recall re-announces them rather than
-  // making them wait through the line again (approved design decision).
-  SKIPPED: ['CALLED'],
-  // V2 Checkpoint 7: terminal, and deliberately NOT recallable (unlike
-  // SKIPPED) — cancellation is intentional abandonment; a customer who wants
-  // service again must create a new token, subject to the queue's own
-  // policies (allowRepeatVisits does not apply here — only COMPLETED
-  // consumes that allowance, see token.service.ts::createToken).
+  // V2 UX + Token Lifecycle checkpoint: SKIPPED is terminal — Recall
+  // (SKIPPED -> CALLED) has been removed. A skipped customer must scan the
+  // queue QR again and receive a new token, subject to the queue's own
+  // repeat-visit policy (skipping never consumed that allowance, so a
+  // rejoin is always permitted purely on the strength of having been
+  // skipped).
+  SKIPPED: [],
+  // V2 Checkpoint 7: terminal, for the same reason as SKIPPED above —
+  // cancellation is intentional abandonment; a customer who wants service
+  // again must create a new token, subject to the queue's own policies
+  // (allowRepeatVisits does not apply here — only COMPLETED consumes that
+  // allowance, see token.service.ts::createToken).
   CANCELLED: [],
 };
 

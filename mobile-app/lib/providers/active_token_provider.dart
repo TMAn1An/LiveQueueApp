@@ -6,9 +6,9 @@ import '../repositories/token_repository.dart';
 import '../services/active_token_storage_service.dart';
 import '../services/api_exception.dart';
 
-/// Every token this installation currently has open (or may still recover)
-/// across every queue, and how to get back to each one (ADR-036, extended by
-/// the V2 Product Completion checkpoint to hold more than one at a time).
+/// Every token this installation currently has open across every queue, and
+/// how to get back to each one (ADR-036, extended by the V2 Product
+/// Completion checkpoint to hold more than one at a time).
 ///
 /// Deliberately separate from [TokenTrackingProvider], which owns the live
 /// socket session and only exists while the tracking screen is open for one
@@ -18,8 +18,9 @@ import '../services/api_exception.dart';
 ///
 /// It never decides a token's fate. The backend is authoritative; this
 /// resyncs each remembered id independently and either keeps the entry
-/// (still active or recoverable) or drops it (genuinely terminal). A failure
-/// resyncing one token can never affect any other — see [resyncAll].
+/// (still active) or drops it (terminal — SKIPPED included, since Recall was
+/// removed). A failure resyncing one token can never affect any other — see
+/// [resyncAll].
 class ActiveTokenProvider extends ChangeNotifier {
   ActiveTokenProvider({
     required TokenRepository tokenRepository,
@@ -80,9 +81,9 @@ class ActiveTokenProvider extends ChangeNotifier {
   }
 
   /// Re-reads one remembered token from the backend and returns it if it is
-  /// still active or recoverable — the authoritative check, and the only one
-  /// that matters: a stale local status must never decide whether a customer
-  /// can reopen their token.
+  /// still active — the authoritative check, and the only one that matters:
+  /// a stale local status must never decide whether a customer can reopen
+  /// their token.
   ///
   /// A network failure deliberately leaves the entry alone and returns null:
   /// not being able to reach the server says nothing about whether the
@@ -95,9 +96,9 @@ class ActiveTokenProvider extends ChangeNotifier {
     try {
       final token = await _tokenRepository.getToken(tokenId);
       final statusChanged = existing.status != token.status;
-      final recoverable = isRecoverableTokenStatus(token.status);
+      final active = isActiveTokenStatus(token.status);
 
-      if (!recoverable) {
+      if (!active) {
         await remove(tokenId);
       } else {
         final updated = existing.copyWith(
@@ -114,11 +115,11 @@ class ActiveTokenProvider extends ChangeNotifier {
       if (statusChanged) {
         onTokenStatusChanged?.call(token, queueName: existing.queueName);
       }
-      // null exactly when the entry was just removed — a genuinely terminal
-      // status (COMPLETED/CANCELLED) is not "the current token", it is "no
-      // longer a token this screen has anything to show". A recoverable one
-      // (including SKIPPED) is returned so the caller can still inspect it.
-      return recoverable ? token : null;
+      // null exactly when the entry was just removed — SKIPPED is now
+      // terminal for this collection (Recall was removed), same as
+      // COMPLETED/CANCELLED: "no longer a token this screen has anything to
+      // show".
+      return active ? token : null;
     } on ApiException catch (e) {
       // 404 is the one answer that genuinely means "this token is gone".
       if (e.statusCode == 404) {
@@ -156,17 +157,16 @@ class ActiveTokenProvider extends ChangeNotifier {
   }
 
   /// Called when a token reaches a terminal state, or the customer cancels.
-  /// Updates or removes only the token identified by [token.id] — SKIPPED
-  /// keeps its entry (still recoverable via staff Recall, see
-  /// [isRecoverableTokenStatus]) with a refreshed status; only a genuinely
-  /// terminal status removes it. History is untouched either way — it is
-  /// stored separately by [HistoryRepository] and keeps the record
-  /// regardless of what happens here.
+  /// Updates or removes only the token identified by [token.id] — SKIPPED is
+  /// now terminal for this collection (Recall was removed), so it is
+  /// removed exactly like COMPLETED/CANCELLED. History is untouched either
+  /// way — it is stored separately by [HistoryRepository] and keeps the
+  /// record regardless of what happens here.
   Future<void> syncFromTracked(LiveQueueToken token) async {
     final existing = summaryFor(token.id);
     if (existing == null) return;
 
-    if (!isRecoverableTokenStatus(token.status)) {
+    if (!isActiveTokenStatus(token.status)) {
       await remove(token.id);
       return;
     }
