@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/notification_preferences.dart';
+import '../providers/active_token_provider.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/token_tracking_provider.dart';
 import '../repositories/app_version_repository.dart';
@@ -13,6 +14,7 @@ import '../repositories/device_repository.dart';
 import '../repositories/token_repository.dart';
 import '../services/fcm_service.dart';
 import '../services/notification_service.dart';
+import '../utils/cross_token_fcm_resync.dart';
 import 'home_screen.dart';
 import 'live_tracking_screen.dart';
 import 'update_required_screen.dart';
@@ -83,6 +85,7 @@ class _SplashScreenState extends State<SplashScreen> {
     final preferencesProvider = context.read<NotificationPreferencesProvider>();
     final tokenRepository = context.read<TokenRepository>();
     final trackingProvider = context.read<TokenTrackingProvider>();
+    final activeTokenProvider = context.read<ActiveTokenProvider>();
     // Captured while this widget is still mounted: the background work below
     // outlives this screen, so it can never touch `context` again.
     final navigator = Navigator.of(context);
@@ -113,6 +116,7 @@ class _SplashScreenState extends State<SplashScreen> {
         deviceRepository: deviceRepository,
         tokenRepository: tokenRepository,
         trackingProvider: trackingProvider,
+        activeTokenProvider: activeTokenProvider,
         preferencesProvider: preferencesProvider,
         tapSub: tapSub,
         readPendingTap: () => pendingTap,
@@ -131,6 +135,7 @@ class _SplashScreenState extends State<SplashScreen> {
     required DeviceRepository deviceRepository,
     required TokenRepository tokenRepository,
     required TokenTrackingProvider trackingProvider,
+    required ActiveTokenProvider activeTokenProvider,
     required NotificationPreferencesProvider preferencesProvider,
     required StreamSubscription<RemoteMessage> tapSub,
     required RemoteMessage? Function() readPendingTap,
@@ -168,6 +173,33 @@ class _SplashScreenState extends State<SplashScreen> {
     // session, not just at startup.
     fcmService.onTokenRefreshed.listen((newToken) {
       unawaited(_registerFcmTokenSafely(deviceRepository, newToken));
+    });
+
+    // V2 Physical Validation + Foreground Notification checkpoint, Part J:
+    // closes the cross-token gap without a permanent per-token Socket.io
+    // subscription. TokenTrackingProvider already has its own FCM listener,
+    // but it only ever acts on the one token it is currently tracking — a
+    // status change on any *other* remembered token previously went
+    // unnoticed by the app until its next incidental resync (Home/Active
+    // Tokens reopening). This listener is kept alive for the app's whole
+    // lifetime, same as the token-refresh one above, and does the smallest
+    // thing that closes it: on a foreground push naming a token that is (a)
+    // one this installation actually remembers and (b) not the one already
+    // being live-tracked (which has a faster path via its own socket
+    // session), resync just that one token — never every remembered one.
+    // ActiveTokenProvider.resyncOne already records the Notification Center
+    // entry and raises the foreground banner on a genuine status change
+    // (see main.dart's onTokenStatusChanged/onNotificationAdded wiring), so
+    // there is nothing else to wire here.
+    fcmService.onDataMessage.listen((data) {
+      final tokenId = tokenIdToResyncFor(
+        data: data,
+        currentlyTrackedTokenId: trackingProvider.token?.id,
+        isRemembered: (id) => activeTokenProvider.summaryFor(id) != null,
+      );
+      if (tokenId != null) {
+        unawaited(activeTokenProvider.resyncOne(tokenId));
+      }
     });
 
     await tapSub.cancel();

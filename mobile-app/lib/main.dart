@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'firebase_options.dart';
 import 'services/fcm_service.dart';
 
+import 'models/app_notification.dart';
 import 'models/live_queue_token.dart';
 import 'providers/history_provider.dart';
 import 'providers/notification_center_provider.dart';
@@ -31,11 +32,14 @@ import 'services/history_storage_service.dart';
 import 'services/notification_center_storage_service.dart';
 import 'services/notification_service.dart';
 import 'services/email_verification_api_service.dart';
+import 'services/foreground_banner_service.dart';
 import 'services/preferences_storage_service.dart';
 import 'services/queue_api_service.dart';
 import 'services/socket_service.dart';
 import 'services/token_api_service.dart';
 import 'theme/app_theme.dart';
+import 'utils/app_navigation.dart';
+import 'utils/open_active_token.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -88,6 +92,14 @@ class LiveQueueApp extends StatelessWidget {
         Provider<ActiveTokenStorageService>(create: (_) => ActiveTokenStorageService()),
         Provider<NotificationCenterStorageService>(
           create: (_) => NotificationCenterStorageService(),
+        ),
+        // V2 Physical Validation + Foreground Notification checkpoint:
+        // the one presenter for the small "🔔 A002 has been called" banner
+        // that can appear over any screen. Disposed with the app, same as
+        // every other long-lived service here.
+        Provider<ForegroundBannerService>(
+          create: (_) => ForegroundBannerService(navigatorKey),
+          dispose: (_, s) => s.dispose(),
         ),
         Provider<PreferencesStorageService>(
           create: (_) => PreferencesStorageService(),
@@ -163,6 +175,22 @@ class LiveQueueApp extends StatelessWidget {
         ChangeNotifierProvider<NotificationCenterProvider>(
           create: (context) => NotificationCenterProvider(
             storage: context.read<NotificationCenterStorageService>(),
+            // V2 Physical Validation + Foreground Notification checkpoint:
+            // every genuinely new entry also raises the foreground banner,
+            // except the join itself — a successful join already has its
+            // own immediate confirmation screen, and a banner on top of it
+            // would just be a redundant, unnecessary second popup for the
+            // exact same news the customer is already looking at.
+            onNotificationAdded: (notification) {
+              if (notification.kind == NotificationKind.joined) return;
+              final navContext = navigatorKey.currentContext;
+              if (navContext == null) return;
+              context.read<ForegroundBannerService>().show(
+                    title: notification.title,
+                    body: notification.body,
+                    onTap: () => openActiveToken(navContext, notification.tokenId),
+                  );
+            },
           )..load(),
         ),
         // ADR-036: outlives every screen, so a running token stays reachable
@@ -245,6 +273,7 @@ class LiveQueueApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
+        navigatorKey: navigatorKey,
         title: 'LiveQueue',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.light,

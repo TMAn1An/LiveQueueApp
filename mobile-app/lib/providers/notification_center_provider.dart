@@ -26,10 +26,21 @@ import '../services/notification_center_storage_service.dart';
 /// once from Socket.io, once from a resync — is a no-op rather than a
 /// duplicate row. See [_upsert].
 class NotificationCenterProvider extends ChangeNotifier {
-  NotificationCenterProvider({required NotificationCenterStorageService storage})
-      : _storage = storage;
+  NotificationCenterProvider({
+    required NotificationCenterStorageService storage,
+    this.onNotificationAdded,
+  }) : _storage = storage;
 
   final NotificationCenterStorageService _storage;
+
+  /// Told exactly when a genuinely new entry is inserted — never for a
+  /// dedup no-op, and never for the bulk restore [load] performs at startup
+  /// (that assigns `_notifications` directly, bypassing [_upsert] entirely).
+  /// This is the hook the foreground banner (V2 Physical Validation +
+  /// Foreground Notification checkpoint) uses to know when something is
+  /// worth interrupting the customer's current screen for, without the
+  /// Notification Center needing to know banners exist at all.
+  final void Function(AppNotification notification)? onNotificationAdded;
 
   List<AppNotification> _notifications = [];
   bool isLoading = true;
@@ -188,5 +199,6 @@ class NotificationCenterProvider extends ChangeNotifier {
     _notifications = [..._notifications, notification];
     notifyListeners();
     unawaited(_storage.saveAll(_notifications));
+    onNotificationAdded?.call(notification);
   }
 }

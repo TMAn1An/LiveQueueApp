@@ -242,4 +242,96 @@ void main() {
     expect(second.notifications, hasLength(1));
     expect(second.notifications.single.tokenId, 'token-1');
   });
+
+  // V2 Physical Validation + Foreground Notification checkpoint, Part E/G:
+  // onNotificationAdded is the hook the foreground banner is built on. It
+  // must fire on a genuinely new entry, and only then.
+  group('onNotificationAdded', () {
+    test('fires once for a genuinely new entry', () {
+      final added = <String>[];
+      final provider = NotificationCenterProvider(
+        storage: NotificationCenterStorageService(),
+        onNotificationAdded: (n) => added.add(n.id),
+      );
+
+      provider.recordStatusChange(
+        _token(status: 'CALLED', calledAt: '2026-01-01T10:00:00.000Z'),
+        queueName: 'Pharmacy',
+      );
+
+      expect(added, hasLength(1));
+    });
+
+    test('does not fire for a duplicate of the same logical event', () {
+      final added = <String>[];
+      final provider = NotificationCenterProvider(
+        storage: NotificationCenterStorageService(),
+        onNotificationAdded: (n) => added.add(n.id),
+      );
+      final token = _token(status: 'CALLED', calledAt: '2026-01-01T10:00:00.000Z');
+
+      provider.recordStatusChange(token, queueName: 'Pharmacy');
+      provider.recordStatusChange(token, queueName: 'Pharmacy');
+
+      expect(added, hasLength(1));
+    });
+
+    test('fires again for a genuinely new event — a recall with a fresh timestamp', () {
+      final added = <String>[];
+      final provider = NotificationCenterProvider(
+        storage: NotificationCenterStorageService(),
+        onNotificationAdded: (n) => added.add(n.id),
+      );
+
+      provider.recordStatusChange(
+        _token(status: 'CALLED', calledAt: '2026-01-01T10:00:00.000Z'),
+        queueName: 'Pharmacy',
+      );
+      provider.recordStatusChange(
+        _token(status: 'CALLED', calledAt: '2026-01-01T11:00:00.000Z'),
+        queueName: 'Pharmacy',
+      );
+
+      expect(added, hasLength(2));
+    });
+
+    test('never fires for the bulk restore load() performs at startup', () async {
+      final seed = NotificationCenterProvider(storage: NotificationCenterStorageService());
+      seed.recordJoin(_token(), queueName: 'Pharmacy');
+      await Future<void>.delayed(Duration.zero);
+
+      final added = <String>[];
+      final restored = NotificationCenterProvider(
+        storage: NotificationCenterStorageService(),
+        onNotificationAdded: (n) => added.add(n.id),
+      );
+      await restored.load();
+
+      // The join notification from the seed provider is present...
+      expect(restored.notifications, hasLength(1));
+      // ...but restoring it from disk must never look like a fresh event —
+      // otherwise every app resume would replay every stored notification
+      // as a brand-new foreground banner.
+      expect(added, isEmpty);
+    });
+
+    test('identifies which token the event is about, for banner routing', () {
+      final tokenIds = <String>[];
+      final provider = NotificationCenterProvider(
+        storage: NotificationCenterStorageService(),
+        onNotificationAdded: (n) => tokenIds.add(n.tokenId),
+      );
+
+      provider.recordStatusChange(
+        _token(id: 'token-a', status: 'CALLED', calledAt: '2026-01-01T10:00:00.000Z'),
+        queueName: 'Pharmacy',
+      );
+      provider.recordStatusChange(
+        _token(id: 'token-b', status: 'CALLED', calledAt: '2026-01-01T10:00:00.000Z'),
+        queueName: 'Billing',
+      );
+
+      expect(tokenIds, ['token-a', 'token-b']);
+    });
+  });
 }
