@@ -97,12 +97,14 @@ function QueueRow({ queue }: { queue: Queue }) {
     <tr className="border-b border-border transition-colors duration-150 hover:bg-subtle">
       <td className="py-2 pr-4">
         {/* ADR-036: the name opens this queue's own line, which is where
-            staff actually work; settings stay one click further in. */}
+            staff actually work — kept clickable as a convenience, but the
+            Actions column's own "Open Queue" button is the one place this
+            is never ambiguous (V2 UX + Token Lifecycle checkpoint, Part D:
+            a tiny inline "Settings" link next to the name is what customers
+            reported as confusing — Settings is now its own explicit
+            button, same tier as Open Queue, not a stray text link). */}
         <Link to={`/queues/${queue.id}/live`} className="font-medium text-brand-600 hover:underline">
           {queue.name}
-        </Link>
-        <Link to={`/queues/${queue.id}`} className="ml-2 text-xs text-muted hover:underline">
-          Settings
         </Link>
         {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived)</span>}
       </td>
@@ -117,26 +119,37 @@ function QueueRow({ queue }: { queue: Queue }) {
         </Link>
       </td>
       <td className="py-2 pr-4">
-        <PermissionGate permission="manage_queues">
-          {!queue.deletedAt && (
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                loading={updateStatus.isPending}
-                onClick={() => updateStatus.mutate(nextStatus)}
-              >
-                {updateStatus.isPending
-                  ? 'Updating…'
-                  : queue.status === 'ACTIVE'
-                    ? 'Pause'
-                    : 'Resume'}
-              </Button>
-              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-                Delete
-              </Button>
-            </div>
-          )}
-        </PermissionGate>
+        <div className="flex flex-wrap gap-2">
+          {/* Primary: always available, to every role that can see this
+              table at all — opening a queue's live line is not a
+              manage_queues action. */}
+          <Link to={`/queues/${queue.id}/live`}>
+            <Button variant="primary">Open Queue</Button>
+          </Link>
+          <Link to={`/queues/${queue.id}`}>
+            <Button variant="outline">Settings</Button>
+          </Link>
+          <PermissionGate permission="manage_queues">
+            {!queue.deletedAt && (
+              <>
+                <Button
+                  variant="secondary"
+                  loading={updateStatus.isPending}
+                  onClick={() => updateStatus.mutate(nextStatus)}
+                >
+                  {updateStatus.isPending
+                    ? 'Updating…'
+                    : queue.status === 'ACTIVE'
+                      ? 'Pause'
+                      : 'Resume'}
+                </Button>
+                <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+                  Delete
+                </Button>
+              </>
+            )}
+          </PermissionGate>
+        </div>
         {confirmingDelete && (
           <ConfirmDialog
             title={`Delete queue "${queue.name}"?`}

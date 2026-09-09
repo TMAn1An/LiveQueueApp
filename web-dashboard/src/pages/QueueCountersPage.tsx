@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { useQueue } from '../hooks/useQueues';
 import {
   useAssignCounter,
@@ -14,6 +14,7 @@ import { useStaffList } from '../hooks/useStaff';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState, InlineSpinner } from '../components/Spinner';
 import { PermissionGate } from '../components/PermissionGate';
@@ -217,11 +218,13 @@ export function QueueCountersPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-2">
-        <Link to={`/queues/${queueId}`} className="text-sm text-brand-600 hover:underline">
-          ← {queue?.name ?? 'Queue'}
-        </Link>
-      </div>
+      <QueueBreadcrumb
+        queueId={queueId}
+        queueName={queue?.name ?? 'Queue'}
+        section="Counters"
+        backTo={`/queues/${queueId}`}
+        backLabel={`Back to ${queue?.name ?? 'Queue'}`}
+      />
       <h1 className="mb-4 text-xl font-semibold text-fg">Counters</h1>
 
       <ErrorBanner message={error} />

@@ -19,7 +19,6 @@ vi.mock('../hooks/useTokenActions', () => ({
   useStartToken: () => ({ mutate: vi.fn() }),
   useCompleteToken: () => ({ mutate: vi.fn() }),
   useSkipToken: () => ({ mutate: vi.fn() }),
-  useRecallToken: () => ({ mutate: vi.fn() }),
   useSetRequiredDuration: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 

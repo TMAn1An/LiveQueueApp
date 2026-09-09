@@ -5,8 +5,9 @@ import { QueuesPage } from './QueuesPage';
 import { useDeleteQueue, useQueues, useUpdateQueueStatus } from '../hooks/useQueues';
 import type { Queue } from '../types/queue';
 
+const mockHasPermission = vi.fn(() => true);
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({ hasPermission: mockHasPermission }),
 }));
 vi.mock('../hooks/useQueues');
 
@@ -45,6 +46,7 @@ function mockQueue(overrides: Partial<Queue> = {}): Queue {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockHasPermission.mockReturnValue(true);
   vi.mocked(useUpdateQueueStatus).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<
     typeof useUpdateQueueStatus
   >);
@@ -157,6 +159,47 @@ describe('QueuesPage — search', () => {
 
     fireEvent.click(screen.getByLabelText('Clear search'));
     expect(screen.getByText('Front Desk')).toBeInTheDocument();
+  });
+});
+
+// V2 UX + Token Lifecycle checkpoint, Part D: the queue name plus a tiny
+// inline "Settings" text link did not communicate where to click for what.
+// Replaced with explicit, same-tier Open Queue / Settings buttons.
+describe('QueuesPage — explicit Open Queue / Settings actions', () => {
+  it('renders an Open Queue button linking to the live queue page', () => {
+    vi.mocked(useQueues).mockReturnValue({
+      data: [mockQueue({ id: 'queue-42' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueues>);
+    renderPage();
+
+    const link = screen.getByRole('link', { name: 'Open Queue' });
+    expect(link).toHaveAttribute('href', '/queues/queue-42/live');
+  });
+
+  it('renders a Settings button linking to the queue settings page', () => {
+    vi.mocked(useQueues).mockReturnValue({
+      data: [mockQueue({ id: 'queue-42' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueues>);
+    renderPage();
+
+    const link = screen.getByRole('link', { name: 'Settings' });
+    expect(link).toHaveAttribute('href', '/queues/queue-42');
+  });
+
+  it('Open Queue and Settings remain visible without manage_queues, but Pause/Delete do not', () => {
+    mockHasPermission.mockReturnValue(false);
+    vi.mocked(useQueues).mockReturnValue({
+      data: [mockQueue({ id: 'queue-42' })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueues>);
+    renderPage();
+
+    expect(screen.getByRole('link', { name: 'Open Queue' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
   });
 });
 

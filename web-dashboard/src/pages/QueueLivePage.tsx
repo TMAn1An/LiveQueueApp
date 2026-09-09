@@ -3,6 +3,7 @@ import { useQueue } from '../hooks/useQueues';
 import { useCounters } from '../hooks/useCounters';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
 import { LiveQueueTable } from '../components/LiveQueueTable';
@@ -24,17 +25,13 @@ export function QueueLivePage() {
   return (
     <div className="space-y-6">
       <div>
-        <nav className="mb-2 text-xs text-muted">
-          <Link to="/dashboard" className="hover:underline">
-            Dashboard
-          </Link>
-          <span className="mx-1">/</span>
-          <Link to="/queues" className="hover:underline">
-            Queues
-          </Link>
-          <span className="mx-1">/</span>
-          <span className="text-fg-soft">{queue.name}</span>
-        </nav>
+        <QueueBreadcrumb
+          queueId={queue.id}
+          queueName={queue.name}
+          section="Live Queue"
+          backTo="/queues"
+          backLabel="Back to Queues"
+        />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-semibold text-fg">{queue.name}</h1>

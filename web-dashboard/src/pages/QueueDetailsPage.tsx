@@ -8,6 +8,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
 import { PermissionGate } from '../components/PermissionGate';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
+import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { ServicesManager } from '../components/ServicesManager';
 import { FormBuilder } from '../components/FormBuilder';
 import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
@@ -34,15 +35,26 @@ export function QueueDetailsPage() {
 
   return (
     <div className="space-y-6">
+      <QueueBreadcrumb
+        queueId={queue.id}
+        queueName={queue.name}
+        backTo="/queues"
+        backLabel="Back to Queues"
+      />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-fg">{queue.name}</h1>
           <StatusBadge status={queue.status} />
           {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived — read only)</span>}
         </div>
-        <Link to={`/queues/${queue.id}/counters`}>
-          <Button variant="secondary">Manage Counters</Button>
-        </Link>
+        <div className="flex gap-2">
+          <Link to={`/queues/${queue.id}/live`}>
+            <Button variant="primary">Open Queue</Button>
+          </Link>
+          <Link to={`/queues/${queue.id}/counters`}>
+            <Button variant="secondary">Manage Counters</Button>
+          </Link>
+        </div>
       </div>
 
       <Card>
