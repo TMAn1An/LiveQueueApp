@@ -1,7 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useDeleteOrganization, useOrganization, useUpdateOrganization } from '../hooks/useOrganization';
+import {
+  useDeleteOrganization,
+  useOrganization,
+  useRestartOnboarding,
+  useUpdateOrganization,
+} from '../hooks/useOrganization';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
@@ -23,6 +28,8 @@ export function OrganizationSettingsPage() {
   const [timezone, setTimezone] = useState('');
   const updateOrganization = useUpdateOrganization();
   const deleteOrganization = useDeleteOrganization();
+  const restartOnboarding = useRestartOnboarding();
+  const [restarted, setRestarted] = useState(false);
   const [name, setName] = useState('');
   const [editing, setEditing] = useState(false);
   const [confirmName, setConfirmName] = useState('');
@@ -140,6 +147,33 @@ export function OrganizationSettingsPage() {
           <p className="mt-3 text-xs text-faint">Only the organization owner can edit these settings.</p>
         )}
       </Card>
+
+      {/* V2 Product Completion checkpoint, Part C. Not destructive — it
+          shows the setup guide again, and touches nothing else about the
+          organization — so it needs no confirmation dialog. */}
+      {isOwner && (
+        <Card>
+          <h2 className="mb-2 text-sm font-semibold text-fg">Setup Guide</h2>
+          <p className="mb-3 text-sm text-muted">
+            Walk through the guided tour of setting up a queue again — creating a queue, adding
+            services and counters, inviting staff, and generating a QR code.
+          </p>
+          <Button
+            variant="secondary"
+            loading={restartOnboarding.isPending}
+            onClick={() =>
+              restartOnboarding.mutate(undefined, { onSuccess: () => setRestarted(true) })
+            }
+          >
+            {restartOnboarding.isPending ? 'Restarting…' : 'Restart tutorial'}
+          </Button>
+          {restarted && (
+            <p className="mt-2 text-xs text-muted">
+              The guide will reappear the next time you load the dashboard.
+            </p>
+          )}
+        </Card>
+      )}
 
       {isOwner && (
         <Card className="border-red-200">

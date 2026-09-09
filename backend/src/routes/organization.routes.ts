@@ -18,6 +18,13 @@ router.put(
   validate(updateOrganizationSchema),
   organizationController.update,
 );
+// V2 Product Completion checkpoint, Part C. Owner-only is enforced inside
+// the service (requireOwner), same pattern as PUT /me above — no dedicated
+// permission exists for "the owner's own onboarding state", so this only
+// requires being authenticated, matching GET /me.
+router.post('/me/onboarding/complete', authenticate, organizationController.completeOnboarding);
+router.post('/me/onboarding/restart', authenticate, organizationController.restartOnboarding);
+
 // Irreversible, cascades through the whole organization — the Phase 7 audit
 // named this specific mutation for the sensitive category (not the PUT above).
 router.delete(

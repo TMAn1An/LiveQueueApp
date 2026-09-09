@@ -41,6 +41,9 @@ export interface Organization {
   status: OrganizationStatus;
   /** ADR-035: the clock every queue inherits unless it sets its own. */
   timezone?: string | null;
+  /** V2 Product Completion checkpoint, Part C: null means the owner has not
+   * finished the first-time dashboard tutorial — that is what triggers it. */
+  onboardingCompletedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

@@ -18,3 +18,12 @@ export function updateOrganization(input: UpdateOrganizationInput) {
 export function deleteOrganization(confirmName: string) {
   return apiFetch<void>('/api/organizations/me', { method: 'DELETE', body: { confirmName } });
 }
+
+/** V2 Product Completion checkpoint, Part C. */
+export function completeOnboarding() {
+  return apiFetch<Organization>('/api/organizations/me/onboarding/complete', { method: 'POST' });
+}
+
+export function restartOnboarding() {
+  return apiFetch<Organization>('/api/organizations/me/onboarding/restart', { method: 'POST' });
+}

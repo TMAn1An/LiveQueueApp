@@ -80,18 +80,30 @@ enum DeviceStatus {
 /// and every organization-scoped query must be filtered by the authenticated
 /// staff member's organizationId — never by a client-supplied id.
 model Organization {
-  id        String             @id @default(uuid())
-  name      String
-  status    OrganizationStatus @default(ACTIVE)
+  id                    String             @id @default(uuid())
+  name                  String
+  status                OrganizationStatus @default(ACTIVE)
   /// ADR-035: the IANA zone this organization operates in, and the default
   /// every one of its queues inherits. Initialized from the browser of the
   /// person setting the organization up — that is the admin's computer, not
   /// a surveyed location, so it is a starting suggestion they can correct in
   /// settings, never something presented as authoritative. Nullable because
   /// every organization that predates this had no such value.
-  timezone  String?
-  createdAt DateTime           @default(now()) @map("created_at")
-  updatedAt DateTime           @updatedAt @map("updated_at")
+  timezone              String?
+  /// V2 Product Completion checkpoint, Part C: null means the owner has not
+  /// finished (or has never seen) the first-time dashboard tutorial — that
+  /// is the trigger to show it, not a separate boolean, so "shown but not
+  /// finished" and "never shown" don't need two fields to distinguish.
+  /// Every organization that existed before this checkpoint was backfilled
+  /// to non-null by its own migration, so nobody already running the
+  /// dashboard is unexpectedly walked through onboarding; only an
+  /// organization created after this shipped starts null. An owner can
+  /// return here at will via "Restart tutorial" (OrganizationSettingsPage),
+  /// which simply clears it again — this never touches queues, staff, or
+  /// any other organization data.
+  onboardingCompletedAt DateTime?          @map("onboarding_completed_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
 
   staff          Staff[]
   queues         Queue[]

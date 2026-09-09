@@ -4,6 +4,7 @@ import { useOrganizationSocket } from '../hooks/useOrganizationSocket';
 import { EmailVerificationBanner } from '../components/EmailVerificationBanner';
 import { BrandLogo } from '../components/BrandLogo';
 import { Button } from '../components/Button';
+import { OnboardingTutorial } from '../components/OnboardingTutorial';
 import { ThemeToggle } from '../components/ThemeToggle';
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
@@ -89,6 +90,15 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+      {/* V2 Product Completion checkpoint, Part C: only the owner who
+          registered this organization sees their own setup guide — never
+          STAFF, and never an ADMIN completing someone else's onboarding.
+          Null is "not finished yet"; every pre-existing organization was
+          backfilled to non-null by its own migration. A floating panel,
+          not a modal, so the dashboard underneath stays fully usable. */}
+      {staff?.role === 'OWNER' && organization?.onboardingCompletedAt == null && (
+        <OnboardingTutorial />
+      )}
     </div>
   );
 }

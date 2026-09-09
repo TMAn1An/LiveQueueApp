@@ -17,6 +17,9 @@ function serializeOrganization(organization: Organization) {
     status: organization.status,
     /// ADR-035: the clock every queue inherits unless it overrides one.
     timezone: organization.timezone,
+    /// V2 Product Completion checkpoint, Part C: null is the trigger for
+    /// the dashboard to show the first-time tutorial.
+    onboardingCompletedAt: organization.onboardingCompletedAt,
     createdAt: organization.createdAt,
     updatedAt: organization.updatedAt,
   };
@@ -56,6 +59,38 @@ export async function updateOrganization(
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.timezone !== undefined ? { timezone: input.timezone || null } : {}),
     },
+  });
+  return serializeOrganization(organization);
+}
+
+/**
+ * V2 Product Completion checkpoint, Part C. Owner-only, matching every other
+ * mutation on this row (requireOwner) — the tutorial is specifically the
+ * *owner's* setup walkthrough, so an ADMIN completing or restarting it on
+ * the owner's behalf would be a stranger deciding someone else's onboarding
+ * state. Idempotent: completing an already-completed tutorial just refreshes
+ * the timestamp rather than erroring.
+ */
+export async function completeOnboarding(organizationId: string, role: string) {
+  requireOwner(role);
+  const organization = await prisma.organization.update({
+    where: { id: organizationId },
+    data: { onboardingCompletedAt: new Date() },
+  });
+  return serializeOrganization(organization);
+}
+
+/**
+ * Clears the completion marker so the dashboard shows the tutorial again on
+ * next load — nothing else about the organization changes. This is the only
+ * way `onboardingCompletedAt` ever goes from non-null back to null after the
+ * backfill migration; a fresh organization starts null on its own.
+ */
+export async function restartOnboarding(organizationId: string, role: string) {
+  requireOwner(role);
+  const organization = await prisma.organization.update({
+    where: { id: organizationId },
+    data: { onboardingCompletedAt: null },
   });
   return serializeOrganization(organization);
 }

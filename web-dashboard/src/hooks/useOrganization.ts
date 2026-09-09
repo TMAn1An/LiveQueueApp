@@ -22,3 +22,20 @@ export function useDeleteOrganization() {
     mutationFn: (confirmName: string) => organizationApi.deleteOrganization(confirmName),
   });
 }
+
+/** V2 Product Completion checkpoint, Part C. */
+export function useCompleteOnboarding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => organizationApi.completeOnboarding(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['organization'] }),
+  });
+}
+
+export function useRestartOnboarding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => organizationApi.restartOnboarding(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['organization'] }),
+  });
+}

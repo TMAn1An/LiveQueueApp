@@ -15,6 +15,22 @@ export async function update(req: Request, res: Response) {
   res.status(200).json({ success: true, data: organization });
 }
 
+export async function completeOnboarding(req: Request, res: Response) {
+  const organization = await organizationService.completeOnboarding(
+    req.auth!.organizationId,
+    req.auth!.role,
+  );
+  res.status(200).json({ success: true, data: organization });
+}
+
+export async function restartOnboarding(req: Request, res: Response) {
+  const organization = await organizationService.restartOnboarding(
+    req.auth!.organizationId,
+    req.auth!.role,
+  );
+  res.status(200).json({ success: true, data: organization });
+}
+
 export async function remove(req: Request, res: Response) {
   await organizationService.deleteOrganization(
     req.auth!.organizationId,

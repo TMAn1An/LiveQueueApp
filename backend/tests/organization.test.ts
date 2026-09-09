@@ -169,3 +169,105 @@ describe('DELETE /api/organizations/me', () => {
     expect(await prisma.device.findUnique({ where: { id: device.id } })).not.toBeNull();
   });
 });
+
+// V2 Product Completion checkpoint, Part C: the dashboard tutorial keys
+// entirely off this timestamp — null means "show it", non-null means "don't".
+describe('Organization onboarding state', () => {
+  it('a freshly registered organization starts eligible for the tutorial (null)', async () => {
+    const ctx = await registerOwner();
+
+    const org = await prisma.organization.findUniqueOrThrow({ where: { id: ctx.organizationId } });
+
+    expect(org.onboardingCompletedAt).toBeNull();
+  });
+
+  it('GET /api/organizations/me exposes onboardingCompletedAt', async () => {
+    const ctx = await registerOwner();
+
+    const res = await api().get('/api/organizations/me').set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.body.data.onboardingCompletedAt).toBeNull();
+  });
+});
+
+describe('POST /api/organizations/me/onboarding/complete', () => {
+  it('sets onboardingCompletedAt for the owner', async () => {
+    const ctx = await registerOwner();
+
+    const res = await api()
+      .post('/api/organizations/me/onboarding/complete')
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.onboardingCompletedAt).not.toBeNull();
+
+    const org = await prisma.organization.findUniqueOrThrow({ where: { id: ctx.organizationId } });
+    expect(org.onboardingCompletedAt).not.toBeNull();
+  });
+
+  it('rejects a non-owner (ADMIN)', async () => {
+    const ctx = await registerOwner();
+    const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
+
+    const res = await api()
+      .post('/api/organizations/me/onboarding/complete')
+      .set('Authorization', `Bearer ${admin.accessToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects a non-owner (STAFF)', async () => {
+    const ctx = await registerOwner();
+    const restricted = await createRestrictedStaff(ctx.organizationId);
+
+    const res = await api()
+      .post('/api/organizations/me/onboarding/complete')
+      .set('Authorization', `Bearer ${restricted.accessToken}`);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects an unauthenticated request', async () => {
+    const res = await api().post('/api/organizations/me/onboarding/complete');
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /api/organizations/me/onboarding/restart', () => {
+  it('clears onboardingCompletedAt back to null', async () => {
+    const ctx = await registerOwner();
+    await api()
+      .post('/api/organizations/me/onboarding/complete')
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    const res = await api()
+      .post('/api/organizations/me/onboarding/restart')
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.onboardingCompletedAt).toBeNull();
+  });
+
+  it('does not touch any other organization data', async () => {
+    const ctx = await registerOwner({ organizationName: 'Acme Corp' });
+
+    const res = await api()
+      .post('/api/organizations/me/onboarding/restart')
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Acme Corp');
+    expect(await prisma.staff.findUnique({ where: { id: ctx.staffId } })).not.toBeNull();
+  });
+
+  it('rejects a non-owner (ADMIN)', async () => {
+    const ctx = await registerOwner();
+    const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
+
+    const res = await api()
+      .post('/api/organizations/me/onboarding/restart')
+      .set('Authorization', `Bearer ${admin.accessToken}`);
+
+    expect(res.status).toBe(403);
+  });
+});
