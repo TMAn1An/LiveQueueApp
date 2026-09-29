@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:mobile_app/models/app_notification.dart';
+import 'package:mobile_app/models/history_entry.dart';
 import 'package:mobile_app/models/live_queue_token.dart';
 import 'package:mobile_app/models/notification_preferences.dart';
 import 'package:mobile_app/providers/active_token_provider.dart';
@@ -473,6 +474,71 @@ void main() {
     final texts = tester.widgetList<Text>(find.byType(Text)).map((t) => t.data ?? '').join(' ');
     expect(texts, isNot(contains('@')));
     expect(texts, isNot(contains('token-a')));
+
+    bannerService.dispose();
+  });
+
+  testWidgets('ADR-042: a skip noticed by resync raises a banner carrying the reason from the synced token',
+      (tester) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final bannerService = ForegroundBannerService(navigatorKey);
+    // The push carries no reason — only the authoritative REST read does.
+    final skipped = jsonDecode(jsonEncode(
+        buildToken(id: 'token-a', queueId: 'queue-a', serial: 'A003', status: 'WAITING').toJson()))
+        as Map<String, dynamic>
+      ..['status'] = 'SKIPPED'
+      ..['skippedAt'] = DateTime.utc(2026, 1, 1, 10).toIso8601String()
+      ..['skipReason'] = {'code': 'CUSTOMER_NOT_PRESENT', 'text': 'Customer not present'};
+    final apiClient = ApiClient(
+      httpClient: MockClient((request) async => ok(skipped)),
+      baseUrl: 'http://localhost:4000',
+    );
+    final historyRepository = HistoryRepository(storageService: HistoryStorageService());
+    final activeToken = ActiveTokenProvider(
+      tokenRepository: TokenRepository(apiService: TokenApiService(apiClient), socketService: SocketService()),
+      storage: ActiveTokenStorageService(),
+      // Mirrors main.dart's wiring of this callback.
+      onTokenStatusChanged: (token, {required queueName}) {
+        navigatorKey.currentContext!
+            .read<NotificationCenterProvider>()
+            .recordStatusChange(token, queueName: queueName);
+        if (!token.isActive) historyRepository.recordFinalState(token);
+      },
+    );
+    await activeToken.remember(buildToken(id: 'token-a', queueId: 'queue-a', serial: 'A003', status: 'WAITING'),
+        queueName: 'Pharmacy');
+    await historyRepository.recordJoin(HistoryEntry(
+      tokenId: 'token-a',
+      queueId: 'queue-a',
+      queueName: 'Pharmacy',
+      serviceId: 'service-1',
+      serviceName: 'General',
+      serialNumber: 'A003',
+      createdAt: DateTime.utc(2026, 1, 1),
+      finalStatus: TokenStatus.waiting,
+    ));
+
+    await tester.pumpWidget(appUnder(
+      home: const HomeScreen(),
+      apiClient: apiClient,
+      activeToken: activeToken,
+      navigatorKey: navigatorKey,
+      bannerService: bannerService,
+    ));
+    await tester.pump();
+
+    await tester.runAsync(() => activeToken.resyncOne('token-a'));
+    await tester.pump();
+
+    expect(find.text('Your token was skipped'), findsOneWidget);
+    expect(find.textContaining('Reason: Customer not present'), findsOneWidget);
+    expect(find.textContaining('scan the queue QR code again'), findsOneWidget);
+
+    // The same resync also lands the visit in History, reason included —
+    // even though it was never open in Live Tracking.
+    final history = await tester.runAsync(() => historyRepository.getHistory());
+    expect(history!.single.finalStatus, TokenStatus.skipped);
+    expect(history.single.skipReason, 'Customer not present');
 
     bannerService.dispose();
   });

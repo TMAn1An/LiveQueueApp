@@ -17,7 +17,17 @@ class HistoryEntry {
     required this.serialNumber,
     required this.createdAt,
     required this.finalStatus,
+    this.skipReason,
+    this.completionFeedback,
   });
+
+  /// ADR-042 — why staff skipped this visit, exactly as the customer was
+  /// told. Null when it was not skipped, and on every entry stored before
+  /// skip reasons existed.
+  final String? skipReason;
+
+  /// ADR-042 — staff's optional note when completing this visit.
+  final String? completionFeedback;
 
   final String tokenId;
   final String queueId;
@@ -35,7 +45,11 @@ class HistoryEntry {
   final DateTime createdAt;
   final TokenStatus finalStatus;
 
-  HistoryEntry copyWith({TokenStatus? finalStatus}) {
+  HistoryEntry copyWith({
+    TokenStatus? finalStatus,
+    String? skipReason,
+    String? completionFeedback,
+  }) {
     return HistoryEntry(
       tokenId: tokenId,
       queueId: queueId,
@@ -46,6 +60,8 @@ class HistoryEntry {
       serialNumber: serialNumber,
       createdAt: createdAt,
       finalStatus: finalStatus ?? this.finalStatus,
+      skipReason: skipReason ?? this.skipReason,
+      completionFeedback: completionFeedback ?? this.completionFeedback,
     );
   }
 
@@ -60,6 +76,8 @@ class HistoryEntry {
       'serialNumber': serialNumber,
       'createdAt': createdAt.toIso8601String(),
       'finalStatus': finalStatus.name,
+      'skipReason': ?skipReason,
+      'completionFeedback': ?completionFeedback,
     };
   }
 
@@ -80,6 +98,9 @@ class HistoryEntry {
         (s) => s.name == json['finalStatus'],
         orElse: () => TokenStatus.unknown,
       ),
+      // Absent on every entry stored before ADR-042.
+      skipReason: json['skipReason'] as String?,
+      completionFeedback: json['completionFeedback'] as String?,
     );
   }
 }

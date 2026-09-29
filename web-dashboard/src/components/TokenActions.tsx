@@ -4,12 +4,14 @@ import {
   useCallToken,
   useCompleteToken,
   useSetRequiredDuration,
-  useSkipToken,
   useStartToken,
 } from '../hooks/useTokenActions';
 import { PermissionGate } from './PermissionGate';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
+import { SkipTokenDialog } from './SkipTokenDialog';
+import { CompleteWithFeedbackDialog } from './CompleteWithFeedbackDialog';
+import { actionErrorMessage } from '../utils/actionError';
 import { ApiError } from '../api/client';
 import type { TokenStatus } from '../types/token';
 import type { WaitingActionEligibility } from '../types/dashboard';
@@ -86,8 +88,15 @@ export function TokenActions({
   const callToken = useCallToken();
   const startToken = useStartToken();
   const completeToken = useCompleteToken();
-  const skipToken = useSkipToken();
   const setRequiredDuration = useSetRequiredDuration();
+  const [skipping, setSkipping] = useState(false);
+  const [completingWithFeedback, setCompletingWithFeedback] = useState(false);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+
+  function handleComplete() {
+    setCompleteError(null);
+    completeToken.mutate({ tokenId }, { onError: (err) => setCompleteError(actionErrorMessage(err)) });
+  }
 
   function handleDurationSubmit(e: FormEvent) {
     e.preventDefault();
@@ -222,13 +231,16 @@ export function TokenActions({
             </Button>
           </form>
         )}
+        {/* ADR-042: Complete stays one click. Feedback is the separate,
+            optional path — never a step added in front of Complete. */}
         {status === 'IN_PROGRESS' && (
-          <Button
-            variant="primary"
-            loading={completeToken.isPending}
-            onClick={() => completeToken.mutate(tokenId)}
-          >
+          <Button variant="primary" loading={completeToken.isPending} onClick={handleComplete}>
             {completeToken.isPending ? 'Completing…' : 'Complete'}
+          </Button>
+        )}
+        {status === 'IN_PROGRESS' && (
+          <Button variant="secondary" onClick={() => setCompletingWithFeedback(true)}>
+            Feedback
           </Button>
         )}
         {(status === 'CALLED' || status === 'IN_PROGRESS') && !adjustingDuration && (
@@ -273,21 +285,28 @@ export function TokenActions({
             called; once at a counter, Skip is always available. The single
             "Locked" chip above already explains a locked waiting row, so no
             second disabled button is rendered beside it. */}
+        {/* ADR-042: Skip asks why before anything happens — the reason is
+            what the customer will read. */}
         {((status === 'WAITING' && isFcfsEligible) ||
           status === 'CALLED' ||
           status === 'IN_PROGRESS') && (
-          <Button
-            variant="outline"
-            loading={skipToken.isPending}
-            onClick={() => skipToken.mutate(tokenId)}
-          >
-            {skipToken.isPending ? 'Skipping…' : 'Skip'}
+          <Button variant="outline" onClick={() => setSkipping(true)}>
+            Skip
           </Button>
         )}
       </div>
+      {skipping && <SkipTokenDialog tokenId={tokenId} onClose={() => setSkipping(false)} />}
+      {completingWithFeedback && (
+        <CompleteWithFeedbackDialog tokenId={tokenId} onClose={() => setCompletingWithFeedback(false)} />
+      )}
       {startError && (
         <div className="mt-1 max-w-xs">
           <ErrorBanner message={startError} />
+        </div>
+      )}
+      {completeError && (
+        <div className="mt-1 max-w-xs">
+          <ErrorBanner message={completeError} />
         </div>
       )}
       {durationError && (

@@ -80,6 +80,36 @@ void main() {
     expect(all.single.finalStatus, TokenStatus.waiting);
   });
 
+  test('ADR-042: a skip reason and completion feedback are stored with the final status, and survive a reload',
+      () async {
+    final service = HistoryStorageService();
+    await service.add(_entry('token-skipped'));
+    await service.add(_entry('token-completed'));
+
+    await service.updateStatus('token-skipped', TokenStatus.skipped, skipReason: 'Customer not present');
+    await service.updateStatus('token-completed', TokenStatus.completed,
+        completionFeedback: 'Please bring the original document next time.');
+
+    final reloaded = {for (final e in await HistoryStorageService().getAll()) e.tokenId: e};
+    expect(reloaded['token-skipped']!.skipReason, 'Customer not present');
+    expect(reloaded['token-skipped']!.completionFeedback, isNull);
+    expect(reloaded['token-completed']!.completionFeedback, 'Please bring the original document next time.');
+    expect(reloaded['token-completed']!.skipReason, isNull);
+  });
+
+  test('ADR-042: an entry stored before notes existed still loads, with none', () async {
+    final legacy = _entry('token-old').toJson()
+      ..remove('skipReason')
+      ..remove('completionFeedback')
+      ..['finalStatus'] = 'skipped';
+    SharedPreferences.setMockInitialValues({'token_history': jsonEncode([legacy])});
+
+    final entry = (await HistoryStorageService().getAll()).single;
+    expect(entry.finalStatus, TokenStatus.skipped);
+    expect(entry.skipReason, isNull);
+    expect(entry.completionFeedback, isNull);
+  });
+
   test('clear() empties the store', () async {
     final service = HistoryStorageService();
     await service.add(_entry('token-1'));

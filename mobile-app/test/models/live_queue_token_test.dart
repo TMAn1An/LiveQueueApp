@@ -79,6 +79,36 @@ void main() {
       expect(LiveQueueToken.fromJson(baseJson()).serviceStartVerificationRequired, isTrue);
     });
 
+    test('parses a skip reason and completion feedback (ADR-042)', () {
+      final skipped = LiveQueueToken.fromJson(baseJson()
+        ..['status'] = 'SKIPPED'
+        ..['skipReason'] = {'code': 'OTHER', 'text': 'Wrong queue, please use Billing'});
+      expect(skipped.skipReasonCode, 'OTHER');
+      expect(skipped.skipReasonDisplay, 'Wrong queue, please use Billing');
+      expect(skipped.completionFeedback, isNull);
+
+      final completed = LiveQueueToken.fromJson(baseJson()
+        ..['status'] = 'COMPLETED'
+        ..['skipReason'] = null
+        ..['completionFeedback'] = 'Bring the original next time.');
+      expect(completed.completionFeedback, 'Bring the original next time.');
+      expect(completed.skipReasonDisplay, isNull);
+    });
+
+    test('a skip from before reasons existed, or blank feedback, shows nothing (ADR-042)', () {
+      final legacy = LiveQueueToken.fromJson(baseJson()..['status'] = 'SKIPPED');
+      expect(legacy.skipReasonDisplay, isNull);
+      final blank = LiveQueueToken.fromJson(baseJson()..['completionFeedback'] = '   ');
+      expect(blank.completionFeedback, isNull);
+    });
+
+    test('falls back to the local label only when a reason arrives without text (ADR-042)', () {
+      final token = LiveQueueToken.fromJson(baseJson()..['skipReason'] = {'code': 'NO_RESPONSE', 'text': null});
+      expect(token.skipReasonDisplay, 'No response from customer');
+      final unknown = LiveQueueToken.fromJson(baseJson()..['skipReason'] = {'code': 'OTHER', 'text': ''});
+      expect(unknown.skipReasonDisplay, isNull);
+    });
+
     test('copyWith keeps serviceStartVerificationRequired (ADR-041)', () {
       final token = LiveQueueToken.fromJson(baseJson()..['serviceStartVerificationRequired'] = false);
       expect(token.copyWith(position: 1).serviceStartVerificationRequired, isFalse);

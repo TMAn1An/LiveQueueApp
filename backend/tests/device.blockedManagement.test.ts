@@ -457,9 +457,9 @@ describe('Issue #4: GET /api/devices customerContext', () => {
     await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
     const deviceIdentifier = 'device-ctx-history';
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`);
+    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     const second = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    await api().post(`/api/tokens/${second.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`);
+    await api().post(`/api/tokens/${second.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
     const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);

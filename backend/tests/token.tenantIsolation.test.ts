@@ -48,7 +48,8 @@ describe('Token tenant isolation', () => {
 
     const skipRes = await api()
       .post(`/api/tokens/${token.id}/skip`)
-      .set('Authorization', `Bearer ${orgB.accessToken}`);
+      .set('Authorization', `Bearer ${orgB.accessToken}`)
+      .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     expect(skipRes.status).toBe(404);
   });
 

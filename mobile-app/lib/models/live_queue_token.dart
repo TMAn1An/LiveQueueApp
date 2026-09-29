@@ -53,9 +53,32 @@ class LiveQueueToken {
     this.skippedAt,
     this.cancelledAt,
     this.serviceStartVerificationRequired = true,
+    this.skipReasonCode,
+    this.skipReasonText,
+    this.completionFeedback,
   });
 
   final String id;
+
+  /// ADR-042 — why staff skipped this token, when they did. The code is for
+  /// the app's own use; [skipReasonText] is the exact wording the customer
+  /// should read, as the backend recorded it at skip time. Both null for a
+  /// token that was not skipped, and for a skip from before reasons existed.
+  final String? skipReasonCode;
+  final String? skipReasonText;
+
+  /// ADR-042 — staff's optional note on completion. Null for an ordinary
+  /// completion, in which case nothing about feedback is shown at all.
+  final String? completionFeedback;
+
+  /// What to show the customer as the skip reason, or null when there is
+  /// none to show. Prefers the recorded wording; falls back to a local label
+  /// only if a reason arrived without text.
+  String? get skipReasonDisplay {
+    final text = skipReasonText?.trim();
+    if (text != null && text.isNotEmpty) return text;
+    return skipReasonLabel(skipReasonCode);
+  }
   final String queueId;
 
   /// ADR-041 — whether this token's queue asks for the service-start
@@ -133,8 +156,14 @@ class LiveQueueToken {
       skippedAt: json['skippedAt'] == null ? null : DateTime.parse(json['skippedAt'] as String),
       cancelledAt: json['cancelledAt'] == null ? null : DateTime.parse(json['cancelledAt'] as String),
       serviceStartVerificationRequired: json['serviceStartVerificationRequired'] as bool? ?? true,
+      skipReasonCode: (json['skipReason'] as Map<String, dynamic>?)?['code'] as String?,
+      skipReasonText: (json['skipReason'] as Map<String, dynamic>?)?['text'] as String?,
+      completionFeedback: _nonBlank(json['completionFeedback'] as String?),
     );
   }
+
+  static String? _nonBlank(String? value) =>
+      value == null || value.trim().isEmpty ? null : value;
 
   LiveQueueToken copyWith({
     TokenStatus? status,
@@ -172,8 +201,24 @@ class LiveQueueToken {
       skippedAt: skippedAt,
       cancelledAt: cancelledAt,
       serviceStartVerificationRequired: serviceStartVerificationRequired,
+      skipReasonCode: skipReasonCode,
+      skipReasonText: skipReasonText,
+      completionFeedback: completionFeedback,
     );
   }
+}
+
+/// ADR-042 — the customer-facing wording for each skip reason code, used
+/// only as a fallback when a reason arrives without its recorded text (the
+/// backend always records one). Mirrors the backend's labels.
+String? skipReasonLabel(String? code) {
+  return switch (code) {
+    'CUSTOMER_NOT_PRESENT' => 'Customer not present',
+    'NO_RESPONSE' => 'No response from customer',
+    'MISSING_REQUIREMENT' => 'Required document/information missing',
+    'CUSTOMER_LEFT' => 'Customer requested to leave',
+    _ => null,
+  };
 }
 
 /// The lightweight GET /api/tokens/:id/status shape — used for cheap polling

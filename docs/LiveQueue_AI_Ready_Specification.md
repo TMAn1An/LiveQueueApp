@@ -371,8 +371,11 @@ Customer receives turn notification
 │ generated, shown or asked for (ADR-041).     │
 └──────────────────────────────────────────────┘
         ↓
-Staff completes or skips token
+Staff completes (optionally with feedback)
+or skips (always with a reason) the token
 ```
+
+**Skip reasons and completion feedback (ADR-042).** Every skip must say why. Staff pick one of the predefined reasons — `CUSTOMER_NOT_PRESENT` "Customer not present", `NO_RESPONSE` "No response from customer", `MISSING_REQUIREMENT` "Required document/information missing", `CUSTOMER_LEFT` "Customer requested to leave" — or `OTHER` with their own text (required, up to 200 characters). The backend refuses a skip without a valid reason (`SKIP_REASON_REQUIRED`, `INVALID_SKIP_REASON`, `SKIP_REASON_TEXT_REQUIRED`, `SKIP_REASON_TEXT_TOO_LONG`) and stores the code together with the exact wording the customer is shown. Completion stays one step; staff may optionally attach feedback (up to 500 characters) through a separate Feedback action, and the resulting status is COMPLETED either way. The customer sees the skip reason or completion feedback in Live Tracking, the Notification Center, the foreground banner and History — read from the synced token, never from a push notification, which carries no staff-typed text. A skip remains terminal: the customer is still told to scan the queue QR code again if they need service.
 
 **Service-start verification is a per-queue setting (ADR-041).** `requireServiceStartOtp` is chosen when a queue is created (on by default) and can be changed later in Queue Settings by a role with `manage_queues`. Every queue that existed before the setting keeps requiring the code. The backend enforces the queue's *current* value at the moment of Start, never a value snapshotted onto the token. Turning it off lets an already-CALLED token start directly, ignoring any code already issued. Turning it on issues a fresh code to every CALLED token in that queue at once, so no customer at a counter is left without one. The customer app shows the code card and the "verification code is ready" notification only when the token's queue uses the code (`serviceStartVerificationRequired` on the token view).
 

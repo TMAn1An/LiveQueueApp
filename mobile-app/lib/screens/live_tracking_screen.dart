@@ -205,6 +205,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   ],
                   if (!token.isActive) ...[
                     Text(_terminalStatusMessage(token.status)),
+                    // ADR-042: staff's own words about how the visit ended —
+                    // shown only when there are some, never as an empty box.
+                    if (token.status == TokenStatus.skipped && token.skipReasonDisplay != null) ...[
+                      const SizedBox(height: 12),
+                      _TerminalNote(label: 'Reason', text: token.skipReasonDisplay!),
+                    ],
+                    if (token.status == TokenStatus.completed && token.completionFeedback != null) ...[
+                      const SizedBox(height: 12),
+                      _TerminalNote(label: 'Feedback', text: token.completionFeedback!),
+                    ],
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
@@ -255,6 +265,35 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
     if (confirmed == true) {
       await tracking.cancelToken();
     }
+  }
+}
+
+/// ADR-042: a skip reason or completion feedback, labelled, as staff wrote it.
+class _TerminalNote extends StatelessWidget {
+  const _TerminalNote({required this.label, required this.text});
+
+  final String label;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: theme.textTheme.labelMedium),
+          const SizedBox(height: 4),
+          Text(text, style: theme.textTheme.bodyMedium),
+        ],
+      ),
+    );
   }
 }
 

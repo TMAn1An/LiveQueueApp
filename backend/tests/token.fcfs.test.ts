@@ -151,7 +151,7 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
 
     // a001 is skipped, freeing its slot; a002 (a *later* token) is then
     // called and occupies the only active counter.
-    await api().post(`/api/tokens/${a001.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().post(`/api/tokens/${a001.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     await call(ctx.accessToken, a002.id, counter.id);
 
     // Recall no longer exists — a001 is terminal and can never be called.

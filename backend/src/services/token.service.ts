@@ -13,6 +13,11 @@ import { z, type ZodTypeAny } from 'zod';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { assertValidTransition } from '../utils/tokenStateMachine';
+import {
+  resolveCompletionFeedback,
+  resolveSkipReason,
+  type SkipReasonInput,
+} from '../utils/skipReason';
 import { findCounterScoped } from './counter.service';
 import { requireOwnedQueue } from '../utils/tenantScope';
 import { registerDevice } from './device.service';
@@ -815,6 +820,14 @@ function toCustomerView(
     startedAt: token.startedAt,
     completedAt: token.completedAt,
     skippedAt: token.skippedAt,
+    /** ADR-042: why this customer was skipped — the code for the app's own
+     * logic, the text exactly as they should read it. Null when not skipped,
+     * and on skips from before reasons were required. */
+    skipReason: token.skipReasonCode
+      ? { code: token.skipReasonCode, text: token.skipReasonText }
+      : null,
+    /** ADR-042: staff's optional completion note; null for an ordinary one. */
+    completionFeedback: token.completionFeedback,
   };
 }
 
@@ -1155,6 +1168,9 @@ async function transitionToken(
   targetStatus: TokenStatus,
   timestampField: TimestampField,
   guard?: (tx: Prisma.TransactionClient, token: Token) => Promise<void>,
+  /** ADR-042: written in the same compare-and-swap as the status, so a
+   * skip reason or completion note exists exactly when its status does. */
+  terminalNote: Prisma.TokenUpdateManyMutationInput = {},
 ): Promise<{ token: SafeToken; previousStatus: TokenStatus }> {
   const token = await findTokenScoped(organizationId, tokenId);
   assertValidTransition(token.status, targetStatus);
@@ -1170,7 +1186,7 @@ async function transitionToken(
 
     const result = await tx.token.updateMany({
       where: { id: tokenId, status: token.status },
-      data: { status: targetStatus, [timestampField]: new Date() },
+      data: { ...terminalNote, status: targetStatus, [timestampField]: new Date() },
     });
     if (result.count === 0) {
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
@@ -1186,8 +1202,24 @@ async function transitionToken(
   });
 }
 
-export const completeToken = (organizationId: string, tokenId: string) =>
-  transitionToken(organizationId, tokenId, 'COMPLETED', 'completedAt');
+/**
+ * ADR-042: completion stays one step. Feedback is optional — blank or absent
+ * is an ordinary completion and stores nothing — and never changes the
+ * resulting status, which is COMPLETED either way. The state machine still
+ * only allows this from IN_PROGRESS, so a queue that requires the
+ * service-start code (ADR-041) can still never be completed without it.
+ */
+export const completeToken = (organizationId: string, tokenId: string, feedback?: string) => {
+  const completionFeedback = resolveCompletionFeedback(feedback);
+  return transitionToken(
+    organizationId,
+    tokenId,
+    'COMPLETED',
+    'completedAt',
+    undefined,
+    completionFeedback ? { completionFeedback } : {},
+  );
+};
 
 /**
  * Skipping a WAITING customer is gated on exactly the same eligibility that
@@ -1200,22 +1232,35 @@ export const completeToken = (organizationId: string, tokenId: string) =>
  * Skipping a CALLED or IN_PROGRESS token is untouched: that customer is
  * already at a counter, so neither queue order nor free capacity is in
  * question.
+ *
+ * ADR-042: every skip, from any status, must say why — checked before
+ * anything else, and stored with the status in one write. SKIPPED is
+ * terminal, so nothing can later overwrite the reason.
  */
-export const skipToken = (organizationId: string, tokenId: string) =>
-  transitionToken(organizationId, tokenId, 'SKIPPED', 'skippedAt', async (tx, token) => {
-    if (token.status !== 'WAITING') {
-      return;
-    }
-    const eligibility = await getWaitingTokenActionEligibility(tx, token);
-    if (eligibility.eligible || !eligibility.reason) {
-      return;
-    }
-    throw new AppError(
-      409,
-      eligibility.reason === 'EARLIER_WAITING' ? 'FCFS_VIOLATION' : 'COUNTER_NOT_AVAILABLE',
-      WAITING_ACTION_BLOCKED_MESSAGE[eligibility.reason],
-    );
-  });
+export const skipToken = (organizationId: string, tokenId: string, reason: SkipReasonInput = {}) => {
+  const resolved = resolveSkipReason(reason);
+  return transitionToken(
+    organizationId,
+    tokenId,
+    'SKIPPED',
+    'skippedAt',
+    async (tx, token) => {
+      if (token.status !== 'WAITING') {
+        return;
+      }
+      const eligibility = await getWaitingTokenActionEligibility(tx, token);
+      if (eligibility.eligible || !eligibility.reason) {
+        return;
+      }
+      throw new AppError(
+        409,
+        eligibility.reason === 'EARLIER_WAITING' ? 'FCFS_VIOLATION' : 'COUNTER_NOT_AVAILABLE',
+        WAITING_ACTION_BLOCKED_MESSAGE[eligibility.reason],
+      );
+    },
+    { skipReasonCode: resolved.code, skipReasonText: resolved.text },
+  );
+};
 
 /**
  * V2 Checkpoint 7 (ADR-029): CALLED -> IN_PROGRESS, gated on a customer-

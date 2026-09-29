@@ -204,9 +204,16 @@ class LiveQueueApp extends StatelessWidget {
             // Tracking — records a Notification Center entry when its
             // status genuinely changed, which is what makes a status change
             // in a token the customer isn't looking at still show up here.
-            onTokenStatusChanged: (token, {required queueName}) => context
-                .read<NotificationCenterProvider>()
-                .recordStatusChange(token, queueName: queueName),
+            onTokenStatusChanged: (token, {required queueName}) {
+              context.read<NotificationCenterProvider>().recordStatusChange(token, queueName: queueName);
+              // ADR-042: a visit that ended while it was not open in Live
+              // Tracking still lands in History with its final status and
+              // its skip reason or completion feedback — before this, only
+              // the Notification Center heard about it.
+              if (!token.isActive) {
+                context.read<HistoryRepository>().recordFinalState(token);
+              }
+            },
           )..restore(),
         ),
         ChangeNotifierProvider<TokenTrackingProvider>(

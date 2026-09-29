@@ -17,9 +17,13 @@ LiveQueueToken _token({
   String? cancelledAt,
   bool? serviceStartVerificationRequired,
   Map<String, dynamic>? counter,
+  Map<String, dynamic>? skipReason,
+  String? completionFeedback,
 }) =>
     LiveQueueToken.fromJson({
       'serviceStartVerificationRequired': ?serviceStartVerificationRequired,
+      'skipReason': ?skipReason,
+      'completionFeedback': ?completionFeedback,
       'id': id,
       'queueId': 'queue-1',
       'serviceId': 'service-1',
@@ -144,6 +148,44 @@ void main() {
       final body = provider.notifications.single.body;
       expect(body, isNot(contains('code')));
       expect(body, contains('please proceed'));
+    });
+
+    test('ADR-042: SKIPPED names the reason and still says how to get service again', () {
+      final provider = _provider();
+      provider.recordStatusChange(
+        _token(
+          status: 'SKIPPED',
+          skippedAt: '2026-01-01T10:00:00.000Z',
+          skipReason: {'code': 'OTHER', 'text': 'Wrong queue, please use Billing'},
+        ),
+        queueName: 'Pharmacy',
+      );
+
+      final body = provider.notifications.single.body;
+      expect(body, contains('Reason: Wrong queue, please use Billing'));
+      expect(body, contains('scan the queue QR code again'));
+      expect(body, isNot(contains('recall')));
+    });
+
+    test('ADR-042: COMPLETED carries feedback only when staff left some', () {
+      final provider = _provider();
+      provider.recordStatusChange(
+        _token(
+          id: 'token-a',
+          status: 'COMPLETED',
+          completedAt: '2026-01-01T10:00:00.000Z',
+          completionFeedback: 'Please bring the original document next time.',
+        ),
+        queueName: 'Pharmacy',
+      );
+      provider.recordStatusChange(
+        _token(id: 'token-b', status: 'COMPLETED', completedAt: '2026-01-01T10:00:00.000Z'),
+        queueName: 'Pharmacy',
+      );
+
+      final byToken = {for (final n in provider.notifications) n.tokenId: n};
+      expect(byToken['token-a']!.body, 'A002 · Pharmacy — Feedback: Please bring the original document next time.');
+      expect(byToken['token-b']!.body, 'A002 · Pharmacy');
     });
 
     test('WAITING produces no entry — nothing new to announce', () {

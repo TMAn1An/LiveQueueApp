@@ -95,6 +95,29 @@ export const startTokenSchema = {
     .default({}),
 };
 
+// ADR-042: shape only — a missing or unknown code, or OTHER without text,
+// is judged by resolveSkipReason so each gets its own explicit error code.
+// The generous caps here only stop an oversized payload from reaching it.
+export const skipTokenSchema = {
+  params: tokenIdParams,
+  body: z
+    .object({
+      reasonCode: z.string().max(64).optional(),
+      reasonText: z.string().max(2000).optional(),
+    })
+    .default({}),
+};
+
+// ADR-042: feedback is optional; blank is an ordinary completion.
+export const completeTokenSchema = {
+  params: tokenIdParams,
+  body: z
+    .object({
+      feedback: z.string().max(5000).optional(),
+    })
+    .default({}),
+};
+
 export const callTokenSchema = {
   params: tokenIdParams,
   body: z.object({

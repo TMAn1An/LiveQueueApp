@@ -1,5 +1,6 @@
 import { apiFetch } from './client';
 import type { StaffToken } from '../types/token';
+import type { SkipReasonCode } from '../types/terminalNotes';
 
 export function callToken(tokenId: string, counterId: string) {
   return apiFetch<StaffToken>(`/api/tokens/${tokenId}/call`, { method: 'POST', body: { counterId } });
@@ -15,12 +16,20 @@ export function startToken(tokenId: string, verificationCode?: string) {
   });
 }
 
-export function completeToken(tokenId: string) {
-  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/complete`, { method: 'POST' });
+// ADR-042: feedback is optional — omitted entirely for an ordinary completion.
+export function completeToken(tokenId: string, feedback?: string) {
+  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/complete`, {
+    method: 'POST',
+    body: feedback === undefined ? {} : { feedback },
+  });
 }
 
-export function skipToken(tokenId: string) {
-  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/skip`, { method: 'POST' });
+// ADR-042: every skip says why. reasonText is only meaningful for OTHER.
+export function skipToken(tokenId: string, reasonCode: SkipReasonCode, reasonText?: string) {
+  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/skip`, {
+    method: 'POST',
+    body: reasonText === undefined ? { reasonCode } : { reasonCode, reasonText },
+  });
 }
 
 export function nextToken(queueId: string, counterId: string) {

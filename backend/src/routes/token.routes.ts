@@ -10,9 +10,11 @@ import { validate } from '../middleware/validate';
 import {
   callTokenSchema,
   cancelTokenSchema,
+  completeTokenSchema,
   createTokenSchema,
   reissueVerificationCodeSchema,
   setRequiredDurationSchema,
+  skipTokenSchema,
   startTokenSchema,
   tokenIdOnlySchema,
   verificationCodeQuerySchema,
@@ -96,20 +98,22 @@ router.post(
   validate(startTokenSchema),
   tokenController.start,
 );
+// ADR-042: optional completion feedback.
 router.post(
   '/:tokenId/complete',
   authenticate,
   requireVerified,
   requirePermission('operate_tokens'),
-  validate(tokenIdOnlySchema),
+  validate(completeTokenSchema),
   tokenController.complete,
 );
+// ADR-042: a skip must carry a reason.
 router.post(
   '/:tokenId/skip',
   authenticate,
   requireVerified,
   requirePermission('operate_tokens'),
-  validate(tokenIdOnlySchema),
+  validate(skipTokenSchema),
   tokenController.skip,
 );
 router.patch(

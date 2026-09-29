@@ -440,6 +440,31 @@ See ADR-031 for full design/implementation detail, including the environment-vs-
 
 See ADR-041.
 
+## Update Roadmap Checkpoint 2: Mandatory skip reason + optional completion feedback — DONE
+
+**Goal:** Staff must say why they skip a customer, and may leave optional feedback when completing; the customer can read both.
+
+### Tasks
+
+- [x] Inspect the terminal-state data, skip/complete paths, audit, service history, customer view, and the mobile History / Notification Center / banner / Live Tracking surfaces
+- [x] `SkipReasonCode` enum + `skipReasonCode` / `skipReasonText` / `completionFeedback` columns, additive migration
+- [x] Backend-authoritative skip reason validation with explicit error codes; optional, bounded, normalized completion feedback
+- [x] Note written in the same compare-and-swap as the status; terminal states keep it
+- [x] Customer view, Service History response; audit records the code / a flag only
+- [x] Dashboard: Skip reason dialog, one-click Complete kept, optional Feedback dialog, visible errors; Service History shows the notes
+- [x] Mobile: Live Tracking, Notification Center, foreground banner, History (both tracking and resync paths)
+- [x] Tests across all three apps; docs; commit
+
+### Acceptance
+
+- A skip without a valid reason is refused by the backend; OTHER needs real text
+- The customer sees the reason for a skip and the feedback for a completion, and nothing when there is none
+- Plain Complete is still one click and still produces COMPLETED
+- No staff-typed text reaches FCM, logs or audit metadata
+- State machine, FCFS, counters, permissions, rejoin and repeat-visit rules unchanged
+
+See ADR-042.
+
 ## V2 Checkpoint 10: V2 production verification
 
 **Goal:** A focused final regression pass across all V2 business rules, tenant isolation, concurrency, migrations, and cross-app compatibility — no unnecessary new tests, final build/typecheck/lint verification across all three apps.

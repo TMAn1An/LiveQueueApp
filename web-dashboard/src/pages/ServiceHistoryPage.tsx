@@ -193,6 +193,20 @@ function ServiceHistoryRow({ entry }: { entry: ServiceHistoryEntry }) {
       </td>
       <td className="py-2 pr-4">
         <StatusBadge status={entry.status} />
+        {/* ADR-042: what the customer was told — only when there is
+            something to say. */}
+        {entry.skipReason?.text && (
+          <p className="mt-1 max-w-xs text-xs text-fg-soft">
+            <span className="text-faint">Reason: </span>
+            {entry.skipReason.text}
+          </p>
+        )}
+        {entry.completionFeedback && (
+          <p className="mt-1 max-w-xs whitespace-pre-line text-xs text-fg-soft">
+            <span className="text-faint">Feedback: </span>
+            {entry.completionFeedback}
+          </p>
+        )}
       </td>
     </tr>
   );

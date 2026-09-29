@@ -130,6 +130,7 @@ export async function complete(req: Request, res: Response) {
   const { token } = await tokenService.completeToken(
     req.auth!.organizationId,
     req.params.tokenId as string,
+    req.body.feedback,
   );
   res.status(200).json({ success: true, data: token });
   await auditService.recordAuditEventSafely({
@@ -137,6 +138,9 @@ export async function complete(req: Request, res: Response) {
     action: 'token_completed',
     entityType: 'token',
     entityId: token.id,
+    // ADR-042: that feedback was left, never its words — the token row
+    // already holds them, and free text has no place in the audit trail.
+    metadata: { withFeedback: token.completionFeedback !== null },
     ipAddress: req.ip,
   });
   await realtime.emitTokenCompleted(token.id);
@@ -150,6 +154,7 @@ export async function skip(req: Request, res: Response) {
   const { token, previousStatus } = await tokenService.skipToken(
     req.auth!.organizationId,
     req.params.tokenId as string,
+    req.body,
   );
   res.status(200).json({ success: true, data: token });
   await auditService.recordAuditEventSafely({
@@ -157,7 +162,9 @@ export async function skip(req: Request, res: Response) {
     action: 'token_skipped',
     entityType: 'token',
     entityId: token.id,
-    metadata: { previousStatus },
+    // ADR-042: the reason code only. An OTHER reason's own words stay on the
+    // token row rather than being copied into the audit trail.
+    metadata: { previousStatus, skipReasonCode: token.skipReasonCode },
     ipAddress: req.ip,
   });
   await realtime.emitTokenSkipped(token.id);

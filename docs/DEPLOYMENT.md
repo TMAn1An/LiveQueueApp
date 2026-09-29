@@ -122,6 +122,20 @@ WHERE allow_repeat_visits = false AND repeat_identity_mode IS NULL
   AND deleted_at IS NULL;
 ```
 
+#### Skip reasons and completion feedback (`20260929205254_add_token_skip_reason_and_completion_feedback`)
+
+Adds ADR-042's terminal notes. **Purely additive**: one new enum type
+(`SkipReasonCode`) and three nullable columns on `tokens`
+(`skip_reason_code`, `skip_reason_text`, `completion_feedback`). Existing rows
+keep `NULL` — historical skips are never given an invented reason — and no
+backfill or environment change is needed.
+
+**Deploy the backend and dashboard together.** From this release the skip
+endpoint requires a reason (`SKIP_REASON_REQUIRED` otherwise), so a dashboard
+still running the previous build would have every Skip refused until it is
+updated. The mobile app needs no coordinated release: an older build simply
+does not display the new fields.
+
 #### Service-start verification setting (`20260929200722_add_queue_require_service_start_otp`)
 
 Makes ADR-029's service-start code optional per queue (ADR-041). **Purely

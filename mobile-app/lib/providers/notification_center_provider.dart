@@ -122,16 +122,22 @@ class NotificationCenterProvider extends ChangeNotifier {
           '${token.serialNumber}$where',
           token.startedAt ?? DateTime.now(),
         );
+      // ADR-042: staff's note travels with the entry — read from the synced
+      // token view, never from a push payload, which carries no free text.
       case TokenStatus.completed:
+        final feedback = token.completionFeedback;
         return (
           'Token completed',
-          '${token.serialNumber}$where',
+          feedback == null ? '${token.serialNumber}$where' : '${token.serialNumber}$where — Feedback: $feedback',
           token.completedAt ?? DateTime.now(),
         );
       case TokenStatus.skipped:
+        final reason = token.skipReasonDisplay;
         return (
           'Your token was skipped',
-          '${token.serialNumber}$where — scan the queue QR code again if you still need service',
+          reason == null
+              ? '${token.serialNumber}$where — scan the queue QR code again if you still need service'
+              : '${token.serialNumber}$where — Reason: $reason · scan the queue QR code again if you still need service',
           token.skippedAt ?? DateTime.now(),
         );
       case TokenStatus.cancelled:

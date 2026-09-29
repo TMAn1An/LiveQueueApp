@@ -52,12 +52,23 @@ class HistoryStorageService {
   }
 
   /// Updates the stored final status for a token already in history (e.g.
-  /// once a live-tracked token reaches a terminal state).
-  Future<void> updateStatus(String tokenId, TokenStatus status) async {
+  /// once a live-tracked token reaches a terminal state), together with the
+  /// staff's note on it when there is one (ADR-042) — a skip reason or
+  /// completion feedback, never both.
+  Future<void> updateStatus(
+    String tokenId,
+    TokenStatus status, {
+    String? skipReason,
+    String? completionFeedback,
+  }) async {
     final entries = await getAll();
     final index = entries.indexWhere((e) => e.tokenId == tokenId);
     if (index == -1) return;
-    entries[index] = entries[index].copyWith(finalStatus: status);
+    entries[index] = entries[index].copyWith(
+      finalStatus: status,
+      skipReason: skipReason,
+      completionFeedback: completionFeedback,
+    );
     await _saveAll(entries);
   }
 

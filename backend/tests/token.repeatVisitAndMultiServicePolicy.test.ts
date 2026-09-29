@@ -42,7 +42,7 @@ function completeToken(accessToken: string, tokenId: string) {
 }
 
 function skipToken(accessToken: string, tokenId: string) {
-  return api().post(`/api/tokens/${tokenId}/skip`).set('Authorization', `Bearer ${accessToken}`);
+  return api().post(`/api/tokens/${tokenId}/skip`).set('Authorization', `Bearer ${accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 }
 
 async function completeAJourney(org: {

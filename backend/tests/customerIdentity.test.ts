@@ -547,7 +547,8 @@ describe('repeat enforcement by customer identity', () => {
     const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
     await api()
       .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${org.accessToken}`);
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const second = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
 
@@ -567,7 +568,8 @@ describe('repeat enforcement by customer identity', () => {
     const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
     await api()
       .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${org.accessToken}`);
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const second = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
     expect(second.status).toBe(201);
@@ -603,7 +605,8 @@ describe('repeat enforcement by customer identity', () => {
     const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
     await api()
       .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${org.accessToken}`);
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     // Being skipped freed them to rejoin, and they did — from another phone.
     const rejoined = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');

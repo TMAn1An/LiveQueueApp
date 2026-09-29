@@ -68,6 +68,17 @@ enum TokenStatus {
   CANCELLED
 }
 
+/// ADR-042: why staff skipped a customer. Deliberately short — a reason is
+/// only useful if staff can pick it in a second. OTHER always carries the
+/// staff's own text (Token.skipReasonText).
+enum SkipReasonCode {
+  CUSTOMER_NOT_PRESENT
+  NO_RESPONSE
+  MISSING_REQUIREMENT
+  CUSTOMER_LEFT
+  OTHER
+}
+
 /// Device identity is deliberately global (no organizationId) per spec 7.19 /
 /// ADR-011 — a device is a lightweight per-installation identifier, not a
 /// tenant-scoped account.
@@ -444,6 +455,18 @@ model Token {
   /// never overloaded onto skippedAt (SKIPPED and CANCELLED are distinct
   /// business events with different historical meaning).
   cancelledAt DateTime? @map("cancelled_at")
+
+  /// ADR-042: why staff skipped this customer. Required on every skip from
+  /// now on; null on every token never skipped, and on skips recorded before
+  /// the requirement existed (never back-filled, never invented).
+  skipReasonCode     SkipReasonCode? @map("skip_reason_code")
+  /// ADR-042: the wording the customer is shown — the predefined reason's
+  /// label as it read at skip time, or the staff's own text for OTHER. A
+  /// snapshot, so a later relabel never rewrites what a customer was told.
+  skipReasonText     String?         @map("skip_reason_text")
+  /// ADR-042: optional note left by staff when completing service. Null
+  /// means an ordinary completion — never a second terminal state.
+  completionFeedback String?         @map("completion_feedback")
 
   /// V2 Checkpoint 7: the CALLED -> IN_PROGRESS gate. Generated fresh every
   /// time a token enters CALLED (both /call and Recall — see callToken),

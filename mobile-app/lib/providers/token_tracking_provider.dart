@@ -366,7 +366,7 @@ class TokenTrackingProvider extends ChangeNotifier {
       // History keeps the record; the active-token pointer does not. The two
       // are separate concepts, and a finished visit belongs only to the
       // first (ADR-036).
-      _historyRepository.recordStatusUpdate(updated.id, updated.status);
+      _historyRepository.recordFinalState(updated);
       onTokenSettled?.call(updated);
     }
   }

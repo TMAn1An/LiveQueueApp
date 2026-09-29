@@ -105,7 +105,8 @@ describe('dispatchReminders — selection rules', () => {
     const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
     await api()
       .post(`/api/tokens/${setup.tokenId}/skip`)
-      .set('Authorization', `Bearer ${setup.accessToken}`);
+      .set('Authorization', `Bearer ${setup.accessToken}`)
+      .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     await waitForCalls(send, 1);
     send.mockClear();
 

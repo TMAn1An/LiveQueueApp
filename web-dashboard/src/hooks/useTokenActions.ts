@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as tokenApi from '../api/token.api';
+import type { SkipReasonCode } from '../types/terminalNotes';
 
 /**
  * Shared invalidation for every token-lifecycle mutation — the live queue
@@ -34,7 +35,8 @@ export function useStartToken() {
 export function useCompleteToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (tokenId: string) => tokenApi.completeToken(tokenId),
+    mutationFn: ({ tokenId, feedback }: { tokenId: string; feedback?: string }) =>
+      tokenApi.completeToken(tokenId, feedback),
     onSuccess: () => invalidateLiveData(queryClient),
   });
 }
@@ -42,7 +44,15 @@ export function useCompleteToken() {
 export function useSkipToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (tokenId: string) => tokenApi.skipToken(tokenId),
+    mutationFn: ({
+      tokenId,
+      reasonCode,
+      reasonText,
+    }: {
+      tokenId: string;
+      reasonCode: SkipReasonCode;
+      reasonText?: string;
+    }) => tokenApi.skipToken(tokenId, reasonCode, reasonText),
     onSuccess: () => invalidateLiveData(queryClient),
   });
 }

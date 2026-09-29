@@ -84,6 +84,9 @@ const HISTORY_SELECT = {
   completedAt: true,
   skippedAt: true,
   cancelledAt: true,
+  skipReasonCode: true,
+  skipReasonText: true,
+  completionFeedback: true,
   requiredDurationMinutes: true,
   queue: { select: { id: true, name: true } },
   counter: { select: { id: true, name: true } },
@@ -149,6 +152,13 @@ export async function listServiceHistory(
       completedAt: token.completedAt,
       skippedAt: token.skippedAt,
       cancelledAt: token.cancelledAt,
+      /** ADR-042: why the visit was skipped, as the customer was told.
+       * Null when not skipped, and on skips from before reasons existed. */
+      skipReason: token.skipReasonCode
+        ? { code: token.skipReasonCode, text: token.skipReasonText }
+        : null,
+      /** ADR-042: staff's optional completion note. */
+      completionFeedback: token.completionFeedback,
       /** Measured, not estimated: the wall-clock gap between start and
        * completion. Null unless both timestamps exist. */
       actualDurationMinutes: actualDurationMinutes(token.startedAt, token.completedAt),

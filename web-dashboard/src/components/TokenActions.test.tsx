@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TokenActions } from './TokenActions';
 import { useCounters } from '../hooks/useCounters';
@@ -110,13 +110,15 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
     expect(screen.queryByRole('option', { name: 'Counter 2' })).not.toBeInTheDocument();
   });
 
-  it('clicking Skip calls skipToken directly with the token id', async () => {
+  it('clicking Skip asks for a reason instead of skipping (ADR-042)', async () => {
     const user = userEvent.setup();
     render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
 
     await user.click(screen.getByText('Skip'));
 
-    expect(skipMutate).toHaveBeenCalledWith('t1');
+    expect(skipMutate).not.toHaveBeenCalled();
+    expect(screen.getByText('Skip customer')).toBeInTheDocument();
+    expect(screen.getByLabelText('Reason')).toBeInTheDocument();
   });
 });
 
@@ -206,6 +208,172 @@ describe('TokenActions — queue without the service-start code (ADR-041)', () =
 
     expect(startMutate).not.toHaveBeenCalled();
     expect(screen.getByPlaceholderText('Verification code')).toBeInTheDocument();
+  });
+});
+
+describe('TokenActions — Skip requires a reason (ADR-042)', () => {
+  async function openSkip() {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
+    await user.click(screen.getByText('Skip'));
+    return user;
+  }
+  const confirmSkip = () =>
+    within(screen.getByRole('dialog', { name: 'Skip customer' })).getByRole('button', { name: 'Skip' });
+
+  it('offers the predefined reasons and keeps Skip disabled until one is chosen', async () => {
+    await openSkip();
+    for (const label of [
+      'Customer not present',
+      'No response from customer',
+      'Required document/information missing',
+      'Customer requested to leave',
+      'Other',
+    ]) {
+      expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
+    }
+    expect(confirmSkip()).toBeDisabled();
+  });
+
+  it('a predefined reason skips with its code and no text', async () => {
+    const user = await openSkip();
+    await user.selectOptions(screen.getByLabelText('Reason'), 'NO_RESPONSE');
+    expect(screen.queryByLabelText('Describe the reason')).not.toBeInTheDocument();
+    await user.click(confirmSkip());
+
+    expect(skipMutate).toHaveBeenCalledWith(
+      { tokenId: 't1', reasonCode: 'NO_RESPONSE', reasonText: undefined },
+      expect.objectContaining({ onSuccess: expect.any(Function), onError: expect.any(Function) }),
+    );
+  });
+
+  it('Other reveals a text field and requires real text before Skip is allowed', async () => {
+    const user = await openSkip();
+    await user.selectOptions(screen.getByLabelText('Reason'), 'OTHER');
+
+    const text = screen.getByLabelText('Describe the reason');
+    expect(screen.getByText('Required when the reason is Other.')).toBeInTheDocument();
+    expect(confirmSkip()).toBeDisabled();
+
+    await user.type(text, '   ');
+    expect(confirmSkip()).toBeDisabled();
+
+    await user.type(text, 'Wrong queue, sent to Billing  ');
+    expect(confirmSkip()).toBeEnabled();
+    await user.click(confirmSkip());
+
+    expect(skipMutate).toHaveBeenCalledWith(
+      { tokenId: 't1', reasonCode: 'OTHER', reasonText: 'Wrong queue, sent to Billing' },
+      expect.anything(),
+    );
+  });
+
+  it('Cancel closes the dialog and changes nothing', async () => {
+    const user = await openSkip();
+    await user.selectOptions(screen.getByLabelText('Reason'), 'CUSTOMER_LEFT');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(skipMutate).not.toHaveBeenCalled();
+    expect(screen.queryByText('Skip customer')).not.toBeInTheDocument();
+  });
+
+  it('shows a backend refusal in the dialog and keeps it open', async () => {
+    skipMutate.mockImplementation((_vars, { onError }: { onError: (e: unknown) => void }) => {
+      onError(new ApiError(422, 'INVALID_TOKEN_TRANSITION', 'Cannot transition token from COMPLETED to SKIPPED.'));
+    });
+    const user = await openSkip();
+    await user.selectOptions(screen.getByLabelText('Reason'), 'CUSTOMER_NOT_PRESENT');
+    await user.click(confirmSkip());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Cannot transition token from COMPLETED to SKIPPED.',
+    );
+    expect(screen.getByText('Skip customer')).toBeInTheDocument();
+  });
+
+  it('says so plainly when the server could not be reached', async () => {
+    skipMutate.mockImplementation((_vars, { onError }: { onError: (e: unknown) => void }) => {
+      onError(new TypeError('Failed to fetch'));
+    });
+    const user = await openSkip();
+    await user.selectOptions(screen.getByLabelText('Reason'), 'CUSTOMER_NOT_PRESENT');
+    await user.click(confirmSkip());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the server.');
+  });
+
+  it('closes once the skip succeeds', async () => {
+    skipMutate.mockImplementation((_vars, { onSuccess }: { onSuccess: () => void }) => onSuccess());
+    const user = await openSkip();
+    await user.selectOptions(screen.getByLabelText('Reason'), 'CUSTOMER_NOT_PRESENT');
+    await user.click(confirmSkip());
+
+    expect(screen.queryByText('Skip customer')).not.toBeInTheDocument();
+  });
+});
+
+describe('TokenActions — Complete stays one click; feedback is optional (ADR-042)', () => {
+  it('Complete completes immediately, with no dialog and no feedback', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" />);
+
+    await user.click(screen.getByText('Complete'));
+
+    expect(completeMutate).toHaveBeenCalledWith({ tokenId: 't1' }, expect.anything());
+    expect(screen.queryByText('Complete with feedback')).not.toBeInTheDocument();
+  });
+
+  it('a failed one-click Complete is shown, not swallowed', async () => {
+    completeMutate.mockImplementation((_vars, { onError }: { onError: (e: unknown) => void }) => {
+      onError(new ApiError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.'));
+    });
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" />);
+
+    await user.click(screen.getByText('Complete'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Token state changed concurrently.');
+  });
+
+  it('only an IN_PROGRESS row offers Feedback', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
+    expect(screen.queryByText('Feedback')).not.toBeInTheDocument();
+  });
+
+  it('Feedback opens a note, and completing sends it', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" />);
+
+    await user.click(screen.getByText('Feedback'));
+    expect(completeMutate).not.toHaveBeenCalled();
+    await user.type(
+      screen.getByLabelText('Feedback for the customer (optional)'),
+      '  Please bring the original document next time.  ',
+    );
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Complete with feedback' })).getByRole('button', {
+        name: 'Complete',
+      }),
+    );
+
+    expect(completeMutate).toHaveBeenCalledWith(
+      { tokenId: 't1', feedback: 'Please bring the original document next time.' },
+      expect.anything(),
+    );
+  });
+
+  it('completing from the feedback dialog with nothing typed is an ordinary completion', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" />);
+
+    await user.click(screen.getByText('Feedback'));
+    await user.click(
+      within(screen.getByRole('dialog', { name: 'Complete with feedback' })).getByRole('button', {
+        name: 'Complete',
+      }),
+    );
+
+    expect(completeMutate).toHaveBeenCalledWith({ tokenId: 't1', feedback: undefined }, expect.anything());
   });
 });
 

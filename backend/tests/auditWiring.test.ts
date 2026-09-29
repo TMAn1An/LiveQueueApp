@@ -244,7 +244,8 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
       const res = await api()
         .post(`/api/tokens/${token.id}/skip`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`);
+        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
       expect(res.status).toBe(200);
 
       const rows = await waitForAuditLogs({
@@ -253,7 +254,11 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
       });
       expect(rows).toHaveLength(1);
       expect(rows[0]?.entityId).toBe(token.id);
-      expect(rows[0]?.metadata).toEqual({ previousStatus: 'WAITING' });
+      // ADR-042: the reason code is recorded; never the reason's own text.
+      expect(rows[0]?.metadata).toEqual({
+        previousStatus: 'WAITING',
+        skipReasonCode: 'CUSTOMER_NOT_PRESENT',
+      });
     });
 
     it('a rejected call on a skipped (terminal) token creates no audit event', async () => {
@@ -261,7 +266,8 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
       await api()
         .post(`/api/tokens/${token.id}/skip`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`);
+        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
       const res = await api()
         .post(`/api/tokens/${token.id}/call`)
         .set('Authorization', `Bearer ${ctx.accessToken}`)

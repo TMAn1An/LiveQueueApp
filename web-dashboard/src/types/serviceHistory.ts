@@ -1,4 +1,5 @@
 import type { DisplayFormField } from './device';
+import type { SkipReason } from './terminalNotes';
 
 /** Only the three terminal statuses a historical visit can hold. COMPLETED
  * is the default the backend applies when no status is requested — service
@@ -19,6 +20,11 @@ export interface ServiceHistoryEntry {
   completedAt: string | null;
   skippedAt: string | null;
   cancelledAt: string | null;
+  /** ADR-042: why the visit was skipped, as the customer was told. Null when
+   * not skipped, and on skips from before reasons were required. */
+  skipReason: SkipReason | null;
+  /** ADR-042: staff's optional completion note. */
+  completionFeedback: string | null;
   /** Wall-clock minutes between start and completion; null if never started. */
   actualDurationMinutes: number | null;
   /** The staff override when one was set, else the summed service durations. */

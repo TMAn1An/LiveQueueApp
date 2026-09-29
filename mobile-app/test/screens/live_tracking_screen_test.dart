@@ -65,9 +65,15 @@ LiveQueueToken _token({
   CounterInfo? counter,
   String? etaUnavailableReason,
   bool serviceStartVerificationRequired = true,
+  String? skipReasonCode,
+  String? skipReasonText,
+  String? completionFeedback,
 }) {
   return LiveQueueToken(
     serviceStartVerificationRequired: serviceStartVerificationRequired,
+    skipReasonCode: skipReasonCode,
+    skipReasonText: skipReasonText,
+    completionFeedback: completionFeedback,
     id: 'token-1',
     queueId: 'queue-1',
     serviceId: 'service-1',
@@ -253,6 +259,58 @@ void main() {
       expect(find.text('Your verification code has expired.'), findsNothing);
       expect(find.text('Get a new code'), findsNothing);
       expect(find.byType(CircularProgressIndicator), findsNothing);
+    });
+
+    testWidgets('ADR-042: a skipped token shows why, and still says how to get service again', (tester) async {
+      final provider = _FakeTokenTrackingProvider();
+      provider.pushState(
+        token: _token(
+          status: TokenStatus.skipped,
+          skipReasonCode: 'CUSTOMER_NOT_PRESENT',
+          skipReasonText: 'Customer not present',
+        ),
+      );
+      await _pump(tester, provider);
+
+      expect(find.text('Reason'), findsOneWidget);
+      expect(find.text('Customer not present'), findsOneWidget);
+      expect(
+        find.text('This token was skipped. Scan the queue QR code again if you still need service.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('recall'), findsNothing);
+    });
+
+    testWidgets('ADR-042: an Other reason shows the staff member\'s own words', (tester) async {
+      final provider = _FakeTokenTrackingProvider();
+      provider.pushState(
+        token: _token(
+          status: TokenStatus.skipped,
+          skipReasonCode: 'OTHER',
+          skipReasonText: 'Wrong queue, please use Billing',
+        ),
+      );
+      await _pump(tester, provider);
+
+      expect(find.text('Wrong queue, please use Billing'), findsOneWidget);
+    });
+
+    testWidgets('ADR-042: completion feedback is shown when present, and nothing when absent', (tester) async {
+      final withFeedback = _FakeTokenTrackingProvider();
+      withFeedback.pushState(
+        token: _token(status: TokenStatus.completed, completionFeedback: 'Please bring the original document.'),
+      );
+      await _pump(tester, withFeedback);
+      expect(find.text('This token has been completed.'), findsOneWidget);
+      expect(find.text('Feedback'), findsOneWidget);
+      expect(find.text('Please bring the original document.'), findsOneWidget);
+
+      final plain = _FakeTokenTrackingProvider();
+      plain.pushState(token: _token(status: TokenStatus.completed));
+      await _pump(tester, plain);
+      expect(find.text('This token has been completed.'), findsOneWidget);
+      expect(find.text('Feedback'), findsNothing);
+      expect(find.text('Reason'), findsNothing);
     });
 
     testWidgets('a CANCELLED token shows its own message, not the SKIPPED one', (tester) async {

@@ -302,6 +302,18 @@ A dashboard-usability-only checkpoint: the four management lists became searchab
 - **Found and fixed on the way:** `/next` never issued a code (only `/call` did), and it returned the token without stripping internal fields. It now issues the code on the same terms as `/call` and strips its response like every other staff path. The dashboard does not use `/next`, so nothing visible depended on the old behavior.
 - **Verification:** see ADR-041.
 
+### V2 Mandatory skip reason + optional completion feedback (2026-09-30)
+
+**Status: implemented and verified. One additive migration (`20260929205254_add_token_skip_reason_and_completion_feedback`); nothing dropped, no historical row rewritten. Not deployed. See ADR-042.**
+
+- **Every skip now says why.** Staff choose one of five reasons: Customer not present, No response from customer, Required document/information missing, Customer requested to leave, or Other with their own words. The backend refuses a skip without one, with a specific error code for each problem, and stores the code with the exact wording the customer was shown. Old skips keep no reason; none is invented.
+- **Complete is still one click.** A separate "Feedback" action on in-service rows lets staff leave an optional note before completing. The status is COMPLETED either way, and blank feedback is simply an ordinary completion.
+- **Customers see it:** Live Tracking's finished view, the Notification Center, the foreground banner and History all show the reason or feedback when there is one, and nothing when there isn't. The "scan the queue QR code again" guidance stays on skips; nothing says staff can recall them.
+- **Privacy:** push notifications are unchanged and carry no staff-typed text. The app reads the note from the synced token. Audit records only the reason code and whether feedback was left.
+- **Found and fixed on the way:** a visit that ended while the customer wasn't on its Live Tracking screen never updated History, only the Notification Center. The resync path now records it in History too, reason or feedback included. And a failed one-click Complete on the dashboard used to fail silently; it now shows the error.
+- **Staff reporting:** Service History shows the skip reason and completion feedback under each row's status.
+- **Verification:** see ADR-042.
+
 ### V2 Queue isolation, mobile navigation, staff binding (2026-09-09)
 
 **Status: implemented and verified. No migration — the schema already expressed everything this needed.**

@@ -320,7 +320,7 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
     await callToken(org.accessToken, token.id, org.counter.id);
     const firstCode = (await getVerificationCode(token.id, token.deviceIdentifier)).body.data.code;
 
-    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`);
+    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     // Recall no longer exists — a skipped token can never be CALLED again,
     // so its verification code is simply unavailable, not merely rotated.

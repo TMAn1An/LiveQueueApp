@@ -139,7 +139,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     await joinToken(socketSecond, second.id);
     const eventPromise = waitForEvent<PositionEnvelope>(socketSecond, 'token.position_changed');
 
-    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const envelope = await eventPromise;
     expect(envelope.data.position).toBe(1);
@@ -176,7 +176,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     // simulated ETA (V2 Checkpoint 4, ADR-026: the broadcast is no longer
     // scoped to "only tokens whose position shifted").
     const skipPositionEvent = waitForEvent<PositionEnvelope>(socketSecond, 'token.position_changed');
-    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     const envelope = await skipPositionEvent;
 
     expect(envelope.data.position).toBe(1);

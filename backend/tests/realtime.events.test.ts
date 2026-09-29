@@ -242,7 +242,7 @@ describe('All 12 specification events are emitted to the organization room', () 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
     const eventPromise = waitForEvent<Envelope>(socket, 'token.skipped');
 
-    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const envelope = await eventPromise;
     expect(envelope.data.status).toBe('SKIPPED');

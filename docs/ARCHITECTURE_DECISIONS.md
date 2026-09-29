@@ -1213,3 +1213,90 @@ The queue API carries `requireServiceStartOtp` (queue-shaped responses, and the 
 - **Dashboard: 219/219** (35 files, 12 new). `tsc -b` clean; oxlint shows the same five pre-existing warnings and nothing new; the production build succeeds.
 - **Mobile: 322/322** (12 new). `flutter analyze` reports the same 26 pre-existing `prefer_initializing_formals` hints, with no errors or warnings. The debug APK builds.
 - Not verified on a physical device or in a browser, by design for this checkpoint. No production database was accessed and nothing was deployed.
+
+## ADR-042: Skips must give a reason; completion feedback is optional; both are the customer's to read (2026-09-30)
+
+**Status:** Implemented, tested, committed. One additive migration. Not deployed.
+
+### Two separate notes, not one
+
+A skip reason and completion feedback answer different questions ("why was I sent away?" versus "anything I should know?"), carry different rules (required versus optional) and belong to different terminal states. A single generic `note` column would have made "was this skipped for a reason, or completed with a comment?" depend on reading the status first. The token gets three nullable columns instead:
+
+- `skipReasonCode` (`SkipReasonCode` enum: `CUSTOMER_NOT_PRESENT`, `NO_RESPONSE`, `MISSING_REQUIREMENT`, `CUSTOMER_LEFT`, `OTHER`)
+- `skipReasonText`
+- `completionFeedback`
+
+The migration only adds them. No historical token is rewritten, and a skip recorded before this checkpoint keeps no reason rather than an invented one.
+
+### What is stored for a skip, and why both
+
+`skipReasonText` is always filled on a new skip. For a predefined reason it holds that reason's label *as it read at skip time*; for `OTHER` it holds the staff member's own words. The code is what software reasons about, and the text is what the customer was actually told. Storing the snapshot means relabelling a reason later can never rewrite what an earlier customer read. Text sent alongside a predefined code is ignored, since it isn't what that code means.
+
+### Validation lives in the backend, with its own error codes
+
+The request validator only bounds the payload's size. `resolveSkipReason` decides everything else and throws a specific code for each case:
+
+- `SKIP_REASON_REQUIRED` when there is no reason
+- `INVALID_SKIP_REASON` when the code is unknown
+- `SKIP_REASON_TEXT_REQUIRED` when `OTHER` has blank text
+- `SKIP_REASON_TEXT_TOO_LONG` over 200 characters
+
+Every skip needs a reason, from WAITING, CALLED or IN_PROGRESS alike, and the reason is checked before anything else. Completion feedback is optional; blank after cleaning counts as an ordinary completion, and over 500 characters fails with `COMPLETION_FEEDBACK_TOO_LONG`.
+
+Both texts go through one normalizer before storage, because a customer will read them. It removes control characters, collapses runs of spaces and trims. A skip reason is a single line; feedback may keep line breaks.
+
+The note is written in the same compare-and-swap UPDATE as the status (`transitionToken`'s new `terminalNote` argument), so a reason or feedback exists exactly when its status does. SKIPPED and COMPLETED are terminal, so nothing can overwrite either afterwards; a second skip fails as an invalid transition and the original reason stands.
+
+### Complete stays one click
+
+The dashboard's Complete button still completes immediately, with no dialog. Feedback is a separate, secondary "Feedback" action on IN_PROGRESS rows that opens a note and then completes. There is no second terminal state: the status is COMPLETED either way. A failed one-click Complete now shows its error; before, it failed silently.
+
+### Customers read it from the synced token, never from a push
+
+The customer token view carries `skipReason: { code, text } | null` and `completionFeedback`. The FCM notification text and data payload are unchanged (status and ids only). The app resyncs the authoritative token and shows the note in:
+
+- Live Tracking's terminal view: a labelled note under the existing message, with the "scan the queue QR code again" guidance kept
+- the Notification Center entry: "Reason: …" / "Feedback: …"
+- the foreground banner built from that entry, capped at three lines
+- History, both the list's details screen and its stored entry
+
+Operator text therefore never reaches Google's push infrastructure or the device's notification tray through the backend.
+
+### History now hears about visits it wasn't watching
+
+Before this checkpoint, History's final status was written only by the Live Tracking provider. A token that finished while the customer was looking at another screen updated the Notification Center (through `ActiveTokenProvider`'s resync) but stayed WAITING in History. The resync callback now also calls `HistoryRepository.recordFinalState`, the same method Live Tracking uses. That records the final status together with the skip reason or feedback, whichever path noticed the change first.
+
+### Audit and logs
+
+`token_skipped` audit metadata gains `skipReasonCode`; `token_completed` gains `withFeedback: boolean`. Neither ever holds the free text: the token row already stores it, and copying staff-typed text into the audit trail would only create a second place it has to be protected. Nothing new is logged.
+
+### Reporting
+
+The dashboard's Service History response and table include the skip reason and completion feedback, shown under the status badge only when present. Both are plain columns, so they can be queried directly.
+
+### Dashboard
+
+The Skip button opens a "Skip customer" dialog built on the shared `Modal`, which now has proper `role="dialog"` semantics labelled by its title:
+
+- A reason dropdown with the five options.
+- Choosing Other reveals a text field with a live count.
+- Skip (danger-styled) stays disabled until the reason is valid.
+- Cancel changes nothing.
+- A backend refusal is shown in the dialog, and a network failure says the server could not be reached.
+
+### Verification
+
+- **Backend: 769/769** (73 files, 21 new in `token.skipReasonAndCompletionFeedback.test.ts`).
+  - The new tests cover: skips with no reason, an unknown reason, or blank Other text; predefined and Other reasons with their stored snapshot; the text length limit; reasons required from CALLED and IN_PROGRESS too; the customer view and Service History carrying the reason; terminal permanence (a second skip cannot overwrite the reason); rejoin; FCFS; permissions and tenant isolation; completion with no body, with feedback, with blank feedback and over the length limit; that feedback opens no new path from CALLED; the ADR-041 rule that a code queue still needs a verified start before Complete; and text normalization.
+  - The repeat-visit entitlement is covered by the existing identity test "releases the hold when a customer is skipped", which now skips with a real reason.
+  - 21 existing skip call sites across 15 test files now send a reason; the one exact-metadata audit assertion was updated to include `skipReasonCode`.
+  - Typecheck, lint and build are clean.
+- **Prisma:** `format`/`validate` clean. The migration is one `CREATE TYPE` plus three nullable `ADD COLUMN`s. It was applied with `migrate deploy` to local `livequeue_dev`/`livequeue_test` only, and `migrate status` is up to date.
+- **Dashboard: 232/232** (13 new).
+  - The new tests cover the Skip dialog (reasons offered, disabled until valid, a predefined reason, Other requiring text, Cancel, backend and network errors, closing on success), one-click Complete and its error, the Feedback action with and without text, and Service History showing only notes that exist.
+  - `tsc -b` clean; the same five pre-existing lint warnings; the build succeeds.
+- **Mobile: 335/335** (13 new).
+  - The new tests cover model parsing and fallbacks, History storage with and without notes (including pre-existing entries), the details screen, Live Tracking's skipped/Other/feedback/no-feedback views, and the Notification Center wording.
+  - A resync integration test proves a skip raises a banner carrying the reason and lands in History with it.
+  - `flutter analyze` shows the same 26 pre-existing hints; the debug APK builds.
+- No production database was accessed and nothing was deployed.

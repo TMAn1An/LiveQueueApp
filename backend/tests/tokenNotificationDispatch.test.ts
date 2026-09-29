@@ -104,7 +104,7 @@ function completeToken(setup: Setup) {
 }
 
 function skipToken(setup: Setup) {
-  return api().post(`/api/tokens/${setup.tokenId}/skip`).set('Authorization', `Bearer ${setup.accessToken}`);
+  return api().post(`/api/tokens/${setup.tokenId}/skip`).set('Authorization', `Bearer ${setup.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 }
 
 function nextToken(setup: Setup) {

@@ -23,6 +23,8 @@ function mockEntry(overrides: Partial<ServiceHistoryEntry> = {}): ServiceHistory
     completedAt: '2026-09-07T10:17:00.000Z',
     skippedAt: null,
     cancelledAt: null,
+    skipReason: null,
+    completionFeedback: null,
     actualDurationMinutes: 12,
     expectedDurationMinutes: 10,
     ...overrides,
@@ -69,6 +71,36 @@ describe('ServiceHistoryPage', () => {
     expect(table.getByText('Amina Rahman')).toBeInTheDocument();
     expect(table.getByText('Counter 1')).toBeInTheDocument();
     expect(table.getByText('12 min')).toBeInTheDocument();
+  });
+
+  it('shows a skip reason and completion feedback only where they exist (ADR-042)', () => {
+    vi.mocked(useServiceHistory).mockReturnValue(
+      mockResult([
+        mockEntry({ tokenId: 't-plain', serialNumber: 'A001' }),
+        mockEntry({
+          tokenId: 't-feedback',
+          serialNumber: 'A002',
+          completionFeedback: 'Please bring the original document next time.',
+        }),
+        mockEntry({
+          tokenId: 't-skipped',
+          serialNumber: 'A003',
+          status: 'SKIPPED',
+          completedAt: null,
+          skippedAt: '2026-09-07T10:20:00.000Z',
+          skipReason: { code: 'CUSTOMER_NOT_PRESENT', text: 'Customer not present' },
+        }),
+      ]),
+    );
+
+    render(<ServiceHistoryPage />);
+
+    const table = within(screen.getByRole('table'));
+    expect(table.getByText('Customer not present')).toBeInTheDocument();
+    expect(table.getByText('Please bring the original document next time.')).toBeInTheDocument();
+    // One reason, one feedback — the plain completion adds neither label.
+    expect(table.getAllByText(/Reason:/)).toHaveLength(1);
+    expect(table.getAllByText(/Feedback:/)).toHaveLength(1);
   });
 
   it('sends the status filter to the server and resets to the first page', () => {

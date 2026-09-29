@@ -128,6 +128,7 @@ describe('first-come-first-served runs per queue', () => {
     await api()
       .post(`/api/tokens/${first.id}/skip`)
       .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' })
       .expect(200);
 
     const a = await liveLine(org.ctx.accessToken, org.queueA.id);
@@ -189,7 +190,8 @@ describe('first-come-first-served runs per queue', () => {
 
     const res = await api()
       .post(`/api/tokens/${tokenA.id}/skip`)
-      .set('Authorization', `Bearer ${org.ctx.accessToken}`);
+      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COUNTER_NOT_AVAILABLE');

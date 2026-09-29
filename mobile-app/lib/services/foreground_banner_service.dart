@@ -145,7 +145,15 @@ class _ForegroundBanner extends StatelessWidget {
                               title,
                               style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                             ),
-                            Text(body, style: theme.textTheme.bodySmall),
+                            // ADR-042: a body can now carry staff feedback of
+                            // up to 500 characters; the banner stays a banner
+                            // and the full text is one tap away.
+                            Text(
+                              body,
+                              style: theme.textTheme.bodySmall,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ],
                         ),
                       ),
