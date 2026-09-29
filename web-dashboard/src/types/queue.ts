@@ -52,6 +52,16 @@ export interface Queue {
   /** ADR-041: staff must enter the customer's service-start code before
    * starting service. True for every queue that existed before the setting. */
   requireServiceStartOtp: boolean;
+  /** Phase 4: false for every queue that predates scheduling (and for every
+   * queue that has never turned it on) — joins are accepted at any time,
+   * exactly as before this feature existed. */
+  scheduleEnabled: boolean;
+  /** Total joins allowed per calendar day across every session combined.
+   * Null = unlimited. */
+  scheduleDailyCapacity: number | null;
+  /** Whether the mobile app may show today's hours / the customer's assigned
+   * session. Join-failure reasons are shown to the customer either way. */
+  scheduleVisibleToCustomers: boolean;
   formVersion: number;
   qrCodeUri: string;
   deletedAt: string | null;
@@ -74,6 +84,22 @@ export interface Counter {
   staffId: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Phase 4: one recurring weekly time window a queue accepts joins in.
+ * `weekday` follows `Date.prototype.getUTCDay()` — 0 (Sunday) through 6
+ * (Saturday). `startMinute`/`endMinute` are minutes since local midnight in
+ * the queue's own timezone, 0-1439. Overlapping sessions on the same
+ * weekday are allowed by design (two concurrent capacity pools), not an
+ * accident to warn about.
+ */
+export interface QueueSession {
+  id: string;
+  weekday: number;
+  startMinute: number;
+  endMinute: number;
+  capacity: number | null;
 }
 
 export interface QueueFormField {

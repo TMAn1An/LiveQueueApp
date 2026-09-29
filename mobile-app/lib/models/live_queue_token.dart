@@ -1,4 +1,5 @@
 import 'counter_info.dart';
+import 'queue_schedule_status.dart';
 
 /// Mirrors the backend's TokenStatus enum exactly (backend/prisma/schema.prisma).
 enum TokenStatus { waiting, called, inProgress, completed, skipped, cancelled, unknown }
@@ -56,7 +57,15 @@ class LiveQueueToken {
     this.skipReasonCode,
     this.skipReasonText,
     this.completionFeedback,
+    this.assignedSession,
   });
+
+  /// Phase 4 — the fixed session window this token was assigned to at
+  /// creation, when its queue schedules sessions. Never changes afterward,
+  /// even if the session is later edited (the backend snapshots it) — so
+  /// this is safe to show once and forget, not something Live Tracking
+  /// needs to keep resyncing. Null for every token on an unscheduled queue.
+  final QueueSessionWindow? assignedSession;
 
   final String id;
 
@@ -159,6 +168,9 @@ class LiveQueueToken {
       skipReasonCode: (json['skipReason'] as Map<String, dynamic>?)?['code'] as String?,
       skipReasonText: (json['skipReason'] as Map<String, dynamic>?)?['text'] as String?,
       completionFeedback: _nonBlank(json['completionFeedback'] as String?),
+      assignedSession: json['assignedSession'] == null
+          ? null
+          : QueueSessionWindow.fromJson(json['assignedSession'] as Map<String, dynamic>),
     );
   }
 
@@ -204,6 +216,7 @@ class LiveQueueToken {
       skipReasonCode: skipReasonCode,
       skipReasonText: skipReasonText,
       completionFeedback: completionFeedback,
+      assignedSession: assignedSession,
     );
   }
 }

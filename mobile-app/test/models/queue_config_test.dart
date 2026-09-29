@@ -54,6 +54,31 @@ void main() {
     expect(config.formFields, isEmpty);
   });
 
+  test('Phase 4: a queue with no schedule block is fully open, exactly as before this feature existed', () {
+    final config = QueueConfig.fromJson({'id': 'queue-1', 'name': 'Q', 'status': 'ACTIVE'});
+    expect(config.schedule.scheduleEnabled, isFalse);
+    expect(config.isAcceptingCustomers, isTrue);
+  });
+
+  test('Phase 4: isAcceptingCustomers is false while the schedule reports closed, even for an ACTIVE queue', () {
+    final config = QueueConfig.fromJson({
+      'id': 'queue-1',
+      'name': 'Q',
+      'status': 'ACTIVE',
+      'schedule': {
+        'scheduleEnabled': true,
+        'isOpenNow': false,
+        'message': 'This queue opens today at 09:00.',
+        'todaySessions': [
+          {'startMinute': 540, 'endMinute': 720},
+        ],
+      },
+    });
+    expect(config.isAcceptingCustomers, isFalse);
+    expect(config.schedule.message, 'This queue opens today at 09:00.');
+    expect(config.schedule.todaySessions.single.label, '09:00–12:00');
+  });
+
   test('an unrecognized field type maps to unknown rather than throwing', () {
     final field = DynamicFormField.fromJson({
       'id': 'f1',

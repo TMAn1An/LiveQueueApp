@@ -391,6 +391,19 @@ class QueueJoinProvider extends ChangeNotifier {
         return 'Please answer the question that identifies you for this queue.';
       case 'MULTIPLE_SERVICES_NOT_ALLOWED':
         return 'This queue only allows selecting a single service.';
+      // Phase 4: the backend already composes a specific, customer-safe
+      // sentence for each of these (e.g. "This queue opens today at
+      // 09:00.", "This session is full. Please try again during the next
+      // session.") — there is no separate structured detail to read, unlike
+      // the repeat-visit countdown above, so passing the message straight
+      // through is the correct behavior, not a fallback.
+      case 'SCHEDULE_CLOSED_TODAY':
+      case 'SCHEDULE_NOT_YET_OPEN':
+      case 'SCHEDULE_BETWEEN_SESSIONS':
+      case 'SCHEDULE_ENDED_TODAY':
+      case 'SCHEDULE_SESSION_FULL':
+      case 'SCHEDULE_DAILY_CAPACITY_REACHED':
+        return e.message;
       default:
         return e.message;
     }

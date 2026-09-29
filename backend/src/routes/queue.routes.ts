@@ -4,14 +4,18 @@ import * as serviceController from '../controllers/service.controller';
 import * as counterController from '../controllers/counter.controller';
 import * as formFieldController from '../controllers/formField.controller';
 import * as tokenController from '../controllers/token.controller';
+import * as queueScheduleController from '../controllers/queueSchedule.controller';
 import { authenticate } from '../middleware/authenticate';
 import { requirePermission } from '../middleware/requirePermission';
 import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
   createQueueSchema,
+  createQueueSessionSchema,
+  deleteQueueSessionSchema,
   queueIdOnlySchema,
   updateQueueSchema,
+  updateQueueSessionSchema,
   updateQueueStatusSchema,
 } from '../validators/queue.validators';
 import { createServiceSchema } from '../validators/service.validators';
@@ -101,6 +105,41 @@ router.put(
   requirePermission('manage_queues'),
   validate(replaceFormFieldsSchema),
   formFieldController.replace,
+);
+
+// Phase 4: schedule/sessions. Read is any-authenticated-staff (Phase 2
+// decision 1 convention, same as counters/form-fields above); only the
+// mutations require manage_queues.
+router.get(
+  '/:queueId/sessions',
+  authenticate,
+  requireVerified,
+  validate(queueIdOnlySchema),
+  queueScheduleController.list,
+);
+router.post(
+  '/:queueId/sessions',
+  authenticate,
+  requireVerified,
+  requirePermission('manage_queues'),
+  validate(createQueueSessionSchema),
+  queueScheduleController.create,
+);
+router.put(
+  '/:queueId/sessions/:sessionId',
+  authenticate,
+  requireVerified,
+  requirePermission('manage_queues'),
+  validate(updateQueueSessionSchema),
+  queueScheduleController.update,
+);
+router.delete(
+  '/:queueId/sessions/:sessionId',
+  authenticate,
+  requireVerified,
+  requirePermission('manage_queues'),
+  validate(deleteQueueSessionSchema),
+  queueScheduleController.remove,
 );
 
 // Staff selects the counter; the backend auto-selects the oldest eligible

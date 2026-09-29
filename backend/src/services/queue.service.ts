@@ -3,6 +3,7 @@ import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { resolveQueueTimezone, resolveRepeatPolicy } from './queueIdentityPolicy.service';
 import { issueServiceStartCodesForCalledTokens } from './token.service';
+import { requireScheduleTimezone } from './queueSchedule.service';
 import { AppError } from '../utils/AppError';
 import { assertQueueMutable } from '../utils/tenantScope';
 import type { createQueueSchema, updateQueueSchema } from '../validators/queue.validators';
@@ -176,6 +177,14 @@ export async function updateQueue(
   // start path reads the current setting and ignores any code left behind.
   const enablingServiceStartCode =
     input.requireServiceStartOtp === true && !existing.requireServiceStartOtp;
+
+  // Phase 4: every session window is evaluated on the queue's own clock, so
+  // scheduling cannot be turned on (or stay on, if this same request also
+  // clears the timezone) without a real one resolved.
+  const nextScheduleEnabled = input.scheduleEnabled ?? existing.scheduleEnabled;
+  if (nextScheduleEnabled) {
+    requireScheduleTimezone(effectiveTimezone);
+  }
 
   const queue = await prisma.$transaction(async (tx) => {
     const updated = await tx.queue.update({

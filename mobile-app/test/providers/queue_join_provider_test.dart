@@ -227,6 +227,39 @@ void main() {
       expect(provider.errorMessage, 'This queue is not currently accepting new customers.');
       expect(provider.createdToken, isNull);
     });
+
+    test('Phase 4: a schedule join failure shows the backend’s own specific message verbatim', () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.path.contains('/config')) {
+          return http.Response(jsonEncode({'success': true, 'data': _queueJson()}), 200);
+        }
+        if (request.url.path == '/api/devices/register') {
+          return http.Response(jsonEncode({'success': true, 'data': {'id': 'device-1'}}), 201);
+        }
+        return http.Response(
+          jsonEncode({
+            'success': false,
+            'error': {
+              'code': 'SCHEDULE_SESSION_FULL',
+              'message': 'This session is full. Please try again during the next session.',
+            },
+          }),
+          409,
+        );
+      });
+      final provider = _buildProvider(mockClient);
+      await provider.loadQueueById('queue-1');
+      provider.toggleService(provider.queueConfig!.services.first.id);
+      provider.updateFormField('fullName', 'Jane Doe');
+
+      final success = await provider.submitJoin();
+
+      expect(success, isFalse);
+      expect(
+        provider.errorMessage,
+        'This session is full. Please try again during the next session.',
+      );
+    });
   });
 
   group('idempotency key stability across retries', () {

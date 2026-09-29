@@ -14,6 +14,7 @@ import { FormBuilder } from '../components/FormBuilder';
 import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
 import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
 import { ServiceStartVerificationSetting } from '../components/ServiceStartVerificationSetting';
+import { QueueSchedule } from '../components/QueueSchedule';
 
 export function QueueDetailsPage() {
   const { queueId } = useParams<{ queueId: string }>();
@@ -185,6 +186,13 @@ export function QueueDetailsPage() {
           queue={queue}
           effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
         />
+      </Card>
+
+      {/* Phase 4: a queue's operating hours are a fact about when it accepts
+          customers at all, same rank as Repeat Visits above. */}
+      <Card>
+        <h2 className="mb-3 text-base font-semibold text-fg-soft">Schedule &amp; Availability</h2>
+        <QueueSchedule queue={queue} />
       </Card>
 
       <Card>

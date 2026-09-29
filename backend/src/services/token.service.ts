@@ -25,6 +25,7 @@ import {
   computeEligibleAgainAt,
   computeIdentityFingerprint,
   normalizeCustomIdentity,
+  resolveLocalMoment,
   verifyEmailVerificationProof,
   verifyPhoneVerificationProof,
   type RepeatWindow,
@@ -34,6 +35,7 @@ import {
   repeatPolicyHelpers,
   resolveQueueTimezone,
 } from './queueIdentityPolicy.service';
+import { assignSessionForNewToken } from './queueSchedule.service';
 import type { AuthContext } from '../utils/authContext';
 import {
   decryptOtpCode,
@@ -394,7 +396,10 @@ function assertIdempotentPayloadMatches(
  * transaction never leaves next_token_number advanced (ADR-003).
  */
 export async function createToken(input: CreateTokenInput, idempotencyKey: string) {
-  const queue = await prisma.queue.findUnique({ where: { id: input.queueId } });
+  const queue = await prisma.queue.findUnique({
+    where: { id: input.queueId },
+    include: { organization: { select: { timezone: true } } },
+  });
   if (!queue) {
     throw new AppError(404, 'QUEUE_NOT_FOUND', 'Queue not found.');
   }
@@ -533,6 +538,24 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     // separate — stopping one installation from queueing twice at once is an
     // installation-scoped concern, and correctly stays one.
 
+    // Phase 4: scheduleEnabled/scheduleDailyCapacity are a static queue-
+    // configuration gate — read from the pre-lock `queue`, not the locked
+    // row, exactly like the allowMultipleServices check above. The session
+    // lookup and capacity COUNT below are the actual resource allocation,
+    // and run only now, after the queue row lock, which is what makes them
+    // race-free against a concurrent createToken call for the same queue
+    // (see assignSessionForNewToken's own doc comment).
+    const sessionAssignment = queue.scheduleEnabled
+      ? await assignSessionForNewToken(tx, {
+          queueId: input.queueId,
+          dailyCapacity: queue.scheduleDailyCapacity,
+          moment: resolveLocalMoment(
+            new Date(),
+            resolveQueueTimezone(queue, queue.organization) ?? 'UTC',
+          ),
+        })
+      : null;
+
     const sequenceNumber = lockedQueue.nextTokenNumber;
     await tx.queue.update({
       where: { id: input.queueId },
@@ -565,6 +588,13 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         // effect the way the dashboard says it does.
         identityFingerprint: identity?.fingerprint ?? null,
         identityMode: identity?.mode ?? null,
+        // Phase 4: fixed at creation, never reassigned — see Token's own
+        // schema doc comment for why the start/end minutes are snapshotted
+        // rather than only referenced live through queueSessionId.
+        queueSessionId: sessionAssignment?.queueSessionId ?? null,
+        assignedSessionDate: sessionAssignment?.assignedSessionDate ?? null,
+        assignedSessionStartMinute: sessionAssignment?.assignedSessionStartMinute ?? null,
+        assignedSessionEndMinute: sessionAssignment?.assignedSessionEndMinute ?? null,
         tokenServices: { create: input.serviceIds.map((serviceId) => ({ serviceId })) },
       },
     });
@@ -815,6 +845,14 @@ function toCustomerView(
     estimatedReadyAt: computed.estimatedReadyAt,
     etaUnavailableReason: computed.etaUnavailableReason,
     counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
+    /** Phase 4: the customer-safe view of this token's fixed session
+     * assignment — the snapshotted window, never the internal
+     * queueSessionId. Null for every token on an unscheduled queue, and for
+     * any token created before this feature existed. */
+    assignedSession:
+      token.assignedSessionStartMinute != null && token.assignedSessionEndMinute != null
+        ? { startMinute: token.assignedSessionStartMinute, endMinute: token.assignedSessionEndMinute }
+        : null,
     createdAt: token.createdAt,
     calledAt: token.calledAt,
     startedAt: token.startedAt,

@@ -19,6 +19,7 @@ vi.mock('../components/ServicesManager', () => ({ ServicesManager: () => null })
 vi.mock('../components/FormBuilder', () => ({ FormBuilder: () => null }));
 vi.mock('../components/RepeatVisitPolicy', () => ({ RepeatVisitPolicy: () => null }));
 vi.mock('../components/QueueTimezoneSetting', () => ({ QueueTimezoneSetting: () => null }));
+vi.mock('../components/QueueSchedule', () => ({ QueueSchedule: () => null }));
 vi.mock('../components/QrCodeDisplay', () => ({ QrCodeDisplay: () => null }));
 
 function mockQueue(overrides: Partial<Queue> = {}): Queue {
@@ -44,6 +45,9 @@ function mockQueue(overrides: Partial<Queue> = {}): Queue {
     timezone: null,
     allowMultipleServices: true,
     requireServiceStartOtp: true,
+    scheduleEnabled: false,
+    scheduleDailyCapacity: null,
+    scheduleVisibleToCustomers: true,
     formVersion: 1,
     qrCodeUri: 'livequeue://queue/queue-42',
     deletedAt: null,

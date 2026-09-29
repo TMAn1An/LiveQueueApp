@@ -40,6 +40,11 @@ export interface CreateQueueInput {
   /** ADR-041. The backend defaults a new queue to true when omitted. */
   requireServiceStartOtp?: boolean;
   status?: QueueStatus;
+  /** Phase 4. Omitted on create — a brand-new queue always starts
+   * unscheduled; sessions are added afterward. */
+  scheduleEnabled?: boolean;
+  scheduleDailyCapacity?: number | null;
+  scheduleVisibleToCustomers?: boolean;
 }
 
 export function createQueue(input: CreateQueueInput) {

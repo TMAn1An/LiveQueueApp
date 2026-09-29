@@ -277,6 +277,21 @@ model Queue {
   /// depend on where the customer happens to be standing.
   timezone                String?
 
+  /// Phase 4 (schedule/sessions): off by default so every existing queue
+  /// keeps accepting joins at any time, exactly as before this feature
+  /// existed. A queue is "closed" for a given weekday only by having zero
+  /// QueueSession rows for it — there is no separate day-open/closed flag.
+  scheduleEnabled            Boolean @default(false) @map("schedule_enabled")
+  /// Total joins allowed per local calendar day across every session
+  /// combined. Null = unlimited. Enforced alongside (never instead of) each
+  /// session's own capacity.
+  scheduleDailyCapacity      Int?    @map("schedule_daily_capacity")
+  /// Whether the mobile app may show today's hours / the customer's assigned
+  /// session. When false, join-failure reasons still explain themselves
+  /// (spec 4G) — this only hides the schedule's own detail, never the reason
+  /// a join failed.
+  scheduleVisibleToCustomers Boolean @default(true) @map("schedule_visible_to_customers")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -285,6 +300,7 @@ model Queue {
   counters           Counter[]
   formFields         QueueFormField[]
   tokens             Token[]
+  sessions           QueueSession[]
   identityClaims     QueueIdentityClaim[]
   PhoneVerification  PhoneVerification[]
   emailVerifications CustomerEmailVerification[]
@@ -316,6 +332,45 @@ model QueueService {
 
   @@index([queueId])
   @@map("queue_services")
+}
+
+/// Phase 4: one recurring weekly time window a queue accepts joins in.
+/// A weekday with zero rows here is a closed day — there is no separate
+/// "is this day open" flag to keep in sync with the session list.
+///
+/// Deliberately allows two sessions on the same queue/weekday to overlap:
+/// that is a supported way to model two concurrent capacity pools (e.g. two
+/// parallel service tracks), not an accident to reject. The dashboard's own
+/// validation only catches the shape mistakes a human can't reasonably mean
+/// (end <= start, a duplicate identical session) — see
+/// queueSchedule.service.ts.
+model QueueSession {
+  id      String @id @default(uuid())
+  queueId String @map("queue_id")
+  queue   Queue  @relation(fields: [queueId], references: [id], onDelete: Cascade)
+
+  /// 0 = Sunday .. 6 = Saturday, matching JS/Intl's `Date.getUTCDay()` so the
+  /// backend never has to remember a second convention.
+  weekday     Int
+  /// Minutes since local midnight, evaluated in the queue's own timezone
+  /// (resolveQueueTimezone) — never the server's. 0-1439.
+  startMinute Int  @map("start_minute")
+  /// Always > startMinute; a session cannot cross midnight (spec gives no
+  /// requirement for one that does, and it would make "which day is this
+  /// session's capacity counted against" ambiguous).
+  endMinute   Int  @map("end_minute")
+  /// Max joins for this specific session on one calendar day. Null =
+  /// unlimited (still subject to the queue's overall scheduleDailyCapacity,
+  /// if set).
+  capacity    Int?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tokens Token[]
+
+  @@index([queueId, weekday])
+  @@map("queue_sessions")
 }
 
 model Counter {
@@ -518,6 +573,27 @@ model Token {
   identityPeriodKey   String?             @map("identity_period_key")
   identityMode        RepeatIdentityMode? @map("identity_mode")
 
+  /// Phase 4: null on every token created on a queue with scheduleEnabled =
+  /// false (which is every token before this feature and every token on a
+  /// still-unscheduled queue after it — spec 4K). Set once, at creation, by
+  /// queueSchedule.service.ts's assignment algorithm, and never reassigned
+  /// afterward — an admin editing or deleting the session later changes
+  /// nothing about a token that already holds it (the display fields below
+  /// are a snapshot for exactly that reason).
+  queueSessionId             String?       @map("queue_session_id")
+  queueSession               QueueSession? @relation(fields: [queueSessionId], references: [id], onDelete: SetNull)
+  /// The local calendar date (in the queue's timezone, midnight UTC of that
+  /// date — never interpreted as a real instant) this session occurrence
+  /// applies to. Together with queueSessionId this is what daily/session
+  /// capacity counts against.
+  assignedSessionDate        DateTime?     @map("assigned_session_date") @db.Date
+  /// Snapshot of the session's start/end at the moment this token was
+  /// assigned, so History/Live Tracking keep showing the same window even
+  /// if the session is later edited or removed entirely (queueSessionId
+  /// would go null via onDelete: SetNull, but these two survive).
+  assignedSessionStartMinute Int?          @map("assigned_session_start_minute")
+  assignedSessionEndMinute   Int?          @map("assigned_session_end_minute")
+
   notificationPreferences NotificationPreference[]
   /// At most one — this token's hold on a restricted queue (ADR-034).
   identityClaim           QueueIdentityClaim?
@@ -533,6 +609,10 @@ model Token {
   @@index([queueId, status, createdAt])
   @@index([deviceId])
   @@index([counterId])
+  // Phase 4 capacity counts: how many tokens already hold a slot on this
+  // queue (daily) or this specific session (session) for one calendar date.
+  @@index([queueId, assignedSessionDate])
+  @@index([queueSessionId, assignedSessionDate])
   // The reminder scheduler runs globally (not organization-scoped) every
   // minute, selecting "currently WAITING, not yet reminded" tokens across
   // every organization — without this, that query would scan every

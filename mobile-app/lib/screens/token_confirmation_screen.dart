@@ -45,6 +45,10 @@ class TokenConfirmationScreen extends StatelessWidget {
               if (token.position != null) Text('Position: ${token.position}'),
               if (token.estimatedWaitMinutes != null)
                 Text('Estimated Wait: ${token.estimatedWaitMinutes} minutes'),
+              if (token.assignedSession != null) ...[
+                const SizedBox(height: 8),
+                Text('Assigned session: ${token.assignedSession!.label}'),
+              ],
               const SizedBox(height: 32),
               SizedBox(
                 width: double.infinity,

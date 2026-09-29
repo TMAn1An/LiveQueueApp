@@ -1,6 +1,7 @@
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { describeJoinRequirements, resolveQueueTimezone } from './queueIdentityPolicy.service';
+import { describePublicSchedule } from './queueSchedule.service';
 
 /**
  * Public, unauthenticated endpoint consumed by the mobile app before token
@@ -17,7 +18,8 @@ export async function getPublicQueueConfig(queueId: string) {
     throw new AppError(404, 'QUEUE_NOT_FOUND', 'Queue not found.');
   }
 
-  const [services, formFields] = await Promise.all([
+  const timezone = resolveQueueTimezone(queue, queue.organization);
+  const [services, formFields, schedule] = await Promise.all([
     prisma.queueService.findMany({
       where: { queueId, isActive: true },
       orderBy: { serviceName: 'asc' },
@@ -26,6 +28,7 @@ export async function getPublicQueueConfig(queueId: string) {
       where: { queueId, version: queue.formVersion },
       orderBy: { sortOrder: 'asc' },
     }),
+    describePublicSchedule(queue, timezone),
   ]);
 
   return {
@@ -52,7 +55,12 @@ export async function getPublicQueueConfig(queueId: string) {
     // which needs the queue's zone — a fact about the queue, not about the
     // phone reading it. Null means the organization never set one, and the
     // app simply shows local times only.
-    timezone: resolveQueueTimezone(queue, queue.organization),
+    timezone,
+    // Phase 4: the app can show "closed today" / "opens at 09:00" before the
+    // customer even fills the join form. Never includes capacity — the
+    // actual full/closed rejection at join time is always authoritative;
+    // see describePublicSchedule's own doc comment for why.
+    schedule,
     services: services.map((service) => ({
       id: service.id,
       serviceName: service.serviceName,

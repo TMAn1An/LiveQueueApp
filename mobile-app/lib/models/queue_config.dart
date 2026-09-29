@@ -1,5 +1,6 @@
 import 'dynamic_form_field.dart';
 import 'queue_identity_requirements.dart';
+import 'queue_schedule_status.dart';
 import 'service_option.dart';
 
 /// The public, unauthenticated queue configuration
@@ -23,6 +24,7 @@ class QueueConfig {
     this.allowMultipleServices = true,
     this.identity = const QueueIdentityRequirements(),
     this.timezone,
+    this.schedule = const QueueScheduleStatus(),
   });
 
   final String id;
@@ -49,7 +51,12 @@ class QueueConfig {
   /// which case only the customer's local time is shown.
   final String? timezone;
 
-  bool get isAcceptingCustomers => status == 'ACTIVE';
+  /// Phase 4 — whether this queue's optional weekly schedule currently
+  /// allows a join. Off (isOpenNow: true) for every queue that has never
+  /// turned scheduling on.
+  final QueueScheduleStatus schedule;
+
+  bool get isAcceptingCustomers => status == 'ACTIVE' && schedule.isOpenNow;
 
   factory QueueConfig.fromJson(Map<String, dynamic> json) {
     return QueueConfig(
@@ -63,6 +70,7 @@ class QueueConfig {
       identity: QueueIdentityRequirements.fromJson(
         (json['identity'] as Map<String, dynamic>?) ?? const {},
       ),
+      schedule: QueueScheduleStatus.fromJson(json['schedule'] as Map<String, dynamic>?),
       services: (json['services'] as List<dynamic>? ?? const [])
           .map((e) => ServiceOption.fromJson(e as Map<String, dynamic>))
           .toList(),

@@ -44,6 +44,20 @@ export const queueIdParams = z.object({
   queueId: z.string().uuid('queueId must be a valid id.'),
 });
 
+/**
+ * Phase 4: the schedule master switch and its two scalar options. Left
+ * entirely out of createQueueSchema — a brand-new queue always starts
+ * unscheduled (scheduleEnabled defaults false at the DB level, matching
+ * every existing queue), and sessions cannot be created before the queue
+ * itself exists. An admin turns scheduling on and adds sessions afterward
+ * via PUT /:queueId and the /:queueId/sessions endpoints.
+ */
+const scheduleFields = {
+  scheduleEnabled: z.boolean().optional(),
+  scheduleDailyCapacity: z.number().int().positive().max(100_000).nullable().optional(),
+  scheduleVisibleToCustomers: z.boolean().optional(),
+};
+
 export const createQueueSchema = {
   body: z.object({
     name: z.string().trim().min(1, 'Queue name is required.').max(120),
@@ -77,7 +91,33 @@ export const updateQueueSchema = {
     allowMultipleServices: z.boolean().optional(),
     requireServiceStartOtp: z.boolean().optional(),
     ...repeatPolicyFields,
+    ...scheduleFields,
   }),
+};
+
+export const querySessionIdParams = queueIdParams.extend({
+  sessionId: z.string().uuid('sessionId must be a valid id.'),
+});
+
+const sessionBodyFields = {
+  weekday: z.number().int().min(0).max(6),
+  startMinute: z.number().int().min(0).max(1439),
+  endMinute: z.number().int().min(0).max(1439),
+  capacity: z.number().int().positive().max(100_000).nullable().optional().default(null),
+};
+
+export const createQueueSessionSchema = {
+  params: queueIdParams,
+  body: z.object(sessionBodyFields),
+};
+
+export const updateQueueSessionSchema = {
+  params: querySessionIdParams,
+  body: z.object(sessionBodyFields),
+};
+
+export const deleteQueueSessionSchema = {
+  params: querySessionIdParams,
 };
 
 export const queueIdOnlySchema = {

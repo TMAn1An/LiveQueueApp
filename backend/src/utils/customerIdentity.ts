@@ -477,3 +477,30 @@ export function isValidTimezone(timezone: string): boolean {
     return false;
   }
 }
+
+/** Phase 4 (schedule/sessions): "now," decomposed the way a weekly schedule
+ * needs it — which local calendar date and weekday this instant falls on in
+ * the queue's zone, and how far into that day it is. */
+export interface QueueLocalMoment {
+  /** Midnight UTC of the local calendar date — a DATE value, never a real
+   * instant. Two moments on the same local date always produce an equal
+   * dateKey via `Date#getTime()`, which is all Token.assignedSessionDate
+   * comparisons need. */
+  dateKey: Date;
+  /** 0 = Sunday .. 6 = Saturday (`Date.prototype.getUTCDay()` convention),
+   * derived from the local calendar date itself — day-of-week depends only
+   * on the date, never on the zone's offset at this instant. */
+  weekday: number;
+  /** Minutes since local midnight, 0-1439. */
+  minuteOfDay: number;
+}
+
+export function resolveLocalMoment(instant: Date, timezone: string): QueueLocalMoment {
+  const local = localParts(instant, timezone);
+  const dateKey = new Date(Date.UTC(local.year, local.month - 1, local.day));
+  return {
+    dateKey,
+    weekday: dateKey.getUTCDay(),
+    minuteOfDay: local.hour * 60 + local.minute,
+  };
+}

@@ -31,7 +31,7 @@ class QueueDetailsScreen extends StatelessWidget {
                     Text(config.description!),
                   ],
                   const SizedBox(height: 16),
-                  if (!config.isAcceptingCustomers)
+                  if (config.status != 'ACTIVE')
                     _Notice(
                       // A queue that predates ADR-034 and still has no way to
                       // recognise a customer refuses every join, so this says
@@ -44,8 +44,23 @@ class QueueDetailsScreen extends StatelessWidget {
                     const _Notice(
                       text: 'This queue is not accepting customers yet. Please contact staff.',
                     )
+                  // Phase 4: the backend already composes the specific
+                  // reason (closed today / opens at 09:00 / session full,
+                  // etc.) — shown here, before a form is filled in, the same
+                  // way the identity/repeat notices above already are.
+                  else if (config.schedule.scheduleEnabled && !config.schedule.isOpenNow)
+                    _Notice(text: config.schedule.message ?? 'This queue is not currently open.')
                   else if (_repeatNotice(config) != null)
                     _Notice(text: _repeatNotice(config)!),
+                  if (config.schedule.scheduleEnabled &&
+                      config.schedule.isOpenNow &&
+                      config.schedule.todaySessions.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      "Today's hours: ${config.schedule.todaySessions.map((s) => s.label).join(', ')}",
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                   const Spacer(),
                   SizedBox(
                     width: double.infinity,
