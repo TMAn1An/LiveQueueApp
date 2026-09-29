@@ -26,7 +26,7 @@ export function ReportsPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-fg">Reports</h1>
+        <h1 className="text-2xl font-semibold text-fg">Reports</h1>
         <PermissionGate permission="export_reports">
           <Button variant="secondary" onClick={() => exportReport.mutate(query)} disabled={exportReport.isPending}>
             {exportReport.isPending ? 'Exporting…' : 'Export CSV'}
@@ -76,7 +76,7 @@ export function ReportsPage() {
           </div>
 
           <Card>
-            <h2 className="mb-3 text-sm font-semibold text-fg-soft">Queue Performance</h2>
+            <h2 className="mb-3 text-base font-semibold text-fg-soft">Queue Performance</h2>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs uppercase text-faint">
@@ -102,7 +102,7 @@ export function ReportsPage() {
           </Card>
 
           <Card>
-            <h2 className="mb-3 text-sm font-semibold text-fg-soft">Counter Utilization</h2>
+            <h2 className="mb-3 text-base font-semibold text-fg-soft">Counter Utilization</h2>
             <p className="mb-2 text-xs text-faint">
               Share of tokens each counter served — an approximation, since the system does not track
               wall-clock active/offline duration per counter.
@@ -128,7 +128,7 @@ export function ReportsPage() {
           </Card>
 
           <Card>
-            <h2 className="mb-3 text-sm font-semibold text-fg-soft">Peak Hours</h2>
+            <h2 className="mb-3 text-base font-semibold text-fg-soft">Peak Hours</h2>
             <div className="flex items-end gap-1" style={{ height: 120 }}>
               {report.peakHours.map((entry) => {
                 const max = Math.max(...report.peakHours.map((e) => e.count), 1);

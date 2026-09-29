@@ -34,12 +34,14 @@ export function QueueLivePage() {
         />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-fg">{queue.name}</h1>
+            <h1 className="text-2xl font-semibold text-fg">{queue.name}</h1>
             <StatusBadge status={queue.status} />
           </div>
           <div className="flex gap-2">
             <Link to={`/queues/${queue.id}/counters`}>
-              <Button variant="secondary">Counters</Button>
+              <Button variant="secondary" size="lg">
+                Manage Counters
+              </Button>
             </Link>
             <Link to={`/queues/${queue.id}`}>
               <Button variant="secondary">Queue Settings</Button>
@@ -63,7 +65,7 @@ export function QueueLivePage() {
 
       <Card>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-fg-soft">Waiting Line</h2>
+          <h2 className="text-base font-semibold text-fg-soft">Waiting Line</h2>
           <span className="text-xs text-muted">
             {activeCounters.length} active{' '}
             {activeCounters.length === 1 ? 'counter' : 'counters'}

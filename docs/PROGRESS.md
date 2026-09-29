@@ -157,6 +157,16 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Intentionally unchanged:** the CALLED/SKIPPED/COMPLETED copy itself (already exactly right, including the service-start-verification and skip-reason variants — ADR-041/042), the FCM payload, the backend, and the dashboard.
 - **Verification:** mobile 348/348 (8 new), `flutter analyze` clean (same 26 pre-existing hints), debug APK builds. Backend (771/771) and dashboard (232/232) untouched.
 
+### V2 Dashboard Visual Hierarchy + Navigation Polish (2026-09-30)
+
+**Status: implemented and verified. Dashboard-only. No migration. See ADR-045.**
+
+- **Most of this was already built.** Create Queue was already a prominent, always-visible primary button (never in an overflow menu); every queue row already showed Open Queue/Settings/Pause-Resume/Delete as explicit visible buttons; and `QueueBreadcrumb` already gave Live Queue, Settings and Counters a real Back link and a full `Dashboard / Queues / {queue} / {section}` trail. None of that needed changing.
+- **`Button` gained an opt-in `size?: 'md' | 'lg'` prop**, not a second button system — `md` is byte-for-byte the button's old appearance, so every existing call site renders unchanged. `lg` is applied only to the actions the spec names as operationally important: Create Queue, each row's Open Queue, Manage Counters, Call/Start/Confirm/Complete/Feedback/Skip in `TokenActions`, and the page-level Save actions (Queue Settings Details, Repeat Visits, Queue Timezone, Save Form, Organization Settings). Two dense inline per-row Save buttons (renaming one counter, renaming one service) were deliberately left at the default size.
+- **"Manage Counters" is now the label everywhere** that button appears — Queue Settings already used it; Live Queue's own copy said only "Counters" and now matches, so there's one name for one destination.
+- **Typography bumped exactly where asked:** every page's `<h1>` title and every Card section `<h2>` heading grew one step (mechanical, single-occurrence-per-file substitution, not a hand-edit per page), and `StatusBadge` grew from `text-xs` to `text-sm`. No table body, input, or helper text changed size — nothing else was "zoomed."
+- **Verification:** dashboard 232→234/234 (2 new, covering the `Button` `size` contract), `tsc -b` clean, `oxlint` clean (same 3 pre-existing warnings), `vite build` clean. Backend (771/771) and mobile (348/348) untouched and not re-run.
+
 ### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
 
 **Status: PASS. No code changes required — every V2 checkpoint (1-9) plus every ad-hoc fix through today's skip-reason/completion-feedback work verified together as one system for the first time.**

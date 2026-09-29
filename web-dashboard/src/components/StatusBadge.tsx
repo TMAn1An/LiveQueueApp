@@ -18,7 +18,7 @@ const COLORS: Record<string, string> = {
 export function StatusBadge({ status }: { status: string }) {
   const classes = COLORS[status] ?? 'bg-subtle text-muted';
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${classes}`}>
+    <span className={`inline-block rounded-full px-2.5 py-1 text-sm font-semibold ${classes}`}>
       {status.replace(/_/g, ' ')}
     </span>
   );

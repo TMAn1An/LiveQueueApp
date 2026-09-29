@@ -69,7 +69,7 @@ export function DashboardPage() {
 
   return (
     <div>
-      <h1 className="mb-4 text-xl font-semibold text-fg">Dashboard</h1>
+      <h1 className="mb-4 text-2xl font-semibold text-fg">Dashboard</h1>
 
       {statsLoading || !stats ? (
         <Spinner label="Loading stats…" />
@@ -88,7 +88,7 @@ export function DashboardPage() {
 
       <Card>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-fg-soft">Your Queues</h2>
+          <h2 className="text-base font-semibold text-fg-soft">Your Queues</h2>
           <Link to="/queues" className="text-sm text-brand-600 hover:underline">
             Manage queues
           </Link>

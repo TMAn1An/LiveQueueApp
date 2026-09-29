@@ -21,7 +21,7 @@ export function ProfilePage() {
 
   return (
     <div className="max-w-md space-y-6">
-      <h1 className="text-xl font-semibold text-fg">Profile</h1>
+      <h1 className="text-2xl font-semibold text-fg">Profile</h1>
       <Card>
         <dl className="space-y-3 text-sm">
           <div>

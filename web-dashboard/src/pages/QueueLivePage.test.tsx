@@ -161,7 +161,7 @@ describe('QueueLivePage', () => {
   it('offers a way through to this queue’s counters and settings', () => {
     renderPage();
 
-    expect(screen.getByRole('link', { name: 'Counters' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Manage Counters' })).toHaveAttribute(
       'href',
       '/queues/qA/counters',
     );

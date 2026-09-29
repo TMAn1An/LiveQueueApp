@@ -29,7 +29,7 @@ export function AuditLogsPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-xl font-semibold text-fg">Audit Logs</h1>
+      <h1 className="mb-2 text-2xl font-semibold text-fg">Audit Logs</h1>
       <p className="mb-4 max-w-2xl text-sm text-muted">
         A record of staff actions in this organization — newest first.
       </p>

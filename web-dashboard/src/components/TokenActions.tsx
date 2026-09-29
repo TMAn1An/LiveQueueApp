@@ -155,7 +155,7 @@ export function TokenActions({
     <PermissionGate permission="operate_tokens">
       <div className="flex flex-wrap items-center gap-1">
         {status === 'WAITING' && !pickingCounter && isFcfsEligible && (
-          <Button variant="primary" onClick={() => setPickingCounter(true)}>
+          <Button variant="primary" size="lg" onClick={() => setPickingCounter(true)}>
             Call
           </Button>
         )}
@@ -189,13 +189,14 @@ export function TokenActions({
           </select>
         )}
         {status === 'CALLED' && !requiresVerificationCode && (
-          <Button variant="primary" loading={startToken.isPending} onClick={handleDirectStart}>
+          <Button variant="primary" size="lg" loading={startToken.isPending} onClick={handleDirectStart}>
             {startToken.isPending ? 'Starting…' : 'Start'}
           </Button>
         )}
         {status === 'CALLED' && requiresVerificationCode && !startingService && (
           <Button
             variant="primary"
+            size="lg"
             onClick={() => {
               setStartError(null);
               setStartingService(true);
@@ -215,7 +216,7 @@ export function TokenActions({
               onChange={(e) => setVerificationCodeInput(e.target.value)}
               className="w-36 rounded-md border border-border-strong px-2 py-1 text-sm"
             />
-            <Button type="submit" variant="primary" loading={startToken.isPending}>
+            <Button type="submit" variant="primary" size="lg" loading={startToken.isPending}>
               {startToken.isPending ? 'Starting…' : 'Confirm'}
             </Button>
             <Button
@@ -234,12 +235,12 @@ export function TokenActions({
         {/* ADR-042: Complete stays one click. Feedback is the separate,
             optional path — never a step added in front of Complete. */}
         {status === 'IN_PROGRESS' && (
-          <Button variant="primary" loading={completeToken.isPending} onClick={handleComplete}>
+          <Button variant="primary" size="lg" loading={completeToken.isPending} onClick={handleComplete}>
             {completeToken.isPending ? 'Completing…' : 'Complete'}
           </Button>
         )}
         {status === 'IN_PROGRESS' && (
-          <Button variant="secondary" onClick={() => setCompletingWithFeedback(true)}>
+          <Button variant="secondary" size="lg" onClick={() => setCompletingWithFeedback(true)}>
             Feedback
           </Button>
         )}
@@ -290,7 +291,7 @@ export function TokenActions({
         {((status === 'WAITING' && isFcfsEligible) ||
           status === 'CALLED' ||
           status === 'IN_PROGRESS') && (
-          <Button variant="outline" onClick={() => setSkipping(true)}>
+          <Button variant="outline" size="lg" onClick={() => setSkipping(true)}>
             Skip
           </Button>
         )}

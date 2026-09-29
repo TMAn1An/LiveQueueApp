@@ -122,7 +122,7 @@ export function BlockedDevicesPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-xl font-semibold text-fg">Device Blocking</h1>
+      <h1 className="mb-2 text-2xl font-semibold text-fg">Device Blocking</h1>
       <p className="mb-4 max-w-2xl text-sm text-muted">
         Devices that have joined one of your queues. Blocking a device only affects your organization
         — it can still be used to join queues at other businesses.

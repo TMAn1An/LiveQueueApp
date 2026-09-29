@@ -63,7 +63,7 @@ export function OrganizationSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold text-fg">Organization Settings</h1>
+      <h1 className="text-2xl font-semibold text-fg">Organization Settings</h1>
 
       <Card>
         <ErrorBanner message={error} />
@@ -113,7 +113,9 @@ export function OrganizationSettingsPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              <Button onClick={() => void handleSave()}>Save</Button>
+              <Button size="lg" onClick={() => void handleSave()}>
+                Save
+              </Button>
               <Button variant="ghost" onClick={() => setEditing(false)}>
                 Cancel
               </Button>

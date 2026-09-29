@@ -126,6 +126,7 @@ export function QueueTimezoneSetting({
       </div>
       <div className="flex gap-2">
         <Button
+          size="lg"
           loading={updateQueue.isPending}
           disabled={updateQueue.isPending}
           onClick={() => void save(value.trim() || null)}

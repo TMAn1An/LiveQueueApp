@@ -172,7 +172,11 @@ export function FormBuilder({ queueId }: { queueId: string }) {
           <Button variant="secondary" onClick={addField}>
             Add Field
           </Button>
-          <Button disabled={!dirty || replaceFormFields.isPending} onClick={() => void handleSave()}>
+          <Button
+            size="lg"
+            disabled={!dirty || replaceFormFields.isPending}
+            onClick={() => void handleSave()}
+          >
             {replaceFormFields.isPending ? 'Saving…' : 'Save Form'}
           </Button>
         </div>

@@ -58,7 +58,7 @@ export function ServiceHistoryPage() {
 
   return (
     <div>
-      <h1 className="mb-2 text-xl font-semibold text-fg">Service History</h1>
+      <h1 className="mb-2 text-2xl font-semibold text-fg">Service History</h1>
       <p className="mb-4 max-w-2xl text-sm text-muted">
         Visits that have finished in your organization — completed service by default. Newest first.
       </p>

@@ -29,10 +29,27 @@ const VARIANT_CLASSES: Record<Variant, string> = {
    of table actions that jumps on click reads as noise in operational
    software. 150ms is fast enough to feel immediate. */
 const BASE_CLASSES =
-  'inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-2 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:shadow-none';
+  'inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:shadow-none';
+
+type Size = 'md' | 'lg';
+
+/**
+ * V2 Dashboard Visual Hierarchy pass: `md` (the pre-existing, unstyled-by-
+ * default size) never changes, so every call site that doesn't pass `size`
+ * keeps its exact prior appearance. `lg` exists only for the operationally
+ * important actions the spec names (Create Queue, Open Queue, Manage
+ * Counters, Call, Start Service, Complete, Feedback, Skip, Save) — it is
+ * never the default, so a page can't drift toward "everything is large"
+ * just by omitting the prop.
+ */
+const SIZE_CLASSES: Record<Size, string> = {
+  md: 'px-3 py-2 text-sm',
+  lg: 'px-4 py-2.5 text-base',
+};
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
+  size?: Size;
   /** Shows a spinner and blocks further clicks while an action is in
    * flight. The caller still supplies the wording ("Signing in…"), since
    * only it knows what is happening. */
@@ -41,6 +58,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 export function Button({
   variant = 'primary',
+  size = 'md',
   className = '',
   loading = false,
   disabled,
@@ -52,7 +70,7 @@ export function Button({
       type="button"
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`${BASE_CLASSES} ${VARIANT_CLASSES[variant]} ${className}`}
+      className={`${BASE_CLASSES} ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
       {...props}
     >
       {loading && <ButtonSpinner />}

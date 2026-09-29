@@ -143,7 +143,9 @@ function QueueRow({ queue }: { queue: Queue }) {
               table at all — opening a queue's live line is not a
               manage_queues action. */}
           <Link to={`/queues/${queue.id}/live`}>
-            <Button variant="primary">Open Queue</Button>
+            <Button variant="primary" size="lg">
+              Open Queue
+            </Button>
           </Link>
           <Link to={`/queues/${queue.id}`}>
             <Button variant="outline">Settings</Button>
@@ -216,9 +218,11 @@ export function QueuesPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-fg">Queues</h1>
+        <h1 className="text-2xl font-semibold text-fg">Queues</h1>
         <PermissionGate permission="manage_queues">
-          <Button onClick={() => setShowCreate(true)}>Create Queue</Button>
+          <Button size="lg" onClick={() => setShowCreate(true)}>
+            Create Queue
+          </Button>
         </PermissionGate>
       </div>
 

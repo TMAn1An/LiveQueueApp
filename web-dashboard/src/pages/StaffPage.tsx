@@ -223,7 +223,7 @@ export function StaffPage() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-fg">Staff</h1>
+        <h1 className="text-2xl font-semibold text-fg">Staff</h1>
         <PermissionGate permission="manage_staff">
           <Button onClick={() => setShowCreate(true)}>Invite Staff Member</Button>
         </PermissionGate>

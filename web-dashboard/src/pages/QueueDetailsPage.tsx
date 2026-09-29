@@ -44,23 +44,27 @@ export function QueueDetailsPage() {
       />
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-fg">{queue.name}</h1>
+          <h1 className="text-2xl font-semibold text-fg">{queue.name}</h1>
           <StatusBadge status={queue.status} />
           {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived — read only)</span>}
         </div>
         <div className="flex gap-2">
           <Link to={`/queues/${queue.id}/live`}>
-            <Button variant="primary">Open Queue</Button>
+            <Button variant="primary" size="lg">
+              Open Queue
+            </Button>
           </Link>
           <Link to={`/queues/${queue.id}/counters`}>
-            <Button variant="secondary">Manage Counters</Button>
+            <Button variant="secondary" size="lg">
+              Manage Counters
+            </Button>
           </Link>
         </div>
       </div>
 
       <Card>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-fg-soft">Details</h2>
+          <h2 className="text-base font-semibold text-fg-soft">Details</h2>
           {!queue.deletedAt && !editing && (
             <PermissionGate permission="manage_queues">
               <Button variant="secondary" onClick={startEditing}>
@@ -108,6 +112,7 @@ export function QueueDetailsPage() {
             </div>
             <div className="flex gap-2">
               <Button
+                size="lg"
                 loading={updateQueue.isPending}
                 onClick={() =>
                   updateQueue.mutate(
@@ -160,7 +165,7 @@ export function QueueDetailsPage() {
       {/* ADR-041: directly under Details — it changes what staff do at the
           counter, so it is kept where an operator will actually find it. */}
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Service Start</h2>
+        <h2 className="mb-3 text-base font-semibold text-fg-soft">Service Start</h2>
         <ServiceStartVerificationSetting queue={queue} />
       </Card>
 
@@ -168,14 +173,14 @@ export function QueueDetailsPage() {
           inside the repeat-visit form — it is a fact about where the queue
           runs, and the customer app uses it to show queue-local times. */}
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Queue Timezone</h2>
+        <h2 className="mb-3 text-base font-semibold text-fg-soft">Queue Timezone</h2>
         <QueueTimezoneSetting queue={queue} organizationTimezone={organization?.timezone ?? null} />
       </Card>
 
       {/* Directly under Details so a queue that has stopped accepting
           customers says so where an operator will actually see it. */}
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Repeat Visits</h2>
+        <h2 className="mb-3 text-base font-semibold text-fg-soft">Repeat Visits</h2>
         <RepeatVisitPolicy
           queue={queue}
           effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
@@ -183,17 +188,17 @@ export function QueueDetailsPage() {
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Services</h2>
+        <h2 className="mb-3 text-base font-semibold text-fg-soft">Services</h2>
         <ServicesManager queueId={queue.id} services={queue.services} />
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Dynamic Form Fields</h2>
+        <h2 className="mb-3 text-base font-semibold text-fg-soft">Dynamic Form Fields</h2>
         <FormBuilder queueId={queue.id} />
       </Card>
 
       <Card>
-        <h2 className="mb-3 text-sm font-semibold text-fg-soft">QR Code</h2>
+        <h2 className="mb-3 text-base font-semibold text-fg-soft">QR Code</h2>
         <QrCodeDisplay
           qrCodeUri={queue.qrCodeUri}
           organizationName={organization?.name ?? ''}

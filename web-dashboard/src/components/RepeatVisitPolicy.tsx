@@ -465,6 +465,7 @@ export function RepeatVisitPolicy({
             missingTimezone
           }
           onClick={() => void save()}
+          size="lg"
         >
           {updateQueue.isPending ? 'Saving…' : 'Save'}
         </Button>

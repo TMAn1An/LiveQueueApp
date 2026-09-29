@@ -225,7 +225,7 @@ export function QueueCountersPage() {
         backTo={`/queues/${queueId}`}
         backLabel={`Back to ${queue?.name ?? 'Queue'}`}
       />
-      <h1 className="mb-4 text-xl font-semibold text-fg">Counters</h1>
+      <h1 className="mb-4 text-2xl font-semibold text-fg">Counters</h1>
 
       <ErrorBanner message={error} />
 
