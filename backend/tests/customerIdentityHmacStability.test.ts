@@ -1,9 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import {
-  computeIdentityFingerprint,
-  hashEmailCode,
-  hashPhoneCode,
-} from '../src/utils/customerIdentity';
+import { createHmac } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 /**
  * V2 Product Completion checkpoint, Part E: `customerIdentity.ts` contains
@@ -17,54 +13,127 @@ import {
  * is immediately followed by `${...}` — and evaluates to exactly the same
  * runtime character (U+0000) as the raw byte it replaces. That makes the
  * source-level substitution behaviorally inert by construction, but this
- * file exists to *prove* it rather than assert it: every fixed-input
- * expectation below was computed against the pre-cleanup implementation
- * (raw NUL bytes, current git HEAD) with a known
- * `CUSTOMER_IDENTITY_SECRET`, and must still match, byte for byte, after
- * the NUL bytes are replaced with `\0` escapes.
+ * file exists to *prove* it rather than assert it: every expectation below
+ * pins the exact bytes the pre-cleanup implementation hashed (a raw 0x00
+ * between purpose and material, a raw 0x00 between a phone verification id
+ * and its code, a plain space between an email verification id and its
+ * code), and must keep matching byte for byte.
  *
  * A change to the actual separator, the join order, or the HMAC key would
  * fail every one of these — that is the whole point of a golden-value test
  * over a "does verification still work end-to-end" one: the latter would
  * pass even if the separator changed to something else entirely, as long
  * as hashing and comparing stayed internally consistent with each other.
+ *
+ * The suite owns its key. `env.ts` parses `process.env` once, when it is
+ * first imported, and `dotenv` never overrides a variable that is already
+ * set — so the fixed test-only secret is stubbed before a fresh import of
+ * the module under test, and the stub is removed afterwards. The golden
+ * values therefore no longer depend on whatever CUSTOMER_IDENTITY_SECRET a
+ * developer's local `.env` happens to contain.
  */
+
+/** Fake, test-only key. Never used by any real environment. */
+const TEST_SECRET = 'test-only-customer-identity-secret-not-a-real-key';
+
+/**
+ * Independent reference: the documented byte layout, built by hand with
+ * node:crypto — purpose bytes, one explicit 0x00 byte, material bytes —
+ * without going through the production helper or its template literals.
+ */
+function referenceHmac(purpose: string, material: string): string {
+  return createHmac('sha256', Buffer.from(TEST_SECRET, 'utf8'))
+    .update(
+      Buffer.concat([
+        Buffer.from(purpose, 'utf8'),
+        Buffer.from([0x00]),
+        Buffer.from(material, 'utf8'),
+      ]),
+    )
+    .digest('hex');
+}
+
+const NUL = String.fromCharCode(0);
+
+/** Literal material strings, written out rather than rebuilt by production code. */
+const VECTORS = {
+  phoneCode: {
+    purpose: 'livequeue:phone-code:v1',
+    material: `verification-1${NUL}123456`,
+    expected: '4245b09b640e7eaa6fbd27c264c1dfbe24132d37d285aabc900d30727c092530',
+  },
+  emailCode: {
+    purpose: 'livequeue:customer-email-code:v1',
+    material: 'verification-1 123456',
+    expected: 'fabc17aaf999394e80698818ba161eab48cfde584149ad4a3172ce3ffc1949d6',
+  },
+  verifiedEmailFingerprint: {
+    purpose: 'livequeue:identity:v1',
+    material: '7:queue-1|14:VERIFIED_EMAIL|18:person@example.com|0:',
+    expected: 'f37aa153f4139f014120fb87df1441221591f378ebeccd48a9a73d8adde277e6',
+  },
+  customFieldFingerprint: {
+    purpose: 'livequeue:identity:v1',
+    material: '7:queue-1|12:CUSTOM_FIELD|0:|17:national-id-12345',
+    expected: '39203b25f64be3b991b7f0eda4210317784b17016ad8007d230b363aeaf0509c',
+  },
+} as const;
+
+type CustomerIdentityModule = typeof import('../src/utils/customerIdentity');
+let identity: CustomerIdentityModule;
+
+beforeAll(async () => {
+  vi.stubEnv('CUSTOMER_IDENTITY_SECRET', TEST_SECRET);
+  vi.resetModules();
+  identity = await import('../src/utils/customerIdentity.js');
+});
+
+afterAll(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
+
+describe('customerIdentity HMAC golden vectors are independently derived', () => {
+  it.each(Object.entries(VECTORS))(
+    '%s golden value matches the hand-built byte layout',
+    (_, vector) => {
+      expect(referenceHmac(vector.purpose, vector.material)).toBe(vector.expected);
+    },
+  );
+});
+
 describe('customerIdentity HMAC outputs are unchanged by the NUL-byte source cleanup', () => {
   it('hashPhoneCode produces its pre-cleanup golden value', () => {
-    expect(hashPhoneCode('verification-1', '123456')).toBe(
-      '56d4c468bd0f17b52d070d7a0ffbe91994c21121e869fb3bd3feae48b1d1721f',
-    );
+    expect(identity.hashPhoneCode('verification-1', '123456')).toBe(VECTORS.phoneCode.expected);
   });
 
   it('hashEmailCode produces its pre-cleanup golden value', () => {
-    expect(hashEmailCode('verification-1', '123456')).toBe(
-      '5f3a3df90e58dd18dbad7318e4e56e84e3b62642d9f614c8750cb5fc274e620a',
-    );
+    expect(identity.hashEmailCode('verification-1', '123456')).toBe(VECTORS.emailCode.expected);
   });
 
   it('a verified-email fingerprint produces its pre-cleanup golden value', () => {
     expect(
-      computeIdentityFingerprint({
+      identity.computeIdentityFingerprint({
         queueId: 'queue-1',
         mode: 'VERIFIED_EMAIL',
         normalizedVerifiedContact: 'person@example.com',
       }),
-    ).toBe('235478eb55793877f01b8794935f4dba2b86c8efbfcae140651bade303323d4a');
+    ).toBe(VECTORS.verifiedEmailFingerprint.expected);
   });
 
   it('a custom-field fingerprint produces its pre-cleanup golden value', () => {
     expect(
-      computeIdentityFingerprint({
+      identity.computeIdentityFingerprint({
         queueId: 'queue-1',
         mode: 'CUSTOM_FIELD',
         normalizedCustomValue: 'national-id-12345',
       }),
-    ).toBe('2e99cba4d7efa15327859d555d3a3348ed6d522e2917039157ae05bd70937e8d');
+    ).toBe(VECTORS.customFieldFingerprint.expected);
   });
 
   it('hashPhoneCode and hashEmailCode differ for the same inputs (distinct purpose strings)', () => {
     // Confirms the two functions are not accidentally sharing one HMAC
     // input despite both routing through the same internal hmac() helper.
-    expect(hashPhoneCode('v1', '000000')).not.toBe(hashEmailCode('v1', '000000'));
+    expect(identity.hashPhoneCode('v1', '000000')).not.toBe(identity.hashEmailCode('v1', '000000'));
   });
 });
