@@ -146,6 +146,17 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Intentionally unchanged:** the FCM `data` payload (still `{type, tokenId, status}` only), the dashboard, and every FCFS/isolation/capacity/service-start-verification rule — this only touched what is displayed after an already-correct decision.
 - **Verification:** backend 771/771 (2 new), typecheck/lint clean; dashboard unchanged at 232/232; mobile 340/340 (5 new), `flutter analyze` clean, debug APK builds.
 
+### V2 Centered Foreground Notification (2026-09-30)
+
+**Status: implemented and verified. Mobile-only. No migration. See ADR-044.**
+
+- **The banner is now a centered card, not a top strip.** Same `Overlay`-based single-entry-at-a-time presentation as before (ADR-039/040 both still hold — this only changes its shape): a dimmed backdrop centers a compact, fixed-max-width card with a status-keyed icon, title, body, a top-right × and a View button below the text. Still never a `showDialog`/`AlertDialog` — dismissal stays exclusively explicit (× or View), still no auto-dismiss timer.
+- **The FIFO queue, no-stacking, and per-event routing were already correct** — verified by re-reading ADR-039/040 and the existing test suite before changing anything, not re-implemented.
+- **Deduplication was already structurally guaranteed one layer up** (`NotificationCenterProvider._upsert` never calls back twice for the same event id) — added anyway as a second, independent, opt-in guard: `show()` takes an optional `dedupeKey` (main.dart passes the notification's own id) that drops a call matching whatever is currently showing or already queued.
+- **Found and fixed on the way — a genuine pre-existing gap, not something this phase introduced:** "View" on a finished token (from this card *or* the Notification Center, since both share `openActiveToken`) used to just show a snackbar telling the customer to go check History themselves. It now opens that token's own History details directly, or the History list if no matching entry can be found — a plain network failure (still-remembered token) keeps the old retry snackbar, since that case genuinely doesn't know the token is finished.
+- **Intentionally unchanged:** the CALLED/SKIPPED/COMPLETED copy itself (already exactly right, including the service-start-verification and skip-reason variants — ADR-041/042), the FCM payload, the backend, and the dashboard.
+- **Verification:** mobile 348/348 (8 new), `flutter analyze` clean (same 26 pre-existing hints), debug APK builds. Backend (771/771) and dashboard (232/232) untouched.
+
 ### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
 
 **Status: PASS. No code changes required — every V2 checkpoint (1-9) plus every ad-hoc fix through today's skip-reason/completion-feedback work verified together as one system for the first time.**

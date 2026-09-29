@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/active_token_summary.dart';
+import '../models/history_entry.dart';
 import '../providers/active_token_provider.dart';
+import '../providers/history_provider.dart';
 import '../providers/notification_preferences_provider.dart';
 import '../providers/token_tracking_provider.dart';
 import '../screens/live_tracking_screen.dart';
+import '../screens/token_details_screen.dart';
+import '../screens/token_history_screen.dart';
 
 /// The one place that turns "the customer tapped a remembered token" into
 /// "Live Tracking is open for that exact token" — shared by Home's rows, the
@@ -30,16 +34,18 @@ Future<void> openActiveToken(BuildContext context, String tokenId) async {
   if (!context.mounted) return;
 
   if (token == null) {
+    // A resync failure (network) and "this visit is genuinely over" both
+    // come back as null — only the first still has a remembered summary to
+    // retry against. The second case used to just tell the customer to go
+    // look in History themselves; it now opens the right place directly.
     final stillRemembered = activeTokenProvider.summaryFor(tokenId) != null;
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(
-          stillRemembered
-              ? 'Could not check this token just now. Please try again.'
-              : 'That visit is finished. You can find it in History.',
-        ),
-      ),
-    );
+    if (stillRemembered) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Could not check this token just now. Please try again.')),
+      );
+      return;
+    }
+    await _openFinishedToken(context, tokenId);
     return;
   }
 
@@ -47,6 +53,32 @@ Future<void> openActiveToken(BuildContext context, String tokenId) async {
   final queueName = activeTokenProvider.summaryFor(tokenId)?.queueName ?? '';
   context.read<TokenTrackingProvider>().start(token, preferences, queueName: queueName);
   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveTrackingScreen()));
+}
+
+/// A token that is no longer active opens its own History details when the
+/// entry can be found locally; otherwise the History list, so "View" always
+/// lands somewhere useful instead of a toast telling the customer to go find
+/// it themselves.
+Future<void> _openFinishedToken(BuildContext context, String tokenId) async {
+  final historyProvider = context.read<HistoryProvider>();
+  if (historyProvider.entries.isEmpty && !historyProvider.isLoading) {
+    await historyProvider.load();
+    if (!context.mounted) return;
+  }
+
+  HistoryEntry? entry;
+  for (final candidate in historyProvider.entries) {
+    if (candidate.tokenId == tokenId) {
+      entry = candidate;
+      break;
+    }
+  }
+
+  if (entry != null) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => TokenDetailsScreen(entry: entry!)));
+    return;
+  }
+  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const TokenHistoryScreen()));
 }
 
 /// Home-row label: "A002 · Pharmacy · Waiting" with only the parts that

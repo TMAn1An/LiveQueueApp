@@ -93,10 +93,11 @@ class LiveQueueApp extends StatelessWidget {
         Provider<NotificationCenterStorageService>(
           create: (_) => NotificationCenterStorageService(),
         ),
-        // V2 Physical Validation + Foreground Notification checkpoint:
-        // the one presenter for the small "🔔 A002 has been called" banner
-        // that can appear over any screen. Disposed with the app, same as
-        // every other long-lived service here.
+        // V2 Physical Validation + Foreground Notification checkpoint
+        // (centered-card redesign, ADR-044): the one presenter for the
+        // "A002 has been called" notification card that can appear over any
+        // screen. Disposed with the app, same as every other long-lived
+        // service here.
         Provider<ForegroundBannerService>(
           create: (_) => ForegroundBannerService(navigatorKey),
           dispose: (_, s) => s.dispose(),
@@ -188,6 +189,8 @@ class LiveQueueApp extends StatelessWidget {
               context.read<ForegroundBannerService>().show(
                     title: notification.title,
                     body: notification.body,
+                    status: notification.status,
+                    dedupeKey: notification.id,
                     onTap: () => openActiveToken(navContext, notification.tokenId),
                   );
             },
