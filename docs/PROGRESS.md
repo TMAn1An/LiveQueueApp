@@ -22,7 +22,7 @@ From this point forward, work proceeds as **LiveQueue V2**: production bug fixes
 7. Customer cancellation + OTP-gated service start (see ADR-029) — **done**
 8. ~~Anti-bias OTP verification for CALLED → IN_PROGRESS~~ — **retired: completed as part of Checkpoint 7, confirmed by the Checkpoint 7A re-inspection (see ADR-029/ADR-030) — not a separate remaining checkpoint**
 9. Mobile force-update system (backend-controlled minimum supported app version, see ADR-031) — **done**
-10. V2 production verification (final regression pass)
+10. V2 production verification (final regression pass) — **done**
 
 ### V2 Checkpoint 1 — Password change + role rename (2026-08-26)
 
@@ -135,6 +135,16 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Verification:** backend `typecheck`/`lint`/`npm test` clean — 57 files / 531 tests passing (5 new). Mobile `flutter analyze` clean (same pre-existing info-level hints), `flutter test` — 127/127 passing (15 new), `flutter build apk --debug` succeeds. No migration — five new env vars only, all with production-safe defaults.
 - **Deployment:** no Render environment change, no deploy, no Play Store action performed by this checkpoint — see ADR-031 for the exact variable list and the future breaking-release procedure (deploy backend → publish app → confirm rollout → raise the minimum version → later remove old compatibility).
 - **Intentionally unchanged:** iOS policy (no iOS build exists yet to protect), any runtime/admin config UI, background re-checks, any later checkpoint — per this checkpoint's own explicit instruction to stop here.
+
+### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
+
+**Status: PASS. No code changes required — every V2 checkpoint (1-9) plus every ad-hoc fix through today's skip-reason/completion-feedback work verified together as one system for the first time.**
+
+- **Full regression run across all three apps, from a clean environment.** Backend: `npm run typecheck` clean, `npm run lint` clean, `npm test` — 769/769 passing across 73 files. Web dashboard: `tsc -b` clean, `oxlint` clean (same three pre-existing warnings noted in earlier checkpoints, no new ones), `vitest run` — 232/232 passing across 35 files, production `vite build` succeeds. Mobile: `flutter analyze` clean (same pre-existing `prefer_initializing_formals` info-level hints, no warnings or errors), `flutter test` — 335/335 passing, `flutter build apk --debug` succeeds.
+- **Migrations:** all 21 migrations (through `20260929205254_add_token_skip_reason_and_completion_feedback`) applied; `prisma migrate status` reports "Database schema is up to date!" on both `livequeue_dev` and `livequeue_test`.
+- **Tenant isolation and concurrency, re-verified together:** `queueIsolation.test.ts`'s cross-organization and cross-queue suites and the simultaneous-counter-assignment race test all pass under this same run (the `Unique constraint failed on the fields: (staff_id)` line in the test log is the expected losing side of that race being rejected, not a defect).
+- **One environmental false alarm, not a code defect:** the first `npm test` invocation in this session hung indefinitely at process start with near-zero CPU for over ten minutes. Investigated rather than dismissed before rerunning — `pg_stat_activity` showed no stale lock or open transaction on either database, and `prisma generate`/`prisma migrate status` both ran normally in isolation. A fresh run immediately after completed cleanly in ~5 minutes with all tests passing, so this is recorded as a one-off stale process handle on this machine, not a reproducible bug — no code or config change was made in response.
+- **What this checkpoint intentionally does not cover:** production deployment (the two most recent checkpoints above — ADR-041, ADR-042 — and the identity/onboarding work before them all remain "Not deployed"), iOS (no build exists), Play Store/App Store listings, and live SMS-based phone verification (`provider: none`, deliberately deferred, see ADR-034/ADR-037). These are unstarted infrastructure/deployment items, not regressions, and are outside what a code-level regression pass can close.
 
 ### V2 Final Audit — release-readiness review (2026-09-03)
 
