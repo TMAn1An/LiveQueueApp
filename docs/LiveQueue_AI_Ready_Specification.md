@@ -344,6 +344,8 @@ The one-active-token-per-installation rule is unchanged and still keyed on the d
 
 See ADR-034, ADR-035, ADR-037 and ADR-028 for the full design.
 
+**A queue may optionally restrict itself to a weekly schedule of timed sessions with capacity (ADR-046).** Off by default — `scheduleEnabled = false` — so every existing queue keeps accepting joins at any time, unchanged. When enabled, the queue carries one or more sessions per weekday, each a start/end time (in the queue's own timezone) and an optional capacity; a closed weekday is simply one with no sessions, not a separate flag. A join is only assigned to a session that is open *right now* — before the first session, between two sessions, or after the last one are each a specific, customer-safe rejection (never a silent pre-booking of a future slot), and the assignment is fixed and snapshotted at creation, so editing or deleting a session afterward never changes a token that already holds it. Daily and per-session capacity are enforced inside the same queue-row-locked transaction that already serializes token creation, so a full session cannot be overbooked by two simultaneous joins. The static QR code itself never changes — the backend alone decides, at scan/join time, whether the queue is currently open.
+
 ## 4.4 Staff calls a token
 
 ```text
@@ -374,6 +376,8 @@ Customer receives turn notification
 Staff completes (optionally with feedback)
 or skips (always with a reason) the token
 ```
+
+**The turn notification names the actual counter (ADR-043) and is presented as a centered card, not a top banner (ADR-044).** "Please go to Counter 3" (or the queue's own counter-name convention) appears on Live Tracking, Home/Active Tokens, the Notification Center, and the backend-initiated FCM push a backgrounded or terminated app relies on — never a staff ID or internal counter metadata, and never claimed for a WAITING or terminal token. The customer's foreground popup is a single dimmed, centered, explicitly-dismissed-only card (× or View — never an auto-dismiss timer); a second event while one is already showing queues rather than replacing it, and View always opens the token the event is actually about, even if a different token's screen is currently open.
 
 **Skip reasons and completion feedback (ADR-042).** Every skip must say why. Staff pick one of the predefined reasons — `CUSTOMER_NOT_PRESENT` "Customer not present", `NO_RESPONSE` "No response from customer", `MISSING_REQUIREMENT` "Required document/information missing", `CUSTOMER_LEFT` "Customer requested to leave" — or `OTHER` with their own text (required, up to 200 characters). The backend refuses a skip without a valid reason (`SKIP_REASON_REQUIRED`, `INVALID_SKIP_REASON`, `SKIP_REASON_TEXT_REQUIRED`, `SKIP_REASON_TEXT_TOO_LONG`) and stores the code together with the exact wording the customer is shown. Completion stays one step; staff may optionally attach feedback (up to 500 characters) through a separate Feedback action, and the resulting status is COMPLETED either way. The customer sees the skip reason or completion feedback in Live Tracking, the Notification Center, the foreground banner and History — read from the synced token, never from a push notification, which carries no staff-typed text. A skip remains terminal: the customer is still told to scan the queue QR code again if they need service.
 

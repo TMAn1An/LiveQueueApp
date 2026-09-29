@@ -122,6 +122,32 @@ WHERE allow_repeat_visits = false AND repeat_identity_mode IS NULL
   AND deleted_at IS NULL;
 ```
 
+#### Optional weekly schedule + session capacity (`20260929223845_add_queue_schedule_sessions`)
+
+Adds ADR-046's scheduling engine. **Purely additive**: three new columns on
+`queues` (`schedule_enabled BOOLEAN NOT NULL DEFAULT false`,
+`schedule_daily_capacity` nullable, `schedule_visible_to_customers BOOLEAN
+NOT NULL DEFAULT true`), a new `queue_sessions` table, and three nullable
+columns on `tokens` (`queue_session_id`, `assigned_session_date`, and a
+snapshot of the assigned session's start/end minute). The default backfills
+every existing queue as *unscheduled*, so nothing changes for any queue
+until an admin explicitly enables and configures a schedule. No data
+migration, backfill, or new environment variable is needed.
+
+**Deploy the backend before (or together with) the dashboard.** The new
+Schedule & Availability section of Queue Settings, and the `schedule` block
+now returned by the public pre-join queue-config endpoint, both depend on
+backend routes this migration introduces; a dashboard build from before this
+release simply has no UI for the feature and is otherwise unaffected. An
+older mobile app needs no coordinated release: it ignores the unrecognized
+`assignedSession`/`schedule` response fields, and a join rejected by one of
+the six new `SCHEDULE_*` codes (`SCHEDULE_CLOSED_TODAY`, `SCHEDULE_NOT_YET_OPEN`,
+`SCHEDULE_BETWEEN_SESSIONS`, `SCHEDULE_ENDED_TODAY`, `SCHEDULE_SESSION_FULL`,
+`SCHEDULE_DAILY_CAPACITY_REACHED`) still shows the backend's own safe message
+through the existing default/fallback case in `queue_join_provider.dart` —
+the same graceful-degradation precedent as the force-update (ADR-031) and
+multi-service (ADR-027) rollouts, not a new mechanism.
+
 #### Skip reasons and completion feedback (`20260929205254_add_token_skip_reason_and_completion_feedback`)
 
 Adds ADR-042's terminal notes. **Purely additive**: one new enum type

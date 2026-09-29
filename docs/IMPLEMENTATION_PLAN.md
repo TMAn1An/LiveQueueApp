@@ -465,9 +465,23 @@ See ADR-041.
 
 See ADR-042.
 
-## V2 Checkpoint 10: V2 production verification
+## V2 Checkpoint 10: V2 production verification — DONE
 
 **Goal:** A focused final regression pass across all V2 business rules, tenant isolation, concurrency, migrations, and cross-app compatibility — no unnecessary new tests, final build/typecheck/lint verification across all three apps.
+
+**Result:** backend 769/769, dashboard 232/232, mobile 335/335, all three builds/typecheck/lint clean, migrations confirmed in sync on both local databases. See `docs/PROGRESS.md`'s "V2 Checkpoint 10" entry.
+
+## Post-Checkpoint-10 feature roadmap (overnight session, 2026-09-30) — DONE
+
+Six further items were completed and pushed after Checkpoint 10 closed the original V2 list. Each has its own full entry in `docs/PROGRESS.md` (in this order) and, where architecturally meaningful, its own ADR — this section is a pointer, not a duplicate:
+
+1. **Customer Called Counter Information** — the CALLED background push and the Home/Active-Tokens surface now name the actual counter; everywhere else already did. See ADR-043.
+2. **Centered Foreground Notification** — the mobile foreground banner is now a centered card, not a top strip; "View" on a finished token now opens its History details directly. See ADR-044.
+3. **Dashboard Visual Hierarchy + Navigation Polish** — an opt-in `size` prop on the existing `Button` for operationally-important actions, a typography bump for titles/headings, one consistent "Manage Counters" label. See ADR-045.
+4. **Optional Weekly Schedule + Session Capacity** — a queue may now restrict itself to a weekly schedule of timed sessions with optional daily/per-session capacity, off by default for every existing queue. One additive migration (`20260929223845_add_queue_schedule_sessions`). **Explicitly deferred:** session-aware repeat-visit entitlement (one completed visit per session) — real tracked future work, not implemented. See ADR-046.
+5. **Universal Error / Negative Message UX audit** — existing error handling across all three apps was already essentially complete; the one genuine gap (no top-level crash boundary in either frontend) is now closed. See ADR-047.
+6. **Complete regression + security review** — race conditions, cross-org access/IDOR, capacity overbooking, session timezone handling, OTP/ciphertext leakage, and old-client compatibility around all of the above were reviewed by reading the actual implementation. No genuine defects found; no code changed.
+7. **Full final verification** — backend 791/791, dashboard 243/243, mobile 352/352, all builds/typecheck/lint/analyze clean, plus an unpublished `--release` APK build (debug-signed; no release keystore configured on this machine) for the user to inspect. Nothing deployed.
 
 ---
 
