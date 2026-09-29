@@ -49,6 +49,9 @@ export interface Queue {
    * (ADR-035). Only a month/year window or a fixed cutoff actually needs one. */
   timezone: string | null;
   allowMultipleServices: boolean;
+  /** ADR-041: staff must enter the customer's service-start code before
+   * starting service. True for every queue that existed before the setting. */
+  requireServiceStartOtp: boolean;
   formVersion: number;
   qrCodeUri: string;
   deletedAt: string | null;

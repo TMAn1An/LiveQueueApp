@@ -33,6 +33,8 @@ export function useUpdateQueue(queueId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['queues'] });
       void queryClient.invalidateQueries({ queryKey: ['queue', queueId] });
+      // Live-table rows carry queue settings too (ADR-041's Start behavior).
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
     },
   });
 }

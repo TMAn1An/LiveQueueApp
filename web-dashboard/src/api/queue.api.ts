@@ -37,6 +37,8 @@ export interface CreateQueueInput {
   repeatIdentityFieldKey?: string | null;
   timezone?: string | null;
   allowMultipleServices?: boolean;
+  /** ADR-041. The backend defaults a new queue to true when omitted. */
+  requireServiceStartOtp?: boolean;
   status?: QueueStatus;
 }
 

@@ -122,6 +122,23 @@ WHERE allow_repeat_visits = false AND repeat_identity_mode IS NULL
   AND deleted_at IS NULL;
 ```
 
+#### Service-start verification setting (`20260929200722_add_queue_require_service_start_otp`)
+
+Makes ADR-029's service-start code optional per queue (ADR-041). **Purely
+additive**: one column, `queues.require_service_start_otp BOOLEAN NOT NULL
+DEFAULT true`. The default backfills every existing queue as *required*, so
+nothing changes for any queue until an admin turns the setting off. Nothing is
+dropped or rewritten, and no data migration or new environment variable is
+needed.
+
+Deploy the backend before (or together with) the dashboard: the new dashboard
+reads the setting from queue and live-table responses. An older mobile app
+ignores the new `serviceStartVerificationRequired` field and keeps showing the
+code card. On a queue that has turned the code off, that older app's code fetch
+is refused (`SERVICE_START_VERIFICATION_NOT_REQUIRED`) and it shows its
+existing "get a new code" prompt, which staff can ignore because they start
+service directly.
+
 #### Fourth identity migration (`20260910090000_add_verified_email_identity`)
 
 Adds verified-email customer identity (ADR-037). **Purely additive**: two

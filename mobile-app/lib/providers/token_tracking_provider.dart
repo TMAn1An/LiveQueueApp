@@ -111,10 +111,15 @@ class TokenTrackingProvider extends ChangeNotifier {
     // we're already tracking.
     _fcmTapSub = _fcmService.onNotificationTapped.listen((message) => _onFcmDataMessage(message.data));
 
-    if (initialToken.status == TokenStatus.called) {
+    if (_needsVerificationCode(initialToken)) {
       unawaited(_refreshVerificationCode());
     }
   }
+
+  /// A code exists only while CALLED, and only on a queue that uses one
+  /// (ADR-041) — the backend's own answer, carried on the token.
+  static bool _needsVerificationCode(LiveQueueToken token) =>
+      token.status == TokenStatus.called && token.serviceStartVerificationRequired;
 
   /// Never trusts `data['status']` as authoritative — always resyncs via
   /// REST instead (approved Issue #5 design: FCM is a trigger, not a state
@@ -240,20 +245,26 @@ class TokenTrackingProvider extends ChangeNotifier {
   }
 
   void _applyToken(LiveQueueToken updated) {
-    final previousStatus = token?.status;
+    final previous = token;
+    final previousStatus = previous?.status;
     token = updated;
 
-    if (previousStatus != updated.status) {
-      // V2 Checkpoint 7 (ADR-029): a fresh code exists only while CALLED —
-      // entering CALLED always fetches the current one; leaving it
-      // (started/skipped/cancelled/expired-away) always clears the local
-      // copy, matching the backend's own lifecycle.
-      if (updated.status == TokenStatus.called) {
-        unawaited(_refreshVerificationCode());
-      } else {
-        verificationCode = null;
-        verificationCodeExpiresAt = null;
-      }
+    // V2 Checkpoint 7 (ADR-029): a fresh code exists only while CALLED —
+    // entering CALLED always fetches the current one; leaving it
+    // (started/skipped/cancelled/expired-away) always clears the local copy,
+    // matching the backend's own lifecycle.
+    //
+    // ADR-041: the queue's setting can also change while the token stays
+    // CALLED. Switched on, the backend has just issued a code, so it is
+    // fetched now; switched off, the local copy is dropped so no stale code
+    // is ever shown for a queue that no longer asks for one.
+    final neededBefore = previous != null && _needsVerificationCode(previous);
+    final needsNow = _needsVerificationCode(updated);
+    if (needsNow && (previousStatus != updated.status || !neededBefore)) {
+      unawaited(_refreshVerificationCode());
+    } else if (!needsNow) {
+      verificationCode = null;
+      verificationCodeExpiresAt = null;
     }
 
     if (previousStatus != null && previousStatus != updated.status) {

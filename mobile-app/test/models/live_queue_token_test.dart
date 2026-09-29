@@ -63,6 +63,27 @@ void main() {
       expect(token.status, TokenStatus.unknown);
     });
 
+    test('parses serviceStartVerificationRequired, defaulting to true when absent (ADR-041)', () {
+      expect(
+        LiveQueueToken.fromJson(baseJson()..['serviceStartVerificationRequired'] = false)
+            .serviceStartVerificationRequired,
+        isFalse,
+      );
+      expect(
+        LiveQueueToken.fromJson(baseJson()..['serviceStartVerificationRequired'] = true)
+            .serviceStartVerificationRequired,
+        isTrue,
+      );
+      // A backend that predates the setting sends nothing — the verified
+      // flow's UI stays exactly as it was.
+      expect(LiveQueueToken.fromJson(baseJson()).serviceStartVerificationRequired, isTrue);
+    });
+
+    test('copyWith keeps serviceStartVerificationRequired (ADR-041)', () {
+      final token = LiveQueueToken.fromJson(baseJson()..['serviceStartVerificationRequired'] = false);
+      expect(token.copyWith(position: 1).serviceStartVerificationRequired, isFalse);
+    });
+
     test('parses estimatedReadyAt when present, and null when absent (V2 Checkpoint 4)', () {
       final withReadyAt = LiveQueueToken.fromJson(
         baseJson()..['estimatedReadyAt'] = '2026-08-22T10:12:00.000Z',

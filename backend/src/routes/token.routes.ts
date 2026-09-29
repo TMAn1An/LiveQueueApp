@@ -83,9 +83,9 @@ router.post(
   validate(callTokenSchema),
   tokenController.call,
 );
-// V2 Checkpoint 7 (ADR-029): now requires a verified customer code — see
-// startTokenWithOtp. sensitiveRateLimiter added because this is now a
-// brute-forceable-by-guessing endpoint (defense-in-depth alongside the
+// V2 Checkpoint 7 (ADR-029): requires a verified customer code on a queue
+// that uses one (ADR-041) — see startToken. sensitiveRateLimiter added
+// because this is now a brute-forceable-by-guessing endpoint (defense-in-depth alongside the
 // per-token failed-attempt limit enforced in the service layer).
 router.post(
   '/:tokenId/start',

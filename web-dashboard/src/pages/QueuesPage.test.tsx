@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueuesPage } from './QueuesPage';
-import { useDeleteQueue, useQueues, useUpdateQueueStatus } from '../hooks/useQueues';
+import { useCreateQueue, useDeleteQueue, useQueues, useUpdateQueueStatus } from '../hooks/useQueues';
 import type { Queue } from '../types/queue';
 
 const mockHasPermission = vi.fn(() => true);
@@ -33,6 +33,7 @@ function mockQueue(overrides: Partial<Queue> = {}): Queue {
     repeatIdentityFieldKey: null,
     timezone: null,
     allowMultipleServices: true,
+    requireServiceStartOtp: true,
     formVersion: 1,
     qrCodeUri: 'livequeue://queue/q1',
     deletedAt: null,
@@ -200,6 +201,64 @@ describe('QueuesPage — explicit Open Queue / Settings actions', () => {
     expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+});
+
+// ADR-041: the creator decides whether the new queue requires the
+// service-start verification code — on unless they turn it off.
+describe('QueuesPage — Create Queue service-start verification toggle', () => {
+  function openCreateModal(mutateAsync = vi.fn().mockResolvedValue({})) {
+    vi.mocked(useCreateQueue).mockReturnValue({
+      mutateAsync,
+      isPending: false,
+    } as unknown as ReturnType<typeof useCreateQueue>);
+    vi.mocked(useQueues).mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<
+      typeof useQueues
+    >);
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: 'Create Queue' }));
+    return mutateAsync;
+  }
+
+  // The modal's name label is not tied to its input, so it is found as the
+  // label's own sibling rather than by accessible name.
+  function queueNameInput() {
+    return screen.getByText('Queue name').nextElementSibling as HTMLInputElement;
+  }
+
+  it('shows the toggle, enabled by default', () => {
+    openCreateModal();
+    const toggle = screen.getByRole('switch', { name: 'Service-start verification code' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(
+      screen.getByText('Require the customer verification code before staff can start service.'),
+    ).toBeInTheDocument();
+  });
+
+  it('sends requireServiceStartOtp: true when left on', async () => {
+    const mutateAsync = openCreateModal();
+    fireEvent.change(queueNameInput(), { target: { value: 'Pharmacy' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await vi.waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ requireServiceStartOtp: true })),
+    );
+  });
+
+  it('lets the creator turn it off before creating', async () => {
+    const mutateAsync = openCreateModal();
+    fireEvent.change(queueNameInput(), { target: { value: 'Pharmacy' } });
+    const toggle = screen.getByRole('switch', { name: 'Service-start verification code' });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await vi.waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Pharmacy', requireServiceStartOtp: false }),
+      ),
+    );
   });
 });
 

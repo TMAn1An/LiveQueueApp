@@ -52,10 +52,18 @@ class LiveQueueToken {
     this.completedAt,
     this.skippedAt,
     this.cancelledAt,
+    this.serviceStartVerificationRequired = true,
   });
 
   final String id;
   final String queueId;
+
+  /// ADR-041 — whether this token's queue asks for the service-start
+  /// verification code. Always the backend's answer, never guessed locally:
+  /// when false there is no code to show, and the app says nothing about
+  /// one. Defaults to true when absent, so a response from a backend that
+  /// predates the setting keeps the verified flow's UI.
+  final bool serviceStartVerificationRequired;
 
   /// ADR-035 — the queue's own IANA zone, so live tracking can show the
   /// queue's clock beside the customer's. Null when the organization has
@@ -124,6 +132,7 @@ class LiveQueueToken {
       completedAt: json['completedAt'] == null ? null : DateTime.parse(json['completedAt'] as String),
       skippedAt: json['skippedAt'] == null ? null : DateTime.parse(json['skippedAt'] as String),
       cancelledAt: json['cancelledAt'] == null ? null : DateTime.parse(json['cancelledAt'] as String),
+      serviceStartVerificationRequired: json['serviceStartVerificationRequired'] as bool? ?? true,
     );
   }
 
@@ -162,6 +171,7 @@ class LiveQueueToken {
       completedAt: completedAt,
       skippedAt: skippedAt,
       cancelledAt: cancelledAt,
+      serviceStartVerificationRequired: serviceStartVerificationRequired,
     );
   }
 }

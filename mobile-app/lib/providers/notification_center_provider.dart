@@ -103,9 +103,17 @@ class NotificationCenterProvider extends ChangeNotifier {
         // forbids. The body says the code is ready; View already opens Live
         // Tracking, the one existing ownership-checked surface that shows
         // the digits — never repeated here, in FCM, or in this stored text.
+        //
+        // ADR-041: a queue without the code issues none, so the entry must
+        // not promise one — it just sends the customer to their counter.
+        final counterName = token.counter?.name;
         return (
           'Your token was called',
-          '${token.serialNumber}$where — your verification code is ready',
+          token.serviceStartVerificationRequired
+              ? '${token.serialNumber}$where — your verification code is ready'
+              : counterName != null
+                  ? '${token.serialNumber}$where — please go to $counterName'
+                  : '${token.serialNumber}$where — please proceed',
           token.calledAt ?? DateTime.now(),
         );
       case TokenStatus.inProgress:

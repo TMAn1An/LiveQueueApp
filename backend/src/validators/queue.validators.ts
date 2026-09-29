@@ -56,6 +56,9 @@ export const createQueueSchema = {
     status: queueStatus.default('ACTIVE'),
     allowRepeatVisits: z.boolean().default(true),
     allowMultipleServices: z.boolean().default(true),
+    // ADR-041: the service-start verification code. On unless the creator
+    // explicitly turns it off.
+    requireServiceStartOtp: z.boolean().default(true),
     ...repeatPolicyFields,
   }),
 };
@@ -72,6 +75,7 @@ export const updateQueueSchema = {
     defaultNotificationMinutes: z.number().int().positive().optional(),
     allowRepeatVisits: z.boolean().optional(),
     allowMultipleServices: z.boolean().optional(),
+    requireServiceStartOtp: z.boolean().optional(),
     ...repeatPolicyFields,
   }),
 };

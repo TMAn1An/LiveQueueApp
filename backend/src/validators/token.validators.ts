@@ -77,16 +77,22 @@ export const reissueVerificationCodeSchema = {
   }),
 };
 
-// V2 Checkpoint 7: CALLED -> IN_PROGRESS now requires the customer-told
-// verification code — replaces the old bare tokenIdOnlySchema on /start.
+// V2 Checkpoint 7: CALLED -> IN_PROGRESS takes the customer-told
+// verification code. ADR-041: optional in shape, because only a queue that
+// uses the code needs one — whether it is required is decided by the service
+// against the queue's current setting, never by the request. When present it
+// must still be a well-formed 6-digit code.
 export const startTokenSchema = {
   params: tokenIdParams,
-  body: z.object({
-    verificationCode: z
-      .string()
-      .trim()
-      .regex(/^\d{6}$/, 'verificationCode must be a 6-digit code.'),
-  }),
+  body: z
+    .object({
+      verificationCode: z
+        .string()
+        .trim()
+        .regex(/^\d{6}$/, 'verificationCode must be a 6-digit code.')
+        .optional(),
+    })
+    .default({}),
 };
 
 export const callTokenSchema = {

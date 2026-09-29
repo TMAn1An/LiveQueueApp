@@ -165,6 +165,50 @@ describe('TokenActions — Start requires a verification code (V2 Checkpoint 7)'
   });
 });
 
+describe('TokenActions — queue without the service-start code (ADR-041)', () => {
+  it('Start begins service in one click, sends no code, and shows no code input', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" requiresVerificationCode={false} />);
+
+    expect(screen.queryByPlaceholderText('Verification code')).not.toBeInTheDocument();
+    await user.click(screen.getByText('Start'));
+
+    expect(startMutate).toHaveBeenCalledWith({ tokenId: 't1' }, expect.objectContaining({ onError: expect.any(Function) }));
+    expect(screen.queryByPlaceholderText('Verification code')).not.toBeInTheDocument();
+    expect(screen.queryByText('Confirm')).not.toBeInTheDocument();
+  });
+
+  it('shows the backend refusal if the setting was switched back on meanwhile', async () => {
+    const user = userEvent.setup();
+    startMutate.mockImplementation((_vars, { onError }: { onError: (e: unknown) => void }) => {
+      onError(
+        new ApiError(
+          422,
+          'SERVICE_START_VERIFICATION_REQUIRED',
+          "This queue requires the customer's verification code to start service.",
+        ),
+      );
+    });
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" requiresVerificationCode={false} />);
+
+    await user.click(screen.getByText('Start'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "This queue requires the customer's verification code to start service.",
+    );
+  });
+
+  it('a queue that requires the code still asks for it', async () => {
+    const user = userEvent.setup();
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" requiresVerificationCode />);
+
+    await user.click(screen.getByText('Start'));
+
+    expect(startMutate).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText('Verification code')).toBeInTheDocument();
+  });
+});
+
 describe('TokenActions — Adjust Time (V2 Checkpoint 4)', () => {
   it('clicking Adjust Time reveals a minutes input, and submitting calls setRequiredDuration', async () => {
     const user = userEvent.setup();

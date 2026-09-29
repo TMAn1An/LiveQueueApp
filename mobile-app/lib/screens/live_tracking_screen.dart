@@ -183,7 +183,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     ),
                   // V2 Checkpoint 7 (ADR-029): shown only while CALLED — the
                   // customer reads this code aloud to staff to start service.
-                  if (token.status == TokenStatus.called) ...[
+                  // ADR-041: and only when the queue uses the code at all;
+                  // otherwise there is nothing to give staff and no card.
+                  if (token.status == TokenStatus.called && token.serviceStartVerificationRequired) ...[
                     const SizedBox(height: 16),
                     const _VerificationCodeSection(),
                   ],

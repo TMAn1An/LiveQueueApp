@@ -52,6 +52,7 @@ function queue(overrides: Partial<Queue> = {}): Queue {
     repeatIdentityFieldKey: null,
     timezone: null,
     allowMultipleServices: true,
+    requireServiceStartOtp: true,
     formVersion: 1,
     qrCodeUri: 'livequeue://queue/q1',
     deletedAt: null,

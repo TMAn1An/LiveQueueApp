@@ -5,13 +5,13 @@ export function callToken(tokenId: string, counterId: string) {
   return apiFetch<StaffToken>(`/api/tokens/${tokenId}/call`, { method: 'POST', body: { counterId } });
 }
 
-// V2 Checkpoint 7 (ADR-029): CALLED -> IN_PROGRESS now requires the
-// customer-told verification code — staff can no longer start service with
-// a bare click.
-export function startToken(tokenId: string, verificationCode: string) {
+// V2 Checkpoint 7 (ADR-029): CALLED -> IN_PROGRESS takes the customer-told
+// verification code. ADR-041: only on a queue that uses one — otherwise no
+// code is sent at all, and the backend decides either way.
+export function startToken(tokenId: string, verificationCode?: string) {
   return apiFetch<StaffToken>(`/api/tokens/${tokenId}/start`, {
     method: 'POST',
-    body: { verificationCode },
+    body: verificationCode === undefined ? {} : { verificationCode },
   });
 }
 

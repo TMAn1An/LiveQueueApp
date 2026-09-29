@@ -146,7 +146,13 @@ export async function getLiveQueueTable(
       id: token.id,
       serialNumber: token.serialNumber,
       status: token.status,
-      queue: { id: token.queue.id, name: token.queue.name },
+      // ADR-041: whether Start asks staff for the customer's code on this
+      // row. Display only — the API re-decides at start time.
+      queue: {
+        id: token.queue.id,
+        name: token.queue.name,
+        requireServiceStartOtp: token.queue.requireServiceStartOtp,
+      },
       services: token.tokenServices.map((ts) => ({ id: ts.service.id, name: ts.service.serviceName })),
       counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
       position: position?.position ?? null,

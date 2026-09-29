@@ -217,6 +217,14 @@ model Queue {
   /// UI). Defaults true, preserving V2 Checkpoint 5's multi-service
   /// selection unchanged for every existing queue.
   allowMultipleServices      Boolean     @default(true) @map("allow_multiple_services")
+  /// ADR-041: whether staff must enter the customer's service-start
+  /// verification code (ADR-029) before CALLED -> IN_PROGRESS. Named for
+  /// that one code on purpose — LiveQueue also has customer email
+  /// verification, account verification and staff invitations, none of which
+  /// this governs. Defaults true so every existing queue keeps the verified
+  /// flow unchanged. The queue's *current* value decides at start time; it is
+  /// never snapshotted onto tokens.
+  requireServiceStartOtp     Boolean     @default(true) @map("require_service_start_otp")
 
   /// How often one customer may use this queue, when allowRepeatVisits is
   /// false. Null on a restricted queue means the identity policy has not

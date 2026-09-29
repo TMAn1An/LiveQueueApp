@@ -37,6 +37,11 @@ import type { WaitingActionEligibility } from '../types/dashboard';
  * Time" action (PATCH /api/tokens/:tokenId/duration) — staff overriding an
  * active customer's required duration, which the backend then uses to
  * recompute every WAITING token's ETA in the queue.
+ *
+ * ADR-041: `requiresVerificationCode` is the queue's service-start setting.
+ * When false, Start starts service in one click and no code input exists.
+ * Defaults to true, so a caller that does not pass it can never quietly
+ * drop the verified flow — and the backend decides regardless.
  */
 export function TokenActions({
   tokenId,
@@ -44,12 +49,14 @@ export function TokenActions({
   status,
   position,
   actionEligibility,
+  requiresVerificationCode = true,
 }: {
   tokenId: string;
   queueId: string;
   status: TokenStatus;
   position?: number | null;
   actionEligibility?: WaitingActionEligibility | null;
+  requiresVerificationCode?: boolean;
 }) {
   // Call and Skip unlock together, always. The backend decides this — the
   // row carries its answer — and a locked row must never show a live Skip,
@@ -119,6 +126,20 @@ export function TokenActions({
     );
   }
 
+  /** ADR-041: a queue without the code starts in one click. If the setting
+   * was switched back on meanwhile, the backend refuses and says so — that
+   * message is shown as-is, and the refreshed row then asks for the code. */
+  function handleDirectStart() {
+    setStartError(null);
+    startToken.mutate(
+      { tokenId },
+      {
+        onError: (err) =>
+          setStartError(err instanceof ApiError ? err.message : 'Failed to start service.'),
+      },
+    );
+  }
+
   const activeCounters = (counters ?? []).filter((c) => c.status === 'ACTIVE');
 
   return (
@@ -158,7 +179,12 @@ export function TokenActions({
             ))}
           </select>
         )}
-        {status === 'CALLED' && !startingService && (
+        {status === 'CALLED' && !requiresVerificationCode && (
+          <Button variant="primary" loading={startToken.isPending} onClick={handleDirectStart}>
+            {startToken.isPending ? 'Starting…' : 'Start'}
+          </Button>
+        )}
+        {status === 'CALLED' && requiresVerificationCode && !startingService && (
           <Button
             variant="primary"
             onClick={() => {
@@ -169,7 +195,7 @@ export function TokenActions({
             Start
           </Button>
         )}
-        {status === 'CALLED' && startingService && (
+        {status === 'CALLED' && requiresVerificationCode && startingService && (
           <form onSubmit={handleStartSubmit} className="flex items-center gap-1">
             <input
               autoFocus

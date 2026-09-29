@@ -158,6 +158,22 @@ export const emitTokenCancelled = (tokenId: string) =>
   emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_CANCELLED, tokenId);
 
 /**
+ * ADR-041: re-sends the current views of every CALLED token in a queue after
+ * its service-start verification setting changes, reusing token.called —
+ * the event both clients already apply as "here is this token's current
+ * state". Status is unchanged, so neither client treats it as a transition.
+ */
+export function refreshCalledTokens(queueId: string): Promise<void> {
+  return guarded(async () => {
+    if (!getIO()) return;
+    const tokenIds = await tokenService.listCalledTokenIds(queueId);
+    for (const tokenId of tokenIds) {
+      await emitTokenCalled(tokenId);
+    }
+  });
+}
+
+/**
  * Recomputes and emits position_changed for every currently-WAITING token
  * in a queue (approved Phase 4 decision 4; broadened in V2 Checkpoint 4 —
  * see ADR-026). Pre-Checkpoint-4, only tokens *behind* a just-removed

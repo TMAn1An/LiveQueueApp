@@ -64,8 +64,10 @@ LiveQueueToken _token({
   DateTime? estimatedReadyAt,
   CounterInfo? counter,
   String? etaUnavailableReason,
+  bool serviceStartVerificationRequired = true,
 }) {
   return LiveQueueToken(
+    serviceStartVerificationRequired: serviceStartVerificationRequired,
     id: 'token-1',
     queueId: 'queue-1',
     serviceId: 'service-1',
@@ -229,6 +231,28 @@ void main() {
       expect(find.text('482731'), findsNothing);
       expect(find.text('Your verification code has expired.'), findsOneWidget);
       expect(find.text('Get a new code'), findsOneWidget);
+    });
+
+    testWidgets('ADR-041: a CALLED token on a queue without the code shows no code card at all', (tester) async {
+      final provider = _FakeTokenTrackingProvider();
+      provider.pushState(
+        token: _token(
+          status: TokenStatus.called,
+          counter: const CounterInfo(id: 'c1', name: 'Counter 2'),
+          serviceStartVerificationRequired: false,
+        ),
+      );
+      await _pump(tester, provider);
+
+      // Still told it is their turn and where to go…
+      expect(find.text("It's your turn — please proceed."), findsOneWidget);
+      expect(find.text('Counter 2'), findsOneWidget);
+      // …but nothing about a code: no card, no instruction, no renewal prompt.
+      expect(find.text('Verification Code'), findsNothing);
+      expect(find.text('Tell this code to the staff member to start your service.'), findsNothing);
+      expect(find.text('Your verification code has expired.'), findsNothing);
+      expect(find.text('Get a new code'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
     });
 
     testWidgets('a CANCELLED token shows its own message, not the SKIPPED one', (tester) async {

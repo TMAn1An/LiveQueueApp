@@ -353,25 +353,30 @@ Staff chooses next eligible token
         ↓
 Backend atomically assigns token to counter
         ↓
-Token becomes CALLED, backend generates a fresh
-service-start verification code (V2 Checkpoint 7, ADR-029)
+Token becomes CALLED; if the queue requires it,
+backend generates a fresh service-start
+verification code (V2 Checkpoint 7, ADR-029/041)
         ↓
 Customer receives real-time update
         ↓
-Customer receives turn notification, and reads
-their verification code from the app
+Customer receives turn notification
         ↓
-Customer tells the code to staff
-        ↓
-Staff enters the code; backend verifies it
-        ↓
-Token becomes IN_PROGRESS (only on a correct,
-unexpired code — see ADR-029)
+┌─ Queue requires the code (default) ──────────┐
+│ Customer reads their code from the app and   │
+│ tells it to staff; staff enters it; backend  │
+│ verifies it. Token becomes IN_PROGRESS only  │
+│ on a correct, unexpired code (ADR-029).      │
+├─ Queue does not use the code ────────────────┤
+│ Staff starts service directly. No code is    │
+│ generated, shown or asked for (ADR-041).     │
+└──────────────────────────────────────────────┘
         ↓
 Staff completes or skips token
 ```
 
-As of V2 Checkpoint 7, staff cannot transition a token from CALLED to IN_PROGRESS by action alone — the backend requires a short-lived (5-minute), single-use, server-verified code that only the token's owning device can read (`GET /api/tokens/:tokenId/verification-code`), told to staff verbally. This exists specifically so staff cannot silently start a customer's service merely to remove their ability to cancel (see 4.4a below). The raw code is never returned to staff, never appears in Socket.io/FCM payloads, and is never stored in the database in recoverable plaintext form — see ADR-029 for the full design, including why the storage is reversible authenticated encryption rather than a one-way hash.
+**Service-start verification is a per-queue setting (ADR-041).** `requireServiceStartOtp` is chosen when a queue is created (on by default) and can be changed later in Queue Settings by a role with `manage_queues`. Every queue that existed before the setting keeps requiring the code. The backend enforces the queue's *current* value at the moment of Start, never a value snapshotted onto the token. Turning it off lets an already-CALLED token start directly, ignoring any code already issued. Turning it on issues a fresh code to every CALLED token in that queue at once, so no customer at a counter is left without one. The customer app shows the code card and the "verification code is ready" notification only when the token's queue uses the code (`serviceStartVerificationRequired` on the token view).
+
+As of V2 Checkpoint 7, on a queue that requires the code (every queue unless an administrator turns it off, ADR-041), staff cannot transition a token from CALLED to IN_PROGRESS by action alone — the backend requires a short-lived (5-minute), single-use, server-verified code that only the token's owning device can read (`GET /api/tokens/:tokenId/verification-code`), told to staff verbally. This exists specifically so staff cannot silently start a customer's service merely to remove their ability to cancel (see 4.4a below). The raw code is never returned to staff, never appears in Socket.io/FCM payloads, and is never stored in the database in recoverable plaintext form — see ADR-029 for the full design, including why the storage is reversible authenticated encryption rather than a one-way hash.
 
 ## 4.4a Customer cancels their own token
 

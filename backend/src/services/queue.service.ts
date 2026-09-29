@@ -2,6 +2,7 @@ import type { Queue, QueueService, QueueStatus } from '@prisma/client';
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { resolveQueueTimezone, resolveRepeatPolicy } from './queueIdentityPolicy.service';
+import { issueServiceStartCodesForCalledTokens } from './token.service';
 import { AppError } from '../utils/AppError';
 import { assertQueueMutable } from '../utils/tenantScope';
 import type { createQueueSchema, updateQueueSchema } from '../validators/queue.validators';
@@ -113,6 +114,7 @@ export async function createQueue(organizationId: string, input: CreateQueueInpu
       defaultNotificationMinutes: input.defaultNotificationMinutes,
       status: input.status,
       allowMultipleServices: input.allowMultipleServices,
+      requireServiceStartOtp: input.requireServiceStartOtp,
       timezone,
       ...policy,
     },
@@ -168,17 +170,30 @@ export async function updateQueue(
     effectiveTimezone,
   );
 
-  const queue = await prisma.queue.update({
-    where: { id: queueId },
-    data: {
-      ...input,
-      timezone: nextTimezone,
-      // The wall-clock cutoff is a policy input, not a column — resolveRepeatPolicy
-      // turns it into the absolute instant stored below.
-      repeatRestrictionUntilLocal: undefined,
-      ...policy,
-    },
-    include: { services: true },
+  // ADR-041: switching the service-start code ON must not strand a customer
+  // already at a counter without one, so their codes are issued in the same
+  // transaction as the change. Switching it OFF needs nothing here — the
+  // start path reads the current setting and ignores any code left behind.
+  const enablingServiceStartCode =
+    input.requireServiceStartOtp === true && !existing.requireServiceStartOtp;
+
+  const queue = await prisma.$transaction(async (tx) => {
+    const updated = await tx.queue.update({
+      where: { id: queueId },
+      data: {
+        ...input,
+        timezone: nextTimezone,
+        // The wall-clock cutoff is a policy input, not a column — resolveRepeatPolicy
+        // turns it into the absolute instant stored below.
+        repeatRestrictionUntilLocal: undefined,
+        ...policy,
+      },
+      include: { services: true },
+    });
+    if (enablingServiceStartCode) {
+      await issueServiceStartCodesForCalledTokens(tx, queueId);
+    }
+    return updated;
   });
 
   return serializeQueue(queue);

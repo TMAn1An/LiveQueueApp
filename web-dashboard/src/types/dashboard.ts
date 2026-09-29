@@ -31,7 +31,9 @@ export interface LiveQueueTokenRow {
   id: string;
   serialNumber: string;
   status: TokenStatus;
-  queue: { id: string; name: string };
+  /** requireServiceStartOtp (ADR-041) decides whether Start asks for the
+   * customer's code on this row — display only; the API re-decides. */
+  queue: { id: string; name: string; requireServiceStartOtp: boolean };
   /** V2 Checkpoint 5 (ADR-027): the full multi-service selection. */
   services: { id: string; name: string }[];
   counter: { id: string; name: string } | null;

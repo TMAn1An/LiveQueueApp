@@ -88,6 +88,7 @@ export function LiveQueueTable({
                       status={row.status}
                       position={row.position}
                       actionEligibility={row.actionEligibility}
+                      requiresVerificationCode={row.queue.requireServiceStartOtp}
                     />
                   </td>
                 </tr>

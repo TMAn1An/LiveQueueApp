@@ -13,6 +13,7 @@ import { ServicesManager } from '../components/ServicesManager';
 import { FormBuilder } from '../components/FormBuilder';
 import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
 import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
+import { ServiceStartVerificationSetting } from '../components/ServiceStartVerificationSetting';
 
 export function QueueDetailsPage() {
   const { queueId } = useParams<{ queueId: string }>();
@@ -154,6 +155,13 @@ export function QueueDetailsPage() {
             )}
           </dl>
         )}
+      </Card>
+
+      {/* ADR-041: directly under Details — it changes what staff do at the
+          counter, so it is kept where an operator will actually find it. */}
+      <Card>
+        <h2 className="mb-3 text-sm font-semibold text-fg-soft">Service Start</h2>
+        <ServiceStartVerificationSetting queue={queue} />
       </Card>
 
       {/* ADR-035: the queue's clock lives with the queue's own settings, not

@@ -56,9 +56,10 @@ export async function call(req: Request, res: Response) {
 export async function start(req: Request, res: Response) {
   // No approved audit action exists for WAITING/CALLED -> IN_PROGRESS — not
   // audited here; see the Phase 7 Step 5 report for this gap. V2 Checkpoint
-  // 7 (ADR-029): now gated on a verified customer code (startTokenWithOtp)
-  // — the transition itself is unaudited exactly as before, unchanged.
-  const { token } = await tokenService.startTokenWithOtp(
+  // 7 (ADR-029): gated on a verified customer code when the queue uses one
+  // (ADR-041, see startToken) — the transition itself is unaudited exactly
+  // as before, unchanged.
+  const { token } = await tokenService.startToken(
     req.auth!.organizationId,
     req.params.tokenId as string,
     req.body.verificationCode,

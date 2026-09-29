@@ -411,6 +411,35 @@ See ADR-029 for full design/implementation detail, including the reversible-encr
 
 See ADR-031 for full design/implementation detail, including the environment-vs-config-table decision and the future breaking-release procedure.
 
+## Update Roadmap Checkpoint 1: Optional service-start verification code — DONE
+
+**Goal:** Let each queue decide whether staff must enter ADR-029's service-start verification code before starting service, chosen at queue creation and editable later, enforced by the backend. Existing queues keep today's behavior.
+
+### Tasks
+
+- [x] Inspect the current OTP lifecycle (generation in `callToken`, storage, expiry, attempts, start, customer read/reissue, serialization, realtime, notifications) before changing anything
+- [x] `Queue.requireServiceStartOtp` + additive migration, `NOT NULL DEFAULT true`
+- [x] Queue create/update validation and persistence; the change is audited through the existing `queue_updated` action
+- [x] Backend-authoritative start rule against the queue's current setting; explicit `SERVICE_START_VERIFICATION_REQUIRED`
+- [x] No code generated, served or reissued for a queue without the code (`SERVICE_START_VERIFICATION_NOT_REQUIRED`)
+- [x] Mid-lifecycle: ON → OFF ignores and clears a leftover code; OFF → ON issues codes to CALLED tokens in the same transaction; race-safe via `FOR SHARE` + a conditional start UPDATE
+- [x] `/next` issues the code on the same terms as `/call`, and strips internal fields from its response
+- [x] Customer view `serviceStartVerificationRequired`; live refresh of CALLED customers over `token.called`
+- [x] Dashboard: Create Queue switch, Queue Settings card, conditional Start
+- [x] Mobile: conditional code card, CALLED notification text, foreground banner
+- [x] Tests across all three apps; docs; commit
+
+### Acceptance
+
+- Every existing queue still requires the code after migration
+- A new queue can be created with the code required or not; the setting can be changed later by a role with `manage_queues` only
+- A code-requiring queue refuses a start without a correct code; a queue without the code starts directly and never generates one
+- Changing the setting while a customer is CALLED never leaves that customer unable to be served
+- FCFS, counter occupancy, the token state machine, tenant isolation and permissions are unchanged
+- No OTP ciphertext, expiry or attempt count reaches any API, socket, FCM or audit payload
+
+See ADR-041.
+
 ## V2 Checkpoint 10: V2 production verification
 
 **Goal:** A focused final regression pass across all V2 business rules, tenant isolation, concurrency, migrations, and cross-app compatibility — no unnecessary new tests, final build/typecheck/lint verification across all three apps.

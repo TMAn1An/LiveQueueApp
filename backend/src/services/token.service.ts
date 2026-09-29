@@ -784,11 +784,19 @@ function toCustomerView(
    * beside the customer's when they differ. A fact about the queue, never
    * derived from the device reading it. */
   queueTimezone: string | null = null,
+  /** ADR-041: whether this token's queue uses the service-start code — the
+   * only thing the customer app needs to decide whether to show the code
+   * card. Never the code, its ciphertext, expiry or attempt count. Exposed
+   * as `serviceStartVerificationRequired` rather than the column name: token
+   * responses are guarded against any key mentioning "otp" (ADR-029's leak
+   * test), and a derived yes/no has no business weakening that guard. */
+  serviceStartVerificationRequired = true,
 ) {
   return {
     id: token.id,
     queueId: token.queueId,
     queueTimezone,
+    serviceStartVerificationRequired,
     /// LEGACY — the first selected service, kept for an old mobile client
     /// still parsing this field directly (V2 Checkpoint 5, ADR-027).
     serviceId: token.serviceId,
@@ -832,11 +840,22 @@ export async function getTokenCustomerView(tokenId: string) {
     include: {
       counter: true,
       ...TOKEN_SERVICES_INCLUDE,
-      queue: { select: { timezone: true, organization: { select: { timezone: true } } } },
+      queue: {
+        select: {
+          timezone: true,
+          requireServiceStartOtp: true,
+          organization: { select: { timezone: true } },
+        },
+      },
     },
   });
   const computed = await computeComputedFields(token);
-  return toCustomerView(token, computed, resolveQueueTimezone(token.queue, token.queue.organization));
+  return toCustomerView(
+    token,
+    computed,
+    resolveQueueTimezone(token.queue, token.queue.organization),
+    token.queue.requireServiceStartOtp,
+  );
 }
 
 /**
@@ -864,7 +883,11 @@ export async function getTokenStaffView(tokenId: string) {
 export async function getToken(tokenId: string, auth?: AuthContext) {
   const token = await prisma.token.findUnique({
     where: { id: tokenId },
-    include: { counter: true, ...TOKEN_SERVICES_INCLUDE },
+    include: {
+      counter: true,
+      ...TOKEN_SERVICES_INCLUDE,
+      queue: { select: { requireServiceStartOtp: true } },
+    },
   });
   if (!token) {
     throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
@@ -872,10 +895,13 @@ export async function getToken(tokenId: string, auth?: AuthContext) {
 
   const computed = await computeComputedFields(token);
 
+  // The queue relation was loaded only for the flag; it never rides along
+  // in either response shape.
+  const { queue, ...tokenRow } = token;
   if (auth && auth.organizationId === token.organizationId) {
-    return toStaffView(token, computed);
+    return toStaffView(tokenRow, computed);
   }
-  return toCustomerView(token, computed);
+  return toCustomerView(tokenRow, computed, null, queue.requireServiceStartOtp);
 }
 
 export async function getTokenStatus(tokenId: string) {
@@ -961,10 +987,9 @@ export async function callToken(organizationId: string, tokenId: string, counter
     }
 
     // V2 Checkpoint 7 (ADR-029): every legitimate entry into CALLED gets a
-    // brand new service-start verification code.
-    const otpCode = generateOtpCode();
-    const otpCipher = encryptOtpCode(tokenId, otpCode);
-    const otpExpiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60_000);
+    // brand new service-start verification code — when the queue uses one
+    // (ADR-041). A queue that does not gets no code at all.
+    const requiresCode = await readRequireServiceStartOtp(tx, token.queueId);
 
     const result = await tx.token.updateMany({
       where: { id: tokenId, status: token.status },
@@ -972,19 +997,17 @@ export async function callToken(organizationId: string, tokenId: string, counter
         status: 'CALLED',
         counterId,
         calledAt: new Date(),
-        serviceStartOtpCipher: otpCipher,
-        serviceStartOtpExpiresAt: otpExpiresAt,
-        serviceStartOtpFailedAttempts: 0,
+        ...serviceStartCodeFields(tokenId, requiresCode),
       },
     });
     if (result.count === 0) {
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
     }
 
-    // otpCode itself is deliberately discarded here, never returned — this
-    // function's caller is staff (the one clicking Call), who must
-    // never be able to read the code (checkpoint section 20). The customer
-    // retrieves it separately and directly via
+    // The code itself is deliberately discarded (see serviceStartCodeFields),
+    // never returned — this function's caller is staff (the one clicking
+    // Call), who must never be able to read the code (checkpoint section 20).
+    // The customer retrieves it separately and directly via
     // getServiceStartVerificationCode, ownership-checked against their own
     // device.
     const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
@@ -1114,8 +1137,8 @@ type TimestampField = 'completedAt' | 'skippedAt';
  * (compare-and-swap) UPDATE as the concurrency-safety net — two racing
  * requests against the same token can only have one succeed.
  *
- * V2 Checkpoint 7: CALLED -> IN_PROGRESS moved out to startTokenWithOtp
- * below (it now requires a verified code, not just a valid source status),
+ * V2 Checkpoint 7: CALLED -> IN_PROGRESS moved out to startToken below (it
+ * can require a verified code, not just a valid source status),
  * so this helper no longer handles `startedAt` — it remains the shared
  * implementation for exactly the two transitions that still need nothing
  * beyond "is this transition legal, apply it atomically."
@@ -1208,14 +1231,35 @@ export const skipToken = (organizationId: string, tokenId: string) =>
  * ordered checks (code issued? not expired? attempts remaining?) before the
  * same compare-and-swap pattern applies, and a wrong-code attempt must
  * itself durably record the failed attempt without transitioning anything.
+ *
+ * ADR-041: the code is required only while the token's queue says so, and
+ * the queue's *current* value decides. A queue that does not use the code
+ * starts the CALLED token directly — any code left over from before the
+ * setting was turned off is ignored and cleared, never demanded.
  */
-export async function startTokenWithOtp(
+export async function startToken(
   organizationId: string,
   tokenId: string,
-  verificationCode: string,
+  verificationCode: string | undefined,
 ) {
   const token = await findTokenScoped(organizationId, tokenId);
   assertValidTransition(token.status, 'IN_PROGRESS');
+
+  const queue = await prisma.queue.findUniqueOrThrow({
+    where: { id: token.queueId },
+    select: { requireServiceStartOtp: true },
+  });
+  if (!queue.requireServiceStartOtp) {
+    return startWithoutVerification(tokenId, token.status);
+  }
+
+  if (!verificationCode) {
+    throw new AppError(
+      422,
+      'SERVICE_START_VERIFICATION_REQUIRED',
+      "This queue requires the customer's verification code to start service.",
+    );
+  }
 
   if (!token.serviceStartOtpCipher || !token.serviceStartOtpExpiresAt) {
     throw new AppError(
@@ -1304,6 +1348,47 @@ export async function startTokenWithOtp(
 }
 
 /**
+ * ADR-041: CALLED -> IN_PROGRESS for a queue that does not use the
+ * service-start code. The queue condition sits inside the same conditional
+ * UPDATE as the status check, so a concurrent switch back ON can never let
+ * one unverified start through: either this statement sees the old setting,
+ * or it matches nothing and is refused below.
+ */
+async function startWithoutVerification(tokenId: string, previousStatus: TokenStatus) {
+  const result = await prisma.token.updateMany({
+    where: { id: tokenId, status: 'CALLED', queue: { requireServiceStartOtp: false } },
+    data: {
+      status: 'IN_PROGRESS',
+      startedAt: new Date(),
+      serviceStartOtpCipher: null,
+      serviceStartOtpExpiresAt: null,
+      serviceStartOtpFailedAttempts: 0,
+    },
+  });
+  if (result.count === 0) {
+    const fresh = await prisma.token.findUnique({
+      where: { id: tokenId },
+      select: { status: true, queue: { select: { requireServiceStartOtp: true } } },
+    });
+    if (fresh?.status === 'CALLED' && fresh.queue.requireServiceStartOtp) {
+      throw new AppError(
+        422,
+        'SERVICE_START_VERIFICATION_REQUIRED',
+        "This queue requires the customer's verification code to start service.",
+      );
+    }
+    throw new AppError(
+      409,
+      'TOKEN_STATE_CHANGED',
+      'Token state changed concurrently. Please retry.',
+    );
+  }
+
+  const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
+  return { token: omitInternalFields(updated), previousStatus };
+}
+
+/**
  * V2 Checkpoint 7 (ADR-029): customer-initiated cancellation. Ownership is
  * established the same way the pre-existing notification-preferences
  * customer write does (ADR-011/Phase 7 Step 7) — there is no device
@@ -1317,7 +1402,7 @@ export async function startTokenWithOtp(
  * (compare-and-swap) UPDATE pattern used everywhere else in this file — the
  * WHERE clause's status match against the freshly-read status is what makes
  * a concurrent cancel-vs-start race resolve to exactly one winner, without
- * any new locking mechanism (see startTokenWithOtp's matching comment).
+ * any new locking mechanism (see startToken's matching comment).
  */
 export async function cancelToken(tokenId: string, deviceIdentifier: string) {
   const device = await prisma.device.findUnique({ where: { deviceIdentifier } });
@@ -1366,6 +1451,19 @@ export async function cancelToken(tokenId: string, deviceIdentifier: string) {
   });
 }
 
+/** ADR-041: a queue that does not use the service-start code has none to
+ * show and none to reissue. Checked after ownership, so it reveals nothing
+ * to a device that does not own the token. */
+function assertQueueUsesServiceStartCode(requireServiceStartOtp: boolean): void {
+  if (!requireServiceStartOtp) {
+    throw new AppError(
+      409,
+      'SERVICE_START_VERIFICATION_NOT_REQUIRED',
+      'This queue does not use a verification code to start service.',
+    );
+  }
+}
+
 /**
  * V2 Checkpoint 7 (ADR-029): the customer's own read of the currently
  * active verification code — the ONLY path anywhere in the backend that
@@ -1386,7 +1484,10 @@ export async function getServiceStartVerificationCode(tokenId: string, deviceIde
     throw new AppError(404, 'DEVICE_NOT_FOUND', 'Device not found.');
   }
 
-  const token = await prisma.token.findUnique({ where: { id: tokenId } });
+  const token = await prisma.token.findUnique({
+    where: { id: tokenId },
+    include: { queue: { select: { requireServiceStartOtp: true } } },
+  });
   if (!token || token.deviceId !== device.id) {
     throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
   }
@@ -1397,6 +1498,7 @@ export async function getServiceStartVerificationCode(tokenId: string, deviceIde
       'A verification code is only available while this token is CALLED.',
     );
   }
+  assertQueueUsesServiceStartCode(token.queue.requireServiceStartOtp);
   if (!token.serviceStartOtpCipher || !token.serviceStartOtpExpiresAt || token.serviceStartOtpExpiresAt.getTime() < Date.now()) {
     throw new AppError(
       410,
@@ -1436,7 +1538,10 @@ export async function reissueServiceStartVerificationCode(tokenId: string, devic
     throw new AppError(404, 'DEVICE_NOT_FOUND', 'Device not found.');
   }
 
-  const token = await prisma.token.findUnique({ where: { id: tokenId } });
+  const token = await prisma.token.findUnique({
+    where: { id: tokenId },
+    include: { queue: { select: { requireServiceStartOtp: true } } },
+  });
   if (!token || token.deviceId !== device.id) {
     throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
   }
@@ -1447,6 +1552,8 @@ export async function reissueServiceStartVerificationCode(tokenId: string, devic
       'A verification code can only be reissued while this token is CALLED.',
     );
   }
+  // ADR-041: a queue without the code never mints one, even on request.
+  assertQueueUsesServiceStartCode(token.queue.requireServiceStartOtp);
 
   const code = generateOtpCode();
   const cipher = encryptOtpCode(tokenId, code);
@@ -1514,11 +1621,95 @@ export async function nextToken(organizationId: string, queueId: string, counter
       throw new AppError(404, 'NO_ELIGIBLE_TOKENS', 'No eligible waiting tokens.');
     }
 
-    return tx.token.update({
+    // ADR-041: /next enters CALLED exactly like /call, so it issues the
+    // service-start code on the same terms. Before this it issued none, which
+    // left a code-requiring queue's token waiting on a customer reissue.
+    const requiresCode = await readRequireServiceStartOtp(tx, queueId);
+
+    const updated = await tx.token.update({
       where: { id: eligible.id },
-      data: { status: 'CALLED', counterId, calledAt: new Date() },
+      data: {
+        status: 'CALLED',
+        counterId,
+        calledAt: new Date(),
+        ...serviceStartCodeFields(eligible.id, requiresCode),
+      },
     });
+    // Staff response: the cipher must never leave, same as every other path.
+    return omitInternalFields(updated);
   });
+}
+
+/**
+ * ADR-041: the queue's current service-start verification setting, read
+ * under a share lock. A concurrent settings change takes the row's write
+ * lock, so this either sees the change or finishes before it — and the
+ * settings change issues codes for tokens already CALLED once it commits
+ * (issueServiceStartCodesForCalledTokens). Either order leaves every CALLED
+ * token on a code-requiring queue holding a code.
+ */
+async function readRequireServiceStartOtp(
+  tx: Prisma.TransactionClient,
+  queueId: string,
+): Promise<boolean> {
+  const rows = await tx.$queryRaw<{ require_service_start_otp: boolean }[]>`
+    SELECT require_service_start_otp FROM queues WHERE id = ${queueId} FOR SHARE
+  `;
+  // A missing row cannot happen for a token's own queue; failing closed keeps
+  // the verified flow rather than silently skipping it.
+  return rows[0]?.require_service_start_otp ?? true;
+}
+
+/**
+ * The code columns for a token entering CALLED. A queue that does not use
+ * the code stores none — no ciphertext, no expiry — so nothing unnecessary is
+ * generated, kept, or ever at risk of being read back.
+ */
+function serviceStartCodeFields(tokenId: string, requiresCode: boolean) {
+  if (!requiresCode) {
+    return {
+      serviceStartOtpCipher: null,
+      serviceStartOtpExpiresAt: null,
+      serviceStartOtpFailedAttempts: 0,
+    };
+  }
+  return {
+    serviceStartOtpCipher: encryptOtpCode(tokenId, generateOtpCode()),
+    serviceStartOtpExpiresAt: new Date(Date.now() + OTP_EXPIRY_MINUTES * 60_000),
+    serviceStartOtpFailedAttempts: 0,
+  };
+}
+
+/**
+ * ADR-041: when a queue turns the service-start code ON, every token already
+ * CALLED there gets a fresh code at once, in the same transaction as the
+ * setting change — so no customer at a counter is left needing a code that
+ * was never issued. Called only from queue.service.ts::updateQueue.
+ */
+export async function issueServiceStartCodesForCalledTokens(
+  tx: Prisma.TransactionClient,
+  queueId: string,
+): Promise<void> {
+  const called = await tx.token.findMany({
+    where: { queueId, status: 'CALLED' },
+    select: { id: true },
+  });
+  for (const { id } of called) {
+    await tx.token.updateMany({
+      where: { id, status: 'CALLED' },
+      data: serviceStartCodeFields(id, true),
+    });
+  }
+}
+
+/** Tokens currently CALLED in a queue — the customers whose Live Tracking
+ * screen changes when the queue's service-start setting does. */
+export async function listCalledTokenIds(queueId: string): Promise<string[]> {
+  const rows = await prisma.token.findMany({
+    where: { queueId, status: 'CALLED' },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id);
 }
 
 /**

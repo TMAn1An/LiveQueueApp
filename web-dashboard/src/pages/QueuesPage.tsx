@@ -10,6 +10,11 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { SearchInput } from '../components/SearchInput';
+import { Switch } from '../components/Switch';
+import {
+  SERVICE_START_VERIFICATION_HELP,
+  SERVICE_START_VERIFICATION_LABEL,
+} from '../components/ServiceStartVerificationSetting';
 import { ApiError } from '../api/client';
 import type { Queue, QueueStatus } from '../types/queue';
 
@@ -18,12 +23,19 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState('');
   const [tokenPrefix, setTokenPrefix] = useState('A');
   const [allowMultipleServices, setAllowMultipleServices] = useState(true);
+  // ADR-041: on by default — the creator turns it off deliberately.
+  const [requireServiceStartOtp, setRequireServiceStartOtp] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit() {
     setError(null);
     try {
-      await createQueue.mutateAsync({ name, tokenPrefix, allowMultipleServices });
+      await createQueue.mutateAsync({
+        name,
+        tokenPrefix,
+        allowMultipleServices,
+        requireServiceStartOtp,
+      });
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to create queue.');
@@ -65,6 +77,13 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
             </span>
           </span>
         </label>
+        <Switch
+          id="create-queue-service-start-verification"
+          checked={requireServiceStartOtp}
+          onChange={setRequireServiceStartOtp}
+          label={SERVICE_START_VERIFICATION_LABEL}
+          description={SERVICE_START_VERIFICATION_HELP}
+        />
       </div>
       {/* ADR-034: limiting repeat visits now requires choosing what
           identifies a customer — usually one of this queue's form questions,

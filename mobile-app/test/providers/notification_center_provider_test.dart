@@ -15,8 +15,11 @@ LiveQueueToken _token({
   String? completedAt,
   String? skippedAt,
   String? cancelledAt,
+  bool? serviceStartVerificationRequired,
+  Map<String, dynamic>? counter,
 }) =>
     LiveQueueToken.fromJson({
+      'serviceStartVerificationRequired': ?serviceStartVerificationRequired,
       'id': id,
       'queueId': 'queue-1',
       'serviceId': 'service-1',
@@ -25,7 +28,7 @@ LiveQueueToken _token({
       'formData': <String, dynamic>{},
       'position': 1,
       'estimatedWaitMinutes': 5,
-      'counter': null,
+      'counter': counter,
       'createdAt': DateTime.utc(2026, 1, 1).toIso8601String(),
       'calledAt': calledAt,
       'startedAt': null,
@@ -93,6 +96,54 @@ void main() {
       expect(entry.body, contains('verification code is ready'));
       // Never the digits themselves — only ever that a code exists.
       expect(entry.body, isNot(matches(RegExp(r'\d{4,}'))));
+    });
+
+    test('ADR-041: CALLED on a queue that requires the code still says the code is ready', () {
+      final provider = _provider();
+      provider.recordStatusChange(
+        _token(
+          status: 'CALLED',
+          calledAt: '2026-01-01T10:00:00.000Z',
+          serviceStartVerificationRequired: true,
+        ),
+        queueName: 'Pharmacy',
+      );
+
+      expect(provider.notifications.single.body, contains('verification code is ready'));
+    });
+
+    test('ADR-041: CALLED on a queue without the code never mentions one — it names the counter', () {
+      final provider = _provider();
+      provider.recordStatusChange(
+        _token(
+          status: 'CALLED',
+          calledAt: '2026-01-01T10:00:00.000Z',
+          serviceStartVerificationRequired: false,
+          counter: {'id': 'c1', 'name': 'Counter 2'},
+        ),
+        queueName: 'Pharmacy',
+      );
+
+      final entry = provider.notifications.single;
+      expect(entry.title, 'Your token was called');
+      expect(entry.body, isNot(contains('code')));
+      expect(entry.body, contains('please go to Counter 2'));
+    });
+
+    test('ADR-041: without the code and without a counter name, it just says to proceed', () {
+      final provider = _provider();
+      provider.recordStatusChange(
+        _token(
+          status: 'CALLED',
+          calledAt: '2026-01-01T10:00:00.000Z',
+          serviceStartVerificationRequired: false,
+        ),
+        queueName: 'Pharmacy',
+      );
+
+      final body = provider.notifications.single.body;
+      expect(body, isNot(contains('code')));
+      expect(body, contains('please proceed'));
     });
 
     test('WAITING produces no entry — nothing new to announce', () {
