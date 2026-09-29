@@ -106,6 +106,10 @@ class ActiveTokenProvider extends ChangeNotifier {
           queueName: existing.queueName,
           status: token.status,
           lastKnownUpdatedAt: DateTime.now(),
+          // Phase 1 (ADR-043): re-derived fresh from this resync every time,
+          // so a counter from a visit that has since moved on can never
+          // linger — explicit, not `token.counter?.name ?? existing.counterName`.
+          counterName: token.counter?.name,
         );
         _tokens = [..._tokens.where((t) => t.tokenId != tokenId), updated];
         await _storage.upsert(updated);
@@ -171,7 +175,11 @@ class ActiveTokenProvider extends ChangeNotifier {
       return;
     }
 
-    final updated = existing.copyWith(status: token.status, lastKnownUpdatedAt: DateTime.now());
+    final updated = existing.copyWith(
+      status: token.status,
+      lastKnownUpdatedAt: DateTime.now(),
+      counterName: token.counter?.name,
+    );
     _tokens = [..._tokens.where((t) => t.tokenId != token.id), updated];
     await _storage.upsert(updated);
     notifyListeners();

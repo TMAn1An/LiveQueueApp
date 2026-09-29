@@ -267,6 +267,31 @@ describe('Issue #5 — token status-change FCM notifications', () => {
     expect(fcmRow).toBeNull();
   });
 
+  it('Phase 1 (ADR-043): CALLED FCM body names the actual counter, not a generic phrase', async () => {
+    const setup = await setupToken();
+    const counter = await prisma.counter.findUniqueOrThrow({ where: { id: setup.counterId } });
+    const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
+
+    const res = await callToken(setup);
+
+    expect(res.status).toBe(200);
+    const calls = await waitForCallCount(send, 1);
+    expect(calls[0]![1].body).toContain(counter.name);
+    expect(calls[0]![1].body).not.toContain('the counter');
+  });
+
+  it('Phase 1 (ADR-043): /next FCM body also names the counter, not just /call', async () => {
+    const setup = await setupToken();
+    const counter = await prisma.counter.findUniqueOrThrow({ where: { id: setup.counterId } });
+    const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
+
+    const res = await nextToken(setup);
+
+    expect(res.status).toBe(200);
+    const calls = await waitForCallCount(send, 1);
+    expect(calls[0]![1].body).toContain(counter.name);
+  });
+
   it('does not send FCM when the request is invalid (state transition rejected)', async () => {
     const setup = await setupToken();
     const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });

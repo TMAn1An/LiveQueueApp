@@ -26,6 +26,7 @@ Map<String, dynamic> _tokenJson({
   String queueId = 'queue-1',
   String status = 'WAITING',
   String serial = 'A023',
+  Map<String, dynamic>? counter,
 }) =>
     {
       'id': id,
@@ -36,7 +37,7 @@ Map<String, dynamic> _tokenJson({
       'formData': <String, dynamic>{},
       'position': 3,
       'estimatedWaitMinutes': 12,
-      'counter': null,
+      'counter': counter,
       'createdAt': DateTime.utc(2026, 9, 9).toIso8601String(),
       'calledAt': null,
       'startedAt': null,
@@ -309,6 +310,47 @@ void main() {
     await reopened.restore();
     expect(reopened.summaryFor('token-a'), isNull);
     expect(reopened.summaryFor('token-b'), isNotNull);
+  });
+
+  group('Phase 1 (ADR-043) — which counter a CALLED token summary points to', () {
+    test('resyncOne picks up the counter name from a CALLED token', () async {
+      final provider = _build(MockClient(
+        (_) async => _ok(_tokenJson(status: 'CALLED', counter: {'id': 'c1', 'name': 'Counter 3'})),
+      ));
+      await provider.remember(_token(status: 'WAITING'), queueName: 'Pharmacy');
+
+      await provider.resyncOne('token-1');
+
+      expect(provider.summaryFor('token-1')!.counterName, 'Counter 3');
+    });
+
+    test('WAITING has no counter to show, even if one was somehow present in the response', () async {
+      // Defensive: the backend never actually sends a counter for a WAITING
+      // token, but the summary must not surface one even if it did.
+      final provider = _build(MockClient(
+        (_) async => _ok(_tokenJson(status: 'WAITING')),
+      ));
+      await provider.remember(_token(status: 'WAITING'), queueName: 'Pharmacy');
+
+      await provider.resyncOne('token-1');
+
+      expect(provider.summaryFor('token-1')!.counterName, isNull);
+    });
+
+    test('CALLED -> IN_PROGRESS keeps reporting the same counter the customer was sent to',
+        () async {
+      final provider = _build(_byTokenId((_) => _ok(
+            _tokenJson(status: 'IN_PROGRESS', counter: {'id': 'c1', 'name': 'Counter 3'}),
+          )));
+      await provider.remember(
+        _token(status: 'CALLED'),
+        queueName: 'Pharmacy',
+      );
+
+      await provider.resyncOne('token-1');
+
+      expect(provider.summaryFor('token-1')!.counterName, 'Counter 3');
+    });
   });
 
   test('notifies the given callback exactly when a resync finds a genuine status change',

@@ -22,6 +22,7 @@ class ActiveTokenSummary {
     required this.queueName,
     required this.status,
     required this.lastKnownUpdatedAt,
+    this.counterName,
   });
 
   final String tokenId;
@@ -29,6 +30,15 @@ class ActiveTokenSummary {
   final String queueId;
   final String queueName;
   final TokenStatus status;
+
+  /// Phase 1 (ADR-043): which counter to go to, once CALLED — from the
+  /// token's own [LiveQueueToken.counter] relation, never guessed. Null
+  /// while WAITING (nothing to send anyone to yet) and null again once the
+  /// visit ends. [copyWith]'s `counterName` param must therefore support a
+  /// real, explicit null (an ordinary `??` fallback cannot tell "omitted"
+  /// from "clear it") — see the `_unset` sentinel below — so a name from a
+  /// visit that has since ended can never linger and be shown as current.
+  final String? counterName;
 
   /// When this summary was last confirmed against the backend (or first
   /// created, before any resync). Not shown prominently in the UI today;
@@ -43,14 +53,22 @@ class ActiveTokenSummary {
       queueName: queueName,
       status: token.status,
       lastKnownUpdatedAt: DateTime.now(),
+      counterName: token.counter?.name,
     );
   }
+
+  /// Sentinel default for [copyWith]'s `counterName`, so an omitted argument
+  /// (keep the current value) is distinguishable from an explicit `null`
+  /// (clear it) — a plain `?? this.counterName` fallback cannot tell those
+  /// apart, and this field must support both.
+  static const Object _unset = Object();
 
   ActiveTokenSummary copyWith({
     String? serialNumber,
     String? queueName,
     TokenStatus? status,
     DateTime? lastKnownUpdatedAt,
+    Object? counterName = _unset,
   }) {
     return ActiveTokenSummary(
       tokenId: tokenId,
@@ -59,6 +77,7 @@ class ActiveTokenSummary {
       queueName: queueName ?? this.queueName,
       status: status ?? this.status,
       lastKnownUpdatedAt: lastKnownUpdatedAt ?? this.lastKnownUpdatedAt,
+      counterName: identical(counterName, _unset) ? this.counterName : counterName as String?,
     );
   }
 
@@ -69,6 +88,7 @@ class ActiveTokenSummary {
         'queueName': queueName,
         'status': status.name,
         'lastKnownUpdatedAt': lastKnownUpdatedAt.toIso8601String(),
+        if (counterName != null) 'counterName': counterName,
       };
 
   /// Never throws: one corrupt entry in a stored list is skipped by the
@@ -82,6 +102,7 @@ class ActiveTokenSummary {
       status: _statusByName(json['status'] as String?),
       lastKnownUpdatedAt: DateTime.tryParse(json['lastKnownUpdatedAt'] as String? ?? '') ??
           DateTime.fromMillisecondsSinceEpoch(0),
+      counterName: json['counterName'] as String?,
     );
   }
 

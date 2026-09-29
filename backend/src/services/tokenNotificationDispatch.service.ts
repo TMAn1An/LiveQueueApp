@@ -34,13 +34,19 @@ export async function notifyTokenStatusChange(tokenId: string): Promise<void> {
   try {
     const token = await prisma.token.findUnique({
       where: { id: tokenId },
-      select: { id: true, serialNumber: true, status: true, deviceId: true },
+      select: {
+        id: true,
+        serialNumber: true,
+        status: true,
+        deviceId: true,
+        counter: { select: { name: true } },
+      },
     });
     if (!token) {
       return;
     }
 
-    const text = buildNotificationText(token.status, token.serialNumber);
+    const text = buildNotificationText(token.status, token.serialNumber, token.counter?.name ?? null);
     if (!text) {
       // WAITING (and any future non-customer-facing status) has no
       // corresponding push — only the four statuses a customer actually
@@ -81,12 +87,25 @@ interface NotificationText {
   body: string;
 }
 
-function buildNotificationText(status: TokenStatus, serialNumber: string): NotificationText | null {
+function buildNotificationText(
+  status: TokenStatus,
+  serialNumber: string,
+  /** Phase 1 (ADR-043): which counter to report, from the token's own
+   * relation — never guessed, never staff/counter metadata beyond the
+   * customer-safe name. Null for a CALLED token with no usable counter
+   * (should not happen — both Call and Next always set one — but this is
+   * the one push notification a background/terminated app depends on, so it
+   * degrades to the same generic phrasing the mobile app's own local
+   * "turn alert" already falls back to, rather than showing nothing. */
+  counterName: string | null,
+): NotificationText | null {
   switch (status) {
     case 'CALLED':
       return {
         title: 'Your turn is coming',
-        body: `Your token ${serialNumber} has been called. Please go to the counter.`,
+        body: counterName
+          ? `Your token ${serialNumber} has been called. Please go to ${counterName}.`
+          : `Your token ${serialNumber} has been called. Please proceed.`,
       };
     case 'IN_PROGRESS':
       return {

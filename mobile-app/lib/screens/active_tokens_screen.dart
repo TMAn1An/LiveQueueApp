@@ -114,6 +114,11 @@ class _ActiveTokenCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final skipped = summary.status == TokenStatus.skipped;
+    // Phase 1 (ADR-043): a WAITING token has no destination yet — this must
+    // never show a counter it wasn't actually called to (backend-derived
+    // only; never shown for any status but CALLED).
+    final calledToCounter =
+        summary.status == TokenStatus.called ? summary.counterName : null;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -123,10 +128,24 @@ class _ActiveTokenCard extends StatelessWidget {
           color: skipped ? theme.colorScheme.outline : theme.colorScheme.primary,
         ),
         title: Text(summary.serialNumber, style: theme.textTheme.titleMedium),
-        subtitle: Text(
-          [summary.queueName, tokenStatusLabel(summary.status)]
-              .where((p) => p.isNotEmpty)
-              .join(' · '),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              [summary.queueName, tokenStatusLabel(summary.status)]
+                  .where((p) => p.isNotEmpty)
+                  .join(' · '),
+            ),
+            if (summary.status == TokenStatus.called)
+              Text(
+                calledToCounter != null ? 'Please go to $calledToCounter' : 'Please proceed',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+          ],
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => openActiveToken(context, summary.tokenId),

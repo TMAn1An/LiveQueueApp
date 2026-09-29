@@ -136,6 +136,16 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Deployment:** no Render environment change, no deploy, no Play Store action performed by this checkpoint — see ADR-031 for the exact variable list and the future breaking-release procedure (deploy backend → publish app → confirm rollout → raise the minimum version → later remove old compatibility).
 - **Intentionally unchanged:** iOS policy (no iOS build exists yet to protect), any runtime/admin config UI, background re-checks, any later checkpoint — per this checkpoint's own explicit instruction to stop here.
 
+### V2 Customer Called Counter Information (2026-09-30)
+
+**Status: implemented and verified. No migration. Not deployed. See ADR-043.**
+
+- **Almost everything was already wired.** `Token.counterId` has pointed at the actual `Counter` since Checkpoint 3, both Call and Next always set it, and the customer-safe token view already returned `counter: { id, name }` to every REST response and Socket.io payload. Live Tracking, the app's own resync-driven "turn alert" local notification, and the Notification Center entry all already said "please go to Counter 3" correctly.
+- **Found and fixed on the way:** the one backend-initiated FCM push — the only notification a backgrounded or terminated app ever receives — said "Please go to the counter." with no counter name, because its query never selected the relation. It now names the real counter, with the same "Please proceed." fallback the rest of the app already uses.
+- **Home / Active Tokens was the one surface with no representation at all.** `ActiveTokenSummary` gained a `counterName` field, re-derived explicitly from the backend on every resync (never a stale-keeping fallback — an explicit `null` genuinely clears it). The Active Tokens list now shows "Please go to Counter 3" under a CALLED row; a WAITING or terminal row shows nothing. Home's own compact buttons were left as-is — they already route straight into Live Tracking.
+- **Intentionally unchanged:** the FCM `data` payload (still `{type, tokenId, status}` only), the dashboard, and every FCFS/isolation/capacity/service-start-verification rule — this only touched what is displayed after an already-correct decision.
+- **Verification:** backend 771/771 (2 new), typecheck/lint clean; dashboard unchanged at 232/232; mobile 340/340 (5 new), `flutter analyze` clean, debug APK builds.
+
 ### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
 
 **Status: PASS. No code changes required — every V2 checkpoint (1-9) plus every ad-hoc fix through today's skip-reason/completion-feedback work verified together as one system for the first time.**

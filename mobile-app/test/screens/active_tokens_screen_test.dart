@@ -39,6 +39,7 @@ Map<String, dynamic> _tokenJson({
   required String queueId,
   required String serial,
   String status = 'WAITING',
+  Map<String, dynamic>? counter,
 }) =>
     {
       'id': id,
@@ -49,7 +50,7 @@ Map<String, dynamic> _tokenJson({
       'formData': <String, dynamic>{},
       'position': 1,
       'estimatedWaitMinutes': 5,
-      'counter': null,
+      'counter': counter,
       'createdAt': DateTime.utc(2026, 9, 9).toIso8601String(),
       'calledAt': null,
       'startedAt': null,
@@ -188,6 +189,53 @@ void main() {
 
     expect(find.text('A002'), findsNothing);
     expect(find.text('B014'), findsOneWidget);
+  });
+
+  testWidgets('Phase 1 (ADR-043): a CALLED row tells the customer which counter to go to',
+      (tester) async {
+    final apiClient = ApiClient(
+      httpClient: MockClient(
+        (_) async => _ok(_tokenJson(
+          id: 'token-a',
+          queueId: 'queue-a',
+          serial: 'A002',
+          status: 'CALLED',
+          counter: {'id': 'c1', 'name': 'Counter 3'},
+        )),
+      ),
+      baseUrl: 'http://localhost:4000',
+    );
+    final active = _provider(apiClient);
+    await active.remember(
+      LiveQueueToken.fromJson(_tokenJson(id: 'token-a', queueId: 'queue-a', serial: 'A002')),
+      queueName: 'Pharmacy',
+    );
+
+    await tester.pumpWidget(_appUnder(apiClient, active));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Please go to Counter 3'), findsOneWidget);
+  });
+
+  testWidgets('Phase 1 (ADR-043): a WAITING row never claims a counter destination',
+      (tester) async {
+    final apiClient = ApiClient(
+      httpClient: MockClient(
+        (_) async => _ok(_tokenJson(id: 'token-a', queueId: 'queue-a', serial: 'A002', status: 'WAITING')),
+      ),
+      baseUrl: 'http://localhost:4000',
+    );
+    final active = _provider(apiClient);
+    await active.remember(
+      LiveQueueToken.fromJson(_tokenJson(id: 'token-a', queueId: 'queue-a', serial: 'A002')),
+      queueName: 'Pharmacy',
+    );
+
+    await tester.pumpWidget(_appUnder(apiClient, active));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Please go to'), findsNothing);
+    expect(find.textContaining('Please proceed'), findsNothing);
   });
 
   testWidgets('tapping a row opens Live Tracking for that exact token', (tester) async {
