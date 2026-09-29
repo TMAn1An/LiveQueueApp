@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
@@ -40,28 +42,51 @@ import 'services/token_api_service.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_navigation.dart';
 import 'utils/open_active_token.dart';
+import 'widgets/generic_error_widget.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // A build error anywhere in the tree now shows a plain explanation instead
+  // of Flutter's default crash presentation (spec section 25 — no negative
+  // result may be silent). Every expected failure already has its own
+  // specific, safe message; this is only the unexpected-bug fallback.
+  ErrorWidget.builder = (details) {
+    FlutterError.presentError(details);
+    return const GenericErrorWidget();
+  };
 
-  // Firebase/FCM is optional infrastructure — a failure here (network,
-  // misconfiguration) must never stop the rest of the app (REST, Socket.io,
-  // local notifications) from starting. Registered here, early and once,
-  // specifically so the background message handler is live before the app
-  // could plausibly receive a push; FcmService.initialize() (called later,
-  // from SplashScreen) re-checks Firebase.apps before ever calling
-  // initializeApp again, so this is the only place that can fail this way,
-  // not a duplicate-init race with FcmService.
-  try {
-    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  } catch (err) {
-    if (kDebugMode) {
-      debugPrint('Firebase initialization failed (continuing without it): $err');
-    }
-  }
+  runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
 
-  runApp(const LiveQueueApp());
+      // Firebase/FCM is optional infrastructure — a failure here (network,
+      // misconfiguration) must never stop the rest of the app (REST, Socket.io,
+      // local notifications) from starting. Registered here, early and once,
+      // specifically so the background message handler is live before the app
+      // could plausibly receive a push; FcmService.initialize() (called later,
+      // from SplashScreen) re-checks Firebase.apps before ever calling
+      // initializeApp again, so this is the only place that can fail this way,
+      // not a duplicate-init race with FcmService.
+      try {
+        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+        FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      } catch (err) {
+        if (kDebugMode) {
+          debugPrint('Firebase initialization failed (continuing without it): $err');
+        }
+      }
+
+      runApp(const LiveQueueApp());
+    },
+    // Catches whatever a try/catch inside the app didn't — an uncaught
+    // exception in an unawaited Future, for instance. Logged rather than
+    // left to crash the isolate silently; never surfaced to the customer,
+    // since it may not even correspond to anything currently on screen.
+    (error, stack) {
+      if (kDebugMode) {
+        debugPrint('Unhandled async error: $error\n$stack');
+      }
+    },
+  );
 }
 
 /// Composition root: wires services -> repositories -> providers exactly

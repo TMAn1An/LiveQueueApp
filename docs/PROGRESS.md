@@ -179,6 +179,14 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Explicitly deferred: session-aware repeat-visit entitlement (spec item 4H)** — "one completed visit per session" needs a genuinely new restriction type in the hardened repeat-visit/identity-claim engine (ADR-034/035), which this pass deliberately did not reopen. No inert column was added for it; this is real, tracked future work, not a silent gap.
 - **Verification:** backend 771→791/791 (20 new, including the concurrency race tests), typecheck/lint clean, `prisma migrate status` up to date on both databases; dashboard 234→241/241 (7 new), `tsc -b`/`oxlint`/`vite build` clean; mobile 348→351/351 (3 new), `flutter analyze` clean, debug APK builds. No production database was accessed and nothing was deployed.
 
+### V2 Universal Error / Negative Message UX audit (2026-09-30)
+
+**Status: audit complete. Coverage was already essentially complete; one genuine gap found and fixed. See ADR-047.**
+
+- **Audited, not assumed:** backend `AppError`/`errorHandler.ts`, dashboard `ApiError`/`actionErrorMessage`, and mobile `ApiException`/`NetworkException`/`queue_join_provider.dart`'s per-code switch against the full spec checklist (every backend/customer/staff negative-result case it names). All three were already consistent, safe, and complete — every mutation's `onError` already renders a message, every join-failure code (including all six new Phase-4 `SCHEDULE_*` codes) already has specific customer-safe copy, and no swallowed promise rejection or console-only failure was found anywhere in either frontend. None of that was touched or refactored.
+- **The one genuine gap: no top-level crash boundary in either frontend.** An uncaught render/build error (a real bug, not an API failure) had nothing catching it — React would unmount the dashboard to a blank page, and Flutter's default `ErrorWidget` has no safe release-mode fallback wired up. Both are now last-resort-only: `web-dashboard/src/components/ErrorBoundary.tsx` wraps `<App />`, and `mobile-app/lib/widgets/generic_error_widget.dart` is installed via `ErrorWidget.builder` with `runApp` inside `runZonedGuarded` in `main.dart`. Neither reroutes any existing, already-correct error path.
+- **Verification:** dashboard 241→243/243 (2 new), `tsc -b`/`oxlint`/`vite build` clean (same 4 pre-existing warnings). Mobile 351→352/352 (1 new), `flutter analyze` clean (same 26 pre-existing hints), debug APK builds. Backend untouched, not re-run (baseline 791/791 unaffected). No production database was accessed and nothing was deployed.
+
 ### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
 
 **Status: PASS. No code changes required — every V2 checkpoint (1-9) plus every ad-hoc fix through today's skip-reason/completion-feedback work verified together as one system for the first time.**
