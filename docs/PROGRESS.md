@@ -176,7 +176,7 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **The assignment is fixed at creation and snapshotted** (`Token.assignedSessionStartMinute`/`EndMinute`) — editing or deleting the session afterward changes nothing about a token that already holds it. The customer-facing view exposes `assignedSession: {startMinute, endMinute} | null`, never the internal session id.
 - **Dashboard:** a new "Schedule & Availability" section on Queue Settings — enable switch, daily capacity, customer-visibility toggle, and a per-weekday session list with add/edit/remove, following the existing Repeat Visits / Services editing conventions. The public pre-join queue-config endpoint also gained a `schedule` block so the app can show "closed today" / "opens at 09:00" / today's hours before the join form ever opens — capacity is deliberately never previewed there, since only the actual join attempt can be authoritative.
 - **Mobile:** the schedule-closed message and today's hours appear on the queue-details screen (same place the repeat-visit/identity notices already live); the assigned session is shown once on the confirmation screen; all six new `SCHEDULE_*` join-failure codes pass the backend's own specific message straight through.
-- **Explicitly deferred: session-aware repeat-visit entitlement (spec item 4H)** — "one completed visit per session" needs a genuinely new restriction type in the hardened repeat-visit/identity-claim engine (ADR-034/035), which this pass deliberately did not reopen. No inert column was added for it; this is real, tracked future work, not a silent gap.
+- *(Delivered 2026-10-01 — see "V2 Session-Aware Repeat Entitlement" above and ADR-049.)* **Explicitly deferred: session-aware repeat-visit entitlement (spec item 4H)** — "one completed visit per session" needs a genuinely new restriction type in the hardened repeat-visit/identity-claim engine (ADR-034/035), which this pass deliberately did not reopen. No inert column was added for it; this is real, tracked future work, not a silent gap.
 - **Verification:** backend 771→791/791 (20 new, including the concurrency race tests), typecheck/lint clean, `prisma migrate status` up to date on both databases; dashboard 234→241/241 (7 new), `tsc -b`/`oxlint`/`vite build` clean; mobile 348→351/351 (3 new), `flutter analyze` clean, debug APK builds. No production database was accessed and nothing was deployed.
 
 ### V2 Universal Error / Negative Message UX audit (2026-09-30)
@@ -206,6 +206,17 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Clients:** mobile shows "Scheduled for 14:00–17:00" (Live Tracking + confirmation) and lets customers continue before the next session (`schedule.acceptingJoins`); the dashboard shows "Scheduled" plus the session window on the row, and the schedule editor explains the rule.
 - **Found and fixed on the way:** raw-SQL `Date` parameters are bound as `timestamptz` and compared against Prisma's zone-less columns through the DB session timezone — the new gates use `AT TIME ZONE 'UTC'` so they are correct on any server.
 - **Verification:** backend typecheck/lint clean, 23 new tests in `queueSchedule.futureSession.test.ts` (incl. concurrent final-slot and daily-cap races, DST start instant); dashboard 245/245; mobile 357/357, analyze unchanged (26 pre-existing infos).
+
+### V2 Session-Aware Repeat Entitlement (2026-10-01)
+
+**Status: implemented and verified. One additive migration (`20260930181856_add_repeat_restriction_scope`). Not deployed. See ADR-049. Closes the item the schedule work deferred (spec 4H).**
+
+- **New queue setting "Repeat restriction scope": Entire queue (default — every existing queue, behaviour unchanged) or Per session.** Per session: a completed visit uses up the allowance only for that *session occurrence* — weekly session id + local date, never the weekly row alone — so morning → afternoon is allowed, next week's same session is allowed, and a second visit in the same occurrence is refused under the configured window.
+- **Active-duplicate prevention unchanged** (any active token for the identity anywhere in the queue still blocks); SKIPPED/CANCELLED never consume; COMPLETED consumes against its scope. A recorded claim keeps the scope it was taken under.
+- **Assignment is entitlement-aware:** a customer who already used the open morning session is placed in the afternoon rather than refused; if only used-up sessions have room they get the accurate repeat refusal, not "full".
+- **Per session requires the weekly schedule** — enabling it without one, or turning the schedule off while it is selected, is refused (`REPEAT_SCOPE_REQUIRES_SCHEDULE`).
+- **Clients:** dashboard scope control with helper text (disabled while the schedule is off); the app words the notice and the refusal per session.
+- **Verification:** 20 new backend tests across all three identity modes and cross-organization isolation; dashboard 251/251; mobile 359/359.
 
 ### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
 

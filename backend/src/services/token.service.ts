@@ -4,6 +4,7 @@ import type {
   Queue,
   QueueFormField,
   RepeatIdentityMode,
+  RepeatRestrictionScope,
   RepeatRestrictionType,
   RepeatRestrictionUnit,
   Token,
@@ -35,7 +36,7 @@ import {
   repeatPolicyHelpers,
   resolveQueueTimezone,
 } from './queueIdentityPolicy.service';
-import { assignSessionForNewToken } from './queueSchedule.service';
+import { assignSessionForNewToken, sessionOccurrenceScopeKey } from './queueSchedule.service';
 import type { AuthContext } from '../utils/authContext';
 import {
   decryptOtpCode,
@@ -71,6 +72,9 @@ interface ResolvedCustomerIdentity {
   /** The queue's window, carried through so a rejection can say when the
    * customer may come back and settlement can compute it (ADR-035). */
   window: RepeatWindow;
+  /** ADR-049: whether a completed visit spends the whole queue's allowance
+   * or only the assigned session occurrence's. */
+  scope: RepeatRestrictionScope;
 }
 
 function resolveCustomerIdentity(
@@ -78,6 +82,7 @@ function resolveCustomerIdentity(
     Queue,
     | 'id'
     | 'allowRepeatVisits'
+    | 'repeatRestrictionScope'
     | 'repeatRestrictionType'
     | 'repeatRestrictionAmount'
     | 'repeatRestrictionUnit'
@@ -182,8 +187,15 @@ function resolveCustomerIdentity(
       unit: requirements.restrictionUnit,
       until: requirements.restrictionUntil,
     },
+    scope: requirements.restrictionScope ?? 'QUEUE',
   };
 }
+
+/**
+ * ADR-049: the scope key every queue-wide claim carries (and every claim
+ * taken before scopes existed — the column defaults to it).
+ */
+const QUEUE_ENTITLEMENT_SCOPE_KEY = 'QUEUE';
 
 export interface CreateTokenInput {
   queueId: string;
@@ -248,6 +260,7 @@ const INTERNAL_FIELD_NAMES = [
   'identityFingerprint',
   'identityPeriodKey',
   'identityMode',
+  'identityScopeKey',
 ] as const;
 
 /**
@@ -552,9 +565,23 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
           dailyCapacity: queue.scheduleDailyCapacity,
           moment: resolveLocalMoment(new Date(), scheduleTimezone),
           timezone: scheduleTimezone,
+          spentOccurrenceKeys:
+            identity?.scope === 'SESSION'
+              ? await spentSessionOccurrenceKeys(tx, input.queueId, identity.fingerprint)
+              : undefined,
         })
       : null;
 
+    // ADR-049: which entitlement this join spends, decided from the session
+    // it was just assigned to. A per-session queue with no assignment cannot
+    // arise through configuration (SESSION requires the schedule); if it ever
+    // did, the join falls back to the stricter queue-wide scope rather than
+    // to no restriction at all.
+    const occurrenceScopeKey = sessionAssignment
+      ? sessionOccurrenceScopeKey(sessionAssignment.queueSessionId, sessionAssignment.assignedSessionDate)
+      : null;
+    const claimScopeKey =
+      identity?.scope === 'SESSION' && occurrenceScopeKey ? occurrenceScopeKey : QUEUE_ENTITLEMENT_SCOPE_KEY;
 
     const sequenceNumber = lockedQueue.nextTokenNumber;
     await tx.queue.update({
@@ -588,6 +615,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         // effect the way the dashboard says it does.
         identityFingerprint: identity?.fingerprint ?? null,
         identityMode: identity?.mode ?? null,
+        identityScopeKey: identity ? claimScopeKey : null,
         // Phase 4: fixed at creation, never reassigned — see Token's own
         // schema doc comment for why the start/end minutes are snapshotted
         // rather than only referenced live through queueSessionId.
@@ -606,6 +634,8 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         queueId: input.queueId,
         tokenId: token.id,
         identity,
+        occurrenceScopeKey,
+        claimScopeKey,
       });
     }
 
@@ -1921,7 +1951,14 @@ export async function setRequiredDuration(
 
 /** Wording a customer can act on, without implying their phone or device is
  * blocked — it is the visit that is spent, not the equipment. */
-function repeatRejectionMessage(restrictionEndsAt: Date | null): string {
+function repeatRejectionMessage(restrictionEndsAt: Date | null, scope: 'QUEUE' | 'SESSION' = 'QUEUE'): string {
+  // ADR-049: a per-session allowance is spent only for that session, so the
+  // customer is told a later session is still open to them.
+  if (scope === 'SESSION') {
+    return restrictionEndsAt
+      ? 'You have already been served in this session. You can join again after the time shown, or in another session.'
+      : 'You have already been served in this session. You can join again in another session.';
+  }
   if (!restrictionEndsAt) {
     return 'You have already used this queue, and it can only be used once.';
   }
@@ -2021,6 +2058,7 @@ async function settleIdentityClaim(
       status: 'CONSUMED',
       consumedAt,
       eligibleAgainAt,
+      entitlementScopeKey: snapshot.scopeKey,
       tokenId,
     },
   });
@@ -2057,39 +2095,87 @@ function eligibilityAfterVisit(
   );
 }
 
+/**
+ * ADR-049: the session occurrences this identity may not rejoin right now —
+ * live CONSUMED session-scoped claims whose wait has not ended. Read under the
+ * same queue-row lock as the claim itself, so it cannot go stale before the
+ * token is created. Used only to steer assignment; the claim step below
+ * remains the enforcement.
+ */
+async function spentSessionOccurrenceKeys(
+  tx: Prisma.TransactionClient,
+  queueId: string,
+  identityFingerprint: string,
+): Promise<Set<string>> {
+  const claims = await tx.queueIdentityClaim.findMany({
+    where: {
+      queueId,
+      identityFingerprint,
+      supersededAt: null,
+      status: 'CONSUMED',
+      entitlementScopeKey: { startsWith: 'SESSION:' },
+      OR: [{ eligibleAgainAt: null }, { eligibleAgainAt: { gt: new Date() } }],
+    },
+    select: { entitlementScopeKey: true },
+  });
+  return new Set(claims.map((claim) => claim.entitlementScopeKey));
+}
+
 const IDENTITY_SNAPSHOT_SELECT = {
   identityFingerprint: true,
   identityMode: true,
+  identityScopeKey: true,
 } as const;
 
 interface TokenIdentitySnapshot {
   fingerprint: string;
   mode: RepeatIdentityMode;
+  /** ADR-049: the entitlement scope the join was admitted under. */
+  scopeKey: string;
 }
 
 /** The identity a token was admitted under, or null for a token on an
  * unrestricted queue. All three columns are written together at join time, so
  * a partial snapshot is not a state this can produce — it is treated as
- * "no identity" rather than guessed at. */
+ * "no identity" rather than guessed at. A token from before ADR-049 has no
+ * scope key; its claim was queue-wide, which is what the default says. */
 function identitySnapshotOf(token: {
   identityFingerprint: string | null;
   identityMode: RepeatIdentityMode | null;
+  identityScopeKey: string | null;
 }): TokenIdentitySnapshot | null {
   if (!token.identityFingerprint || !token.identityMode) {
     return null;
   }
-  return { fingerprint: token.identityFingerprint, mode: token.identityMode };
+  return {
+    fingerprint: token.identityFingerprint,
+    mode: token.identityMode,
+    scopeKey: token.identityScopeKey ?? QUEUE_ENTITLEMENT_SCOPE_KEY,
+  };
 }
 
 /**
  * Decides whether this customer may join, and takes their hold if so
- * (ADR-035).
+ * (ADR-035, scoped by ADR-049).
  *
  * The old model asked a unique index a yes/no question, because eligibility
  * was a discrete window and "same window" was the whole rule. A custom window
  * is not discrete — it is an instant — so the decision is read explicitly
  * here and the index's job narrows to guaranteeing that only one claim per
- * identity is ever the governing one.
+ * (identity, entitlement scope) is ever the governing one.
+ *
+ * ADR-049 separates the two questions this used to answer with one row:
+ *
+ *  1. Active-duplicate prevention — unchanged and deliberately *not* scoped:
+ *     any live RESERVED claim for this identity anywhere in the queue means
+ *     the person already has a token in progress, so they cannot join again,
+ *     whatever session either token is in.
+ *  2. Completed-visit entitlement — a CONSUMED claim blocks this join only
+ *     if its scope covers it: a queue-wide claim ("QUEUE") covers every join;
+ *     a session-occurrence claim covers only a join assigned to that same
+ *     occurrence. A claim keeps the scope it was taken under, so changing a
+ *     queue's scope later neither retroactively widens nor erases a visit
+ *     already recorded — the same rule ADR-035 applies to a changed window.
  *
  * Reading before writing is safe precisely here: every join to a queue is
  * serialized by the `SELECT ... FOR UPDATE` on the queue row taken at the top
@@ -2104,10 +2190,14 @@ async function claimIdentityForNewToken(
     queueId: string;
     tokenId: string;
     identity: ResolvedCustomerIdentity;
+    /** The session occurrence this join was assigned to, if any. */
+    occurrenceScopeKey: string | null;
+    /** The scope the new claim is taken under. */
+    claimScopeKey: string;
   },
 ): Promise<void> {
   const { identity } = input;
-  const governing = await tx.queueIdentityClaim.findFirst({
+  const live = await tx.queueIdentityClaim.findMany({
     where: {
       queueId: input.queueId,
       identityFingerprint: identity.fingerprint,
@@ -2115,37 +2205,53 @@ async function claimIdentityForNewToken(
     },
   });
 
-  if (governing) {
-    // Held by a token that is still being served — the same person cannot be
-    // in the queue twice at once, from any number of installations.
-    if (governing.status === 'RESERVED') {
-      throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', ACTIVE_ELSEWHERE_MESSAGE, {
-        reason: 'ALREADY_IN_QUEUE',
-      });
-    }
+  // Held by a token that is still being served — the same person cannot be
+  // in the queue twice at once, from any number of installations.
+  if (live.some((claim) => claim.status === 'RESERVED')) {
+    throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', ACTIVE_ELSEWHERE_MESSAGE, {
+      reason: 'ALREADY_IN_QUEUE',
+    });
+  }
 
-    const eligibleAgainAt = governing.eligibleAgainAt;
-    if (!eligibleAgainAt) {
-      // A consumed once-ever visit: no future instant makes them eligible.
-      throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', repeatRejectionMessage(null), {
-        reason: 'ALREADY_USED',
-      });
-    }
-    if (eligibleAgainAt.getTime() > Date.now()) {
-      throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', repeatRejectionMessage(eligibleAgainAt), {
-        reason: 'ALREADY_USED',
-        // Safe context only: when they may return. Never the other visit's
-        // identity, form answers or token.
-        restrictionEndsAt: eligibleAgainAt.toISOString(),
-      });
-    }
+  const covering = live.filter(
+    (claim) =>
+      claim.entitlementScopeKey === QUEUE_ENTITLEMENT_SCOPE_KEY ||
+      (input.occurrenceScopeKey != null && claim.entitlementScopeKey === input.occurrenceScopeKey),
+  );
 
-    // The wait is over. The spent claim becomes history rather than being
-    // deleted, so the record of that visit survives (ADR-034 §historical
-    // claims); its slot is freed by taking its own id, which cannot collide.
+  const now = Date.now();
+  const blocking = covering.filter(
+    (claim) => claim.eligibleAgainAt == null || claim.eligibleAgainAt.getTime() > now,
+  );
+  if (blocking.length > 0) {
+    // The longest-lasting block is the honest answer; "never" outlasts all.
+    const permanent = blocking.find((claim) => claim.eligibleAgainAt == null);
+    const governing =
+      permanent ??
+      blocking.reduce((latest, claim) =>
+        claim.eligibleAgainAt!.getTime() > latest.eligibleAgainAt!.getTime() ? claim : latest,
+      );
+    const scope = governing.entitlementScopeKey === QUEUE_ENTITLEMENT_SCOPE_KEY ? 'QUEUE' : 'SESSION';
+    const endsAt = governing.eligibleAgainAt;
+    throw new AppError(409, 'REPEAT_VISIT_NOT_ALLOWED', repeatRejectionMessage(endsAt, scope), {
+      reason: 'ALREADY_USED',
+      // Which allowance is spent — the whole queue's, or this session's —
+      // so the app can word it. Never which session or whose visit.
+      scope,
+      // Safe context only: when they may return. Never the other visit's
+      // identity, form answers or token.
+      ...(endsAt ? { restrictionEndsAt: endsAt.toISOString() } : {}),
+    });
+  }
+
+  // Every covering claim's wait is over. Spent claims become history rather
+  // than being deleted, so the record of each visit survives (ADR-034
+  // §historical claims); a slot is freed by taking the row's own id, which
+  // cannot collide.
+  for (const claim of covering) {
     await tx.queueIdentityClaim.update({
-      where: { id: governing.id },
-      data: { claimSlot: governing.id, supersededAt: new Date() },
+      where: { id: claim.id },
+      data: { claimSlot: claim.id, supersededAt: new Date() },
     });
   }
 
@@ -2156,6 +2262,7 @@ async function claimIdentityForNewToken(
       identityFingerprint: identity.fingerprint,
       mode: identity.mode,
       status: 'RESERVED',
+      entitlementScopeKey: input.claimScopeKey,
       tokenId: input.tokenId,
     },
   });

@@ -148,6 +148,30 @@ through the existing default/fallback case in `queue_join_provider.dart` —
 the same graceful-degradation precedent as the force-update (ADR-031) and
 multi-service (ADR-027) rollouts, not a new mechanism.
 
+#### Future session assignment (`20260930175515_add_token_assigned_session_starts_at`)
+
+ADR-048. **Purely additive**: one nullable `tokens.assigned_session_starts_at`
+column. Existing tokens keep `NULL`, which means "no gate" — correct, since
+they were only ever assigned to an already-open session. No backfill, no new
+environment variable. Behaviour change for scheduled queues only: a join is
+now placed in the next eligible session *today* instead of being refused, and
+`SCHEDULE_NOT_YET_OPEN`/`SCHEDULE_BETWEEN_SESSIONS` are no longer returned.
+The public config's `schedule` block gains `acceptingJoins` and
+`nextSessionStartMinute`; the app gates joining on `acceptingJoins` (falling
+back to `isOpenNow` against an older backend). Deploy the backend before or
+with the dashboard and app. Adds a third scheduler (§5).
+
+#### Repeat restriction scope (`20260930181856_add_repeat_restriction_scope`)
+
+ADR-049. **Additive**: a `RepeatRestrictionScope` enum, `queues.repeat_restriction_scope
+NOT NULL DEFAULT 'QUEUE'`, `queue_identity_claims.entitlement_scope_key NOT NULL
+DEFAULT 'QUEUE'`, nullable `tokens.identity_scope_key`, and the claim unique
+index widened to include the scope key. Every existing queue and claim becomes
+queue-scoped — identical to today's rule. The new unique index is created
+before the old one is dropped; because every existing row receives the same
+`'QUEUE'` key, the old uniqueness implies the new one, so it cannot fail on
+existing data. No backfill, no new environment variable.
+
 #### Skip reasons and completion feedback (`20260929205254_add_token_skip_reason_and_completion_feedback`)
 
 Adds ADR-042's terminal notes. **Purely additive**: one new enum type
@@ -410,9 +434,9 @@ setting, so evaluate that against your actual proxy before relying on
 
 ## 5. Schedulers
 
-**Two** `node-cron` jobs are started automatically from `server.ts` once the
+**Three** `node-cron` jobs are started automatically from `server.ts` once the
 HTTP server is listening — no separate process or command is needed for
-either:
+any of them:
 
 1. **Reminder dispatch** — `REMINDER_DISPATCH_CRON` (default `*/1 * * * *`).
    Sends "it's almost your turn" pushes.
@@ -421,29 +445,34 @@ either:
    owner never verified their email within the 1-hour registration window.
    Verified accounts are never matched (their `registrationExpiresAt` is
    cleared on verification).
+3. **Session-start broadcast** — fixed `* * * * *` (ADR-048). When a token
+   placed in a later session reaches its session start, it re-broadcasts the
+   queue's ETA/position update so the app and dashboard refresh. Writes
+   nothing; correctness never depends on it.
 
-**Both are safe to run on more than one backend instance.** Reminder
+**All three are safe to run on more than one backend instance.** Reminder
 dispatch claims each token with a conditional `UPDATE ... WHERE
 reminderSentAt IS NULL` before sending, and cleanup is an idempotent
 `deleteMany` — neither depends on there being exactly one process. (Note
 that **Socket.io does**: see §12.)
 
-The notes below apply to both.
+The notes below apply to all three.
 
 ```ts
 server.listen(env.PORT, () => {
   logger.info(...);
   startReminderScheduler();
   startPendingRegistrationCleanupScheduler();
+  startSessionStartScheduler();
 });
 ```
 
-- **Never starts under `NODE_ENV=test`** (both `start*Scheduler()` functions
+- **Never starts under `NODE_ENV=test`** (every `start*Scheduler()` function
   return immediately) — the automated test suite drives the dispatch logic
   directly instead.
 - **No overlapping runs**: `node-cron`'s own `noOverlap: true` option
   guards against a slow run still executing when the next tick fires.
-- **Graceful shutdown**: `SIGTERM`/`SIGINT` stop both schedulers (awaited)
+- **Graceful shutdown**: `SIGTERM`/`SIGINT` stop all schedulers (awaited)
   before the HTTP server and Prisma connection close — a
   deployment that sends `SIGTERM` on redeploy (most container schedulers,
   systemd, PM2) stops the schedulers cleanly first.

@@ -478,10 +478,17 @@ Six further items were completed and pushed after Checkpoint 10 closed the origi
 1. **Customer Called Counter Information** — the CALLED background push and the Home/Active-Tokens surface now name the actual counter; everywhere else already did. See ADR-043.
 2. **Centered Foreground Notification** — the mobile foreground banner is now a centered card, not a top strip; "View" on a finished token now opens its History details directly. See ADR-044.
 3. **Dashboard Visual Hierarchy + Navigation Polish** — an opt-in `size` prop on the existing `Button` for operationally-important actions, a typography bump for titles/headings, one consistent "Manage Counters" label. See ADR-045.
-4. **Optional Weekly Schedule + Session Capacity** — a queue may now restrict itself to a weekly schedule of timed sessions with optional daily/per-session capacity, off by default for every existing queue. One additive migration (`20260929223845_add_queue_schedule_sessions`). **Explicitly deferred:** session-aware repeat-visit entitlement (one completed visit per session) — real tracked future work, not implemented. See ADR-046.
+4. **Optional Weekly Schedule + Session Capacity** — a queue may now restrict itself to a weekly schedule of timed sessions with optional daily/per-session capacity, off by default for every existing queue. One additive migration (`20260929223845_add_queue_schedule_sessions`). **Explicitly deferred at the time:** session-aware repeat-visit entitlement (one completed visit per session) — since delivered, see below. See ADR-046.
 5. **Universal Error / Negative Message UX audit** — existing error handling across all three apps was already essentially complete; the one genuine gap (no top-level crash boundary in either frontend) is now closed. See ADR-047.
 6. **Complete regression + security review** — race conditions, cross-org access/IDOR, capacity overbooking, session timezone handling, OTP/ciphertext leakage, and old-client compatibility around all of the above were reviewed by reading the actual implementation. No genuine defects found; no code changed.
 7. **Full final verification** — backend 791/791, dashboard 243/243, mobile 352/352, all builds/typecheck/lint/analyze clean, plus an unpublished `--release` APK build (debug-signed; no release keystore configured on this machine) for the user to inspect. Nothing deployed.
+
+## Master-roadmap completion (home-PC session, 2026-10-01) — DONE
+
+A source-level audit of the six master-roadmap areas against the actual code found two remaining gaps; both are now closed. Details live in `docs/PROGRESS.md` and the ADRs:
+
+1. **Future eligible session assignment** — joins go to the next eligible session today (current preferred, ended never, no cross-day pre-booking); a future-session token is held out of the callable line, with no position/ETA, until its session starts. Migration `20260930175515_add_token_assigned_session_starts_at`. See ADR-048.
+2. **Session-aware repeat entitlement** — queue setting *Repeat restriction scope* (Entire queue / Per session); per-session entitlement keyed by session occurrence (session id + local date). Migration `20260930181856_add_repeat_restriction_scope`. See ADR-049.
 
 ---
 

@@ -172,6 +172,7 @@ describe('RepeatVisitPolicy', () => {
       repeatRestrictionUntilLocal: null,
       repeatIdentityMode: 'CUSTOM_FIELD',
       repeatIdentityFieldKey: 'nid',
+      repeatRestrictionScope: 'QUEUE',
     });
   });
 
@@ -191,6 +192,7 @@ describe('RepeatVisitPolicy', () => {
       repeatRestrictionUntilLocal: null,
       repeatIdentityMode: 'CUSTOM_FIELD',
       repeatIdentityFieldKey: 'nid',
+      repeatRestrictionScope: 'QUEUE',
     });
   });
 
@@ -281,6 +283,70 @@ describe('RepeatVisitPolicy', () => {
  * an SMS provider exists. The selector must offer exactly the three that
  * work, and must say plainly what each one means.
  */
+describe('RepeatVisitPolicy — repeat restriction scope (ADR-049)', () => {
+  it('defaults to the entire queue and explains both options', async () => {
+    renderPolicy({ scheduleEnabled: true });
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+
+    expect(screen.getByLabelText(/Entire queue/)).toBeChecked();
+    expect(screen.getByText('Repeat limits apply across all sessions.')).toBeInTheDocument();
+    expect(screen.getByText(/only for that assigned session occurrence/)).toBeInTheDocument();
+  });
+
+  it('sends a per-session scope when the schedule is on', async () => {
+    renderPolicy({ scheduleEnabled: true });
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText('Only once ever'));
+    await userEvent.click(screen.getByLabelText(/Per session/));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ repeatRestrictionScope: 'SESSION' }));
+  });
+
+  it('offers per-session only when the weekly schedule is on', async () => {
+    renderPolicy({ scheduleEnabled: false });
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+
+    expect(screen.getByLabelText(/Per session/)).toBeDisabled();
+    expect(screen.getByText(/Per-session limits need this queue/)).toBeInTheDocument();
+  });
+
+  it('summarises a stored per-session limit, and restores it when editing', async () => {
+    renderPolicy({
+      scheduleEnabled: true,
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'ONCE_EVER',
+      repeatIdentityMode: 'CUSTOM_FIELD',
+      repeatIdentityFieldKey: 'nid',
+      repeatRestrictionScope: 'SESSION',
+    });
+    expect(screen.getByText(/Per session: a completed visit uses up the allowance/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+    expect(screen.getByLabelText(/Per session/)).toBeChecked();
+  });
+
+  it('blocks saving a per-session limit once the schedule has been turned off', async () => {
+    renderPolicy({
+      scheduleEnabled: false,
+      allowRepeatVisits: false,
+      repeatRestrictionType: 'ONCE_EVER',
+      repeatIdentityMode: 'CUSTOM_FIELD',
+      repeatIdentityFieldKey: 'nid',
+      repeatRestrictionScope: 'SESSION',
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Change' }));
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    await userEvent.click(screen.getByLabelText(/Entire queue/));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+});
+
 describe('RepeatVisitPolicy — identity options', () => {
   async function openIdentitySelector() {
     renderPolicy();

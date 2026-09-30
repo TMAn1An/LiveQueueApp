@@ -9,6 +9,7 @@ import { IDENTITY_FIELD_TYPES, SELECTABLE_IDENTITY_MODES } from '../types/queue'
 import type {
   Queue,
   RepeatIdentityMode,
+  RepeatRestrictionScope,
   RepeatRestrictionType,
   RepeatRestrictionUnit,
 } from '../types/queue';
@@ -134,6 +135,8 @@ export function RepeatVisitPolicy({
     storedMode && SELECTABLE_IDENTITY_MODES.includes(storedMode) ? storedMode : 'VERIFIED_EMAIL';
   const [mode, setMode] = useState<RepeatIdentityMode>(initialMode);
   const [fieldKey, setFieldKey] = useState(queue.repeatIdentityFieldKey ?? '');
+  const storedScope: RepeatRestrictionScope = queue.repeatRestrictionScope ?? 'QUEUE';
+  const [scope, setScope] = useState<RepeatRestrictionScope>(storedScope);
   const [error, setError] = useState<string | null>(null);
 
   /* Only questions that can actually tell two people apart, and only
@@ -166,6 +169,7 @@ export function RepeatVisitPolicy({
     setUntil(toQueueLocalInput(queue.repeatRestrictionUntil, effectiveTimezone));
     setMode(initialMode);
     setFieldKey(queue.repeatIdentityFieldKey ?? eligibleFields[0]?.key ?? '');
+    setScope(storedScope);
     setError(null);
     setEditing(true);
   }
@@ -183,6 +187,11 @@ export function RepeatVisitPolicy({
     restricted &&
     (type === 'UNTIL_DATETIME' || (type === 'DURATION' && unitNeedsTimezone(unit)));
   const missingTimezone = needsZone && !effectiveTimezone;
+  /* ADR-049: a per-session allowance needs sessions to count against. The
+     backend refuses it without the schedule; the option is disabled here
+     so that is never a surprise at save time. */
+  const sessionScopeUnavailable = !queue.scheduleEnabled;
+  const invalidScope = restricted && scope === 'SESSION' && sessionScopeUnavailable;
 
   async function save() {
     setError(null);
@@ -199,6 +208,7 @@ export function RepeatVisitPolicy({
               repeatRestrictionUntilLocal: type === 'UNTIL_DATETIME' ? until : null,
               repeatIdentityMode: mode,
               repeatIdentityFieldKey: needsField(mode) ? fieldKey : null,
+              repeatRestrictionScope: scope,
             }
           : { allowRepeatVisits: true },
       );
@@ -230,6 +240,11 @@ export function RepeatVisitPolicy({
             <div className="space-y-1 text-fg-soft">
               <p>
                 <span className="font-medium">{describeRestriction(queue, effectiveTimezone)}</span>
+              </p>
+              <p className="text-xs text-muted">
+                {storedScope === 'SESSION'
+                  ? 'Per session: a completed visit uses up the allowance only for the session it was in.'
+                  : 'Entire queue: the limit applies across all sessions.'}
               </p>
               <p className="text-xs text-muted">
                 Customers are recognised by{' '}
@@ -377,6 +392,48 @@ export function RepeatVisitPolicy({
             </p>
           )}
 
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-xs text-muted">Repeat restriction scope</legend>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="repeat-scope"
+                checked={scope === 'QUEUE'}
+                onChange={() => setScope('QUEUE')}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-medium text-fg-soft">Entire queue</span>
+                <span className="block text-xs text-muted">
+                  Repeat limits apply across all sessions.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="radio"
+                name="repeat-scope"
+                checked={scope === 'SESSION'}
+                onChange={() => setScope('SESSION')}
+                disabled={sessionScopeUnavailable && scope !== 'SESSION'}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="block font-medium text-fg-soft">Per session</span>
+                <span className="block text-xs text-muted">
+                  A completed visit consumes the repeat allowance only for that assigned session
+                  occurrence — a customer served in the morning may join the afternoon session.
+                </span>
+              </span>
+            </label>
+            {sessionScopeUnavailable && (
+              <p className="text-xs text-muted">
+                Per-session limits need this queue&apos;s weekly schedule. Turn it on under Schedule
+                &amp; Availability to use them.
+              </p>
+            )}
+          </fieldset>
+
           {missingTimezone && (
             <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
               This queue has no timezone yet, and a {type === 'UNTIL_DATETIME' ? 'fixed cutoff' : 'monthly or yearly'} limit
@@ -462,7 +519,8 @@ export function RepeatVisitPolicy({
             missingField ||
             missingAmount ||
             missingUntil ||
-            missingTimezone
+            missingTimezone ||
+            invalidScope
           }
           onClick={() => void save()}
           size="lg"

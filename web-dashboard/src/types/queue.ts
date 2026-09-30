@@ -45,6 +45,9 @@ export interface Queue {
   repeatRestrictionUntil: string | null;
   repeatIdentityMode: RepeatIdentityMode | null;
   repeatIdentityFieldKey: string | null;
+  /** ADR-049. QUEUE for every queue that never chose otherwise; optional so a
+   * response from an older backend reads as that default. */
+  repeatRestrictionScope?: RepeatRestrictionScope;
   /** IANA name, or null when this queue simply uses its organization's zone
    * (ADR-035). Only a month/year window or a fixed cutoff actually needs one. */
   timezone: string | null;
@@ -133,6 +136,9 @@ export interface AssignableStaff {
  * visit, so the rule is keyed on something the person carries.
  */
 export type RepeatRestrictionType = 'ONCE_EVER' | 'DURATION' | 'UNTIL_DATETIME';
+/** ADR-049: what one completed visit uses up — the whole queue's allowance,
+ * or only the assigned session occurrence's. */
+export type RepeatRestrictionScope = 'QUEUE' | 'SESSION';
 export type RepeatRestrictionUnit = 'MINUTE' | 'HOUR' | 'DAY' | 'WEEK' | 'MONTH' | 'YEAR';
 export type RepeatIdentityMode =
   /** ADR-037: deferred. Still in the union because a queue configured before

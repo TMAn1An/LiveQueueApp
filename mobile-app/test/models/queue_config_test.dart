@@ -116,6 +116,27 @@ void main() {
     expect(config.isAcceptingCustomers, isFalse);
   });
 
+  test('ADR-049: the repeat restriction scope is parsed, and absent means queue-wide', () {
+    QueueConfig parse(Map<String, dynamic> identity) => QueueConfig.fromJson({
+          'id': 'queue-1',
+          'name': 'Q',
+          'status': 'ACTIVE',
+          'identity': identity,
+        });
+
+    final perSession = parse({
+      'repeatRestricted': true,
+      'restrictionScope': 'SESSION',
+      'restrictionType': 'ONCE_EVER',
+      'identityMode': 'CUSTOM_FIELD',
+    });
+    expect(perSession.identity.isPerSession, isTrue);
+
+    final legacy = parse({'repeatRestricted': true, 'restrictionType': 'ONCE_EVER'});
+    expect(legacy.identity.restrictionScope, isNull);
+    expect(legacy.identity.isPerSession, isFalse);
+  });
+
   test('ADR-048: an assigned session carries its absolute start instant', () {
     final window = QueueSessionWindow.fromJson({
       'startMinute': 840,

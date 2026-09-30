@@ -125,6 +125,18 @@ export interface SessionAssignment {
   assignedSessionStartsAt: Date;
 }
 
+/**
+ * ADR-049: the stable identity of one *occurrence* of a weekly session.
+ * A QueueSession row recurs every week, so its id alone would make "the
+ * Monday morning session" one entitlement forever; the local calendar date
+ * the token was assigned to is what distinguishes this Monday from next.
+ * Built only from ids and the date — never from display text or times,
+ * which an admin can edit without the occurrence becoming a different one.
+ */
+export function sessionOccurrenceScopeKey(queueSessionId: string, assignedSessionDate: Date): string {
+  return `SESSION:${queueSessionId}:${assignedSessionDate.toISOString().slice(0, 10)}`;
+}
+
 /** The instant a given local minute of a local calendar date occurs in a
  * zone. `dateKey` is a QueueLocalMoment date key (midnight UTC of the local
  * date), so its UTC fields *are* the local year/month/day. */
@@ -159,7 +171,8 @@ function sessionStartInstant(dateKey: Date, startMinute: number, timezone: strin
  *  2. daily capacity reached → SCHEDULE_DAILY_CAPACITY_REACHED;
  *  3. otherwise walk today's not-yet-ended sessions in (startMinute, id)
  *     order — currently open ones first by construction — and take the first
- *     with room; none has room → SCHEDULE_SESSION_FULL.
+ *     with room; none has room → SCHEDULE_SESSION_FULL. (ADR-049: occurrences
+ *     the customer has already used up are tried last, in the same order.)
  *
  * Throws AppError (409, one of the ScheduleUnavailableCode values) when no
  * session can accept the join. Callers must run this inside the same `tx` as
@@ -167,9 +180,25 @@ function sessionStartInstant(dateKey: Date, startMinute: number, timezone: strin
  */
 export async function assignSessionForNewToken(
   tx: Prisma.TransactionClient,
-  params: { queueId: string; dailyCapacity: number | null; moment: QueueLocalMoment; timezone: string },
+  params: {
+    queueId: string;
+    dailyCapacity: number | null;
+    moment: QueueLocalMoment;
+    timezone: string;
+    /**
+     * ADR-049: session occurrences (by key) this customer has already used
+     * up under a per-session repeat limit. They are passed over so a
+     * customer served in the morning is placed in the afternoon rather than
+     * back into the morning session they may not rejoin. If nothing else has
+     * room, assignment falls back to them anyway, so the join is refused
+     * with the accurate repeat-visit reason (by the claim step) rather than
+     * a misleading "full".
+     */
+    spentOccurrenceKeys?: ReadonlySet<string>;
+  },
 ): Promise<SessionAssignment> {
   const { queueId, dailyCapacity, moment, timezone } = params;
+  const spent = params.spentOccurrenceKeys ?? new Set<string>();
 
   const todaysSessions = await tx.queueSession.findMany({
     where: { queueId, weekday: moment.weekday },
@@ -194,7 +223,10 @@ export async function assignSessionForNewToken(
     }
   }
 
-  for (const session of candidates) {
+  const isSpent = (session: QueueSession) => spent.has(sessionOccurrenceScopeKey(session.id, moment.dateKey));
+  const ordered = [...candidates.filter((s) => !isSpent(s)), ...candidates.filter(isSpent)];
+
+  for (const session of ordered) {
     if (session.capacity != null) {
       const sessionCount = await tx.token.count({
         where: { queueSessionId: session.id, assignedSessionDate: moment.dateKey },

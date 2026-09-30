@@ -10,6 +10,7 @@
 class QueueIdentityRequirements {
   const QueueIdentityRequirements({
     this.repeatRestricted = false,
+    this.restrictionScope,
     this.restrictionType,
     this.restrictionAmount,
     this.restrictionUnit,
@@ -23,6 +24,14 @@ class QueueIdentityRequirements {
 
   /// Whether this queue limits how often one customer may return.
   final bool repeatRestricted;
+
+  /// ADR-049: QUEUE — the limit applies across the whole queue; SESSION — a
+  /// completed visit uses up the allowance only for the session it was in,
+  /// so the customer may still join a different session. Null when
+  /// unrestricted (and from a backend older than ADR-049, meaning QUEUE).
+  final String? restrictionScope;
+
+  bool get isPerSession => restrictionScope == 'SESSION';
 
   /// ONCE_EVER / DURATION / UNTIL_DATETIME — null when unrestricted, or when
   /// the queue still needs configuring (ADR-035).
@@ -58,6 +67,7 @@ class QueueIdentityRequirements {
   factory QueueIdentityRequirements.fromJson(Map<String, dynamic> json) {
     return QueueIdentityRequirements(
       repeatRestricted: json['repeatRestricted'] as bool? ?? false,
+      restrictionScope: json['restrictionScope'] as String?,
       restrictionType: json['restrictionType'] as String?,
       restrictionAmount: json['restrictionAmount'] as int?,
       restrictionUnit: json['restrictionUnit'] as String?,

@@ -1276,6 +1276,8 @@ describe('what the app is told before joining', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.identity).toEqual({
       repeatRestricted: true,
+      // ADR-049: additive — which allowance a visit spends; QUEUE by default.
+      restrictionScope: 'QUEUE',
       restrictionType: 'DURATION',
       restrictionAmount: 30,
       restrictionUnit: 'DAY',

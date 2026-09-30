@@ -400,6 +400,19 @@ void main() {
       expect(provider.errorMessage, contains('already used this queue'));
     });
 
+    test('ADR-049: a per-session refusal says the session is used, not the whole queue', () async {
+      final provider = await providerRejecting({
+        'reason': 'ALREADY_USED',
+        'scope': 'SESSION',
+        'restrictionEndsAt': '2026-10-08T04:00:00.000Z',
+      });
+
+      expect(await provider.submitJoin(), isFalse);
+      expect(provider.errorMessage, contains('in this session'));
+      expect(provider.errorMessage, isNot(contains('used this queue')));
+      expect(provider.restrictionEndsAt, DateTime.parse('2026-10-08T04:00:00.000Z'));
+    });
+
     test('says nothing about a return date when they are simply already in the queue', () async {
       final provider = await providerRejecting({'reason': 'ALREADY_IN_QUEUE'});
 

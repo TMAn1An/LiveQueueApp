@@ -32,6 +32,10 @@ const repeatPolicyFields = {
     .nullable()
     .optional(),
   repeatIdentityFieldKey: z.string().trim().min(1).max(120).nullable().optional(),
+  /** ADR-049: what a completed visit uses up — the whole queue, or only the
+   * assigned session occurrence. SESSION needs the schedule on (checked in
+   * queueIdentityPolicy.service, which knows the queue's schedule state). */
+  repeatRestrictionScope: z.enum(['QUEUE', 'SESSION']).optional(),
   /** ADR-035: no longer part of the repeat-visit form. It lives in the
    * queue's own settings as an override of the organization's zone, and is
    * normally never sent at all. */

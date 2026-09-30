@@ -268,6 +268,12 @@ model Queue {
   /// mode includes CUSTOM_FIELD. Stored as the key rather than a row id so
   /// it survives the form-version rewrite that editing the form performs.
   repeatIdentityFieldKey  String?                @map("repeat_identity_field_key")
+  /// ADR-049: what a completed visit uses up. QUEUE (the default, and the
+  /// value every existing queue gets) — the restriction applies across the
+  /// whole queue, exactly as before. SESSION — a completed visit spends the
+  /// allowance only for the session occurrence (weekly session + calendar
+  /// date) it was assigned to; only valid while the weekly schedule is on.
+  repeatRestrictionScope  RepeatRestrictionScope @default(QUEUE) @map("repeat_restriction_scope")
   /// IANA zone for this queue. ADR-035: no longer chosen from a dropdown in
   /// the repeat-visit settings — it is initialized automatically and lives
   /// under the queue's own settings as an override of the organization's
@@ -572,6 +578,10 @@ model Token {
   identityFingerprint String?             @map("identity_fingerprint")
   identityPeriodKey   String?             @map("identity_period_key")
   identityMode        RepeatIdentityMode? @map("identity_mode")
+  /// ADR-049: the entitlement scope key this token's claim was taken under
+  /// ("QUEUE", or "SESSION:<queueSessionId>:<YYYY-MM-DD>"), so a fallback
+  /// settlement at COMPLETED records the visit against the same scope.
+  identityScopeKey    String?             @map("identity_scope_key")
 
   /// Phase 4: null on every token created on a queue with scheduleEnabled =
   /// false (which is every token before this feature and every token on a
@@ -779,6 +789,15 @@ enum RepeatIdentityMode {
   VERIFIED_EMAIL_AND_CUSTOM_FIELD
 }
 
+/// ADR-049: what one completed visit uses up.
+enum RepeatRestrictionScope {
+  /// The whole queue — the restriction applies across every session.
+  QUEUE
+  /// One session occurrence — a completed visit blocks only the same weekly
+  /// session on the same calendar date.
+  SESSION
+}
+
 enum IdentityClaimStatus {
   /// Held by a token that is still WAITING/CALLED/IN_PROGRESS. Stops the
   /// same person joining twice at once, from any number of installations.
@@ -837,6 +856,15 @@ model QueueIdentityClaim {
   claimSlot    String    @default("ACTIVE") @map("claim_slot")
   supersededAt DateTime? @map("superseded_at")
 
+  /// ADR-049: which entitlement this claim spends. "QUEUE" (the default, and
+  /// every claim before this column existed) covers every join to the
+  /// queue. "SESSION:<queueSessionId>:<YYYY-MM-DD>" covers only joins
+  /// assigned to that same session occurrence — the weekly QueueSession row
+  /// alone is not enough, since one row recurs every week. Built from ids
+  /// and the local calendar date, never from display text. Part of the
+  /// unique index, so one claim per (identity, scope) governs at a time.
+  entitlementScopeKey String @default("QUEUE") @map("entitlement_scope_key")
+
   /// The token holding this claim. Unique so a token can never hold two.
   tokenId String @unique @map("token_id")
   token   Token  @relation(fields: [tokenId], references: [id], onDelete: Cascade)
@@ -844,7 +872,7 @@ model QueueIdentityClaim {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@unique([queueId, identityFingerprint, claimSlot])
+  @@unique([queueId, identityFingerprint, entitlementScopeKey, claimSlot])
   @@index([queueId, status])
   @@index([queueId, identityFingerprint])
   @@map("queue_identity_claims")

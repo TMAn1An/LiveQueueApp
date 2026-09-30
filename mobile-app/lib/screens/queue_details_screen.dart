@@ -50,8 +50,8 @@ class QueueDetailsScreen extends StatelessWidget {
                   // way the identity/repeat notices above already are.
                   else if (config.schedule.scheduleEnabled && !config.schedule.acceptingJoins)
                     _Notice(text: config.schedule.message ?? 'This queue is not currently open.')
-                  else if (_repeatNotice(config) != null)
-                    _Notice(text: _repeatNotice(config)!),
+                  else if (_scopedRepeatNotice(config) != null)
+                    _Notice(text: _scopedRepeatNotice(config)!),
                   // ADR-048: before the next session starts the queue still
                   // accepts joins — the customer is told they will be served
                   // later today, not turned away.
@@ -115,6 +115,18 @@ String? _repeatNotice(QueueConfig config) {
     default:
       return null;
   }
+}
+
+/// ADR-049: the queue-wide notice, reworded when the limit is per session —
+/// a customer served in the morning must not read it as "you can never come
+/// back today".
+String? _scopedRepeatNotice(QueueConfig config) {
+  final notice = _repeatNotice(config);
+  if (notice == null || !config.identity.isPerSession) return notice;
+  if (config.identity.restrictionType == 'ONCE_EVER') {
+    return 'Each customer may be served once per session. You can still join a different session.';
+  }
+  return '$notice This limit applies per session — you can still join a different session.';
 }
 
 /// Singular or plural, so the sentence reads naturally.

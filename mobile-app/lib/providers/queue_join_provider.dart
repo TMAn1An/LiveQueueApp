@@ -427,6 +427,10 @@ class QueueJoinProvider extends ChangeNotifier {
       // detail. Either way the server's own wording is the honest one.
       return e.message;
     }
+    // ADR-049: a per-session allowance is spent only for that session.
+    if (e.details['scope'] == 'SESSION') {
+      return 'You have already been served in this session. You can join it again after:';
+    }
     return 'You have already used this queue. You can join again after:';
   }
 

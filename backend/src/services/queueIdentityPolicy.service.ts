@@ -3,6 +3,7 @@ import type {
   Organization,
   Queue,
   RepeatIdentityMode,
+  RepeatRestrictionScope,
   RepeatRestrictionType,
   RepeatRestrictionUnit,
 } from '@prisma/client';
@@ -43,11 +44,14 @@ export interface RepeatPolicyInput {
   repeatRestrictionUntilLocal?: string | null;
   repeatIdentityMode?: RepeatIdentityMode | null;
   repeatIdentityFieldKey?: string | null;
+  /** ADR-049. Omitted means the queue-wide default. */
+  repeatRestrictionScope?: RepeatRestrictionScope | null;
 }
 
 /** The normalized policy actually written to the queue row. */
 export interface ResolvedRepeatPolicy {
   allowRepeatVisits: boolean;
+  repeatRestrictionScope: RepeatRestrictionScope;
   repeatRestrictionType: RepeatRestrictionType | null;
   repeatRestrictionAmount: number | null;
   repeatRestrictionUnit: RepeatRestrictionUnit | null;
@@ -124,10 +128,14 @@ export async function resolveRepeatPolicy(
    * organization. Needed only for the two configurations that involve a
    * calendar: a month/year window, and a wall-clock cutoff. */
   effectiveTimezone: string | null,
+  /** ADR-049: whether the queue's weekly schedule will be on after this
+   * change. A per-session limit has no sessions to count without it. */
+  scheduleEnabled = false,
 ): Promise<ResolvedRepeatPolicy> {
   if (input.allowRepeatVisits) {
     return {
       allowRepeatVisits: true,
+      repeatRestrictionScope: 'QUEUE',
       repeatRestrictionType: null,
       repeatRestrictionAmount: null,
       repeatRestrictionUnit: null,
@@ -215,8 +223,23 @@ export async function resolveRepeatPolicy(
     identityFieldKey = key;
   }
 
+  // ADR-049: a per-session allowance is only meaningful while the queue
+  // actually assigns sessions. Refused rather than silently downgraded, in
+  // both directions: enabling SESSION on an unscheduled queue, and turning
+  // the schedule off while SESSION is still chosen (the caller merges the
+  // stored scope in, so that request arrives here as SESSION + no schedule).
+  const scope: RepeatRestrictionScope = input.repeatRestrictionScope ?? 'QUEUE';
+  if (scope === 'SESSION' && !scheduleEnabled) {
+    throw new AppError(
+      422,
+      'REPEAT_SCOPE_REQUIRES_SCHEDULE',
+      'A per-session repeat limit needs the weekly schedule. Turn the schedule on, or set the repeat restriction scope to Entire queue first.',
+    );
+  }
+
   return {
     allowRepeatVisits: false,
+    repeatRestrictionScope: scope,
     repeatRestrictionType: type,
     repeatRestrictionAmount: amount,
     repeatRestrictionUnit: unit,
@@ -377,10 +400,14 @@ export function describeJoinRequirements(queue: {
   repeatRestrictionUntil: Date | null;
   repeatIdentityMode: RepeatIdentityMode | null;
   repeatIdentityFieldKey: string | null;
+  /** ADR-049. Optional so a caller holding an older projection still reads
+   * as the default, queue-wide scope. */
+  repeatRestrictionScope?: RepeatRestrictionScope;
 }) {
   if (queue.allowRepeatVisits) {
     return {
       repeatRestricted: false as const,
+      restrictionScope: null,
       restrictionType: null,
       restrictionAmount: null,
       restrictionUnit: null,
@@ -405,6 +432,7 @@ export function describeJoinRequirements(queue: {
   ) {
     return {
       repeatRestricted: true as const,
+      restrictionScope: null,
       restrictionType: null,
       restrictionAmount: null,
       restrictionUnit: null,
@@ -419,6 +447,9 @@ export function describeJoinRequirements(queue: {
 
   return {
     repeatRestricted: true as const,
+    /** ADR-049: QUEUE — one allowance across the queue; SESSION — one per
+     * assigned session occurrence. Lets the app word the limit correctly. */
+    restrictionScope: queue.repeatRestrictionScope ?? ('QUEUE' as RepeatRestrictionScope),
     restrictionType: queue.repeatRestrictionType,
     restrictionAmount: queue.repeatRestrictionAmount,
     restrictionUnit: queue.repeatRestrictionUnit,

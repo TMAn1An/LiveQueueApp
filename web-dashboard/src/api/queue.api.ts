@@ -3,6 +3,7 @@ import type {
   Queue,
   QueueStatus,
   RepeatIdentityMode,
+  RepeatRestrictionScope,
   RepeatRestrictionType,
   RepeatRestrictionUnit,
 } from '../types/queue';
@@ -35,6 +36,8 @@ export interface CreateQueueInput {
   repeatRestrictionUntilLocal?: string | null;
   repeatIdentityMode?: RepeatIdentityMode | null;
   repeatIdentityFieldKey?: string | null;
+  /** ADR-049. SESSION is refused by the backend while the schedule is off. */
+  repeatRestrictionScope?: RepeatRestrictionScope;
   timezone?: string | null;
   allowMultipleServices?: boolean;
   /** ADR-041. The backend defaults a new queue to true when omitted. */

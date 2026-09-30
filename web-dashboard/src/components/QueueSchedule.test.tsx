@@ -10,6 +10,7 @@ import {
   useUpdateQueueSession,
 } from '../hooks/useQueueSchedule';
 import type { Queue, QueueSession } from '../types/queue';
+import { ApiError } from '../api/client';
 
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({ hasPermission: () => true }),
@@ -99,6 +100,19 @@ describe('QueueSchedule', () => {
     await user.click(screen.getByRole('switch', { name: /restrict this queue to a weekly schedule/i }));
 
     expect(updateQueueMutateAsync).toHaveBeenCalledWith({ scheduleEnabled: true });
+  });
+
+  it('ADR-049: turning the schedule off while a per-session repeat limit depends on it shows the refusal', async () => {
+    const user = userEvent.setup();
+    const message =
+      'A per-session repeat limit needs the weekly schedule. Turn the schedule on, or set the repeat restriction scope to Entire queue first.';
+    updateQueueMutateAsync.mockRejectedValueOnce(new ApiError(422, 'REPEAT_SCOPE_REQUIRES_SCHEDULE', message));
+    render(<QueueSchedule queue={queue({ scheduleEnabled: true })} />);
+
+    await user.click(screen.getByRole('switch', { name: /restrict this queue to a weekly schedule/i }));
+
+    expect(updateQueueMutateAsync).toHaveBeenCalledWith({ scheduleEnabled: false });
+    expect(await screen.findByText(message)).toBeInTheDocument();
   });
 
   it('shows every weekday as Closed when no sessions exist yet', () => {

@@ -140,6 +140,7 @@ export async function updateQueue(
   const nextTimezone =
     input.timezone === undefined ? existing.timezone : input.timezone?.trim() || null;
   const effectiveTimezone = resolveQueueTimezone({ timezone: nextTimezone }, organization);
+  const nextScheduleEnabled = input.scheduleEnabled ?? existing.scheduleEnabled;
 
   // Merged against what is already stored: a request that only renames the
   // queue must not be read as clearing its identity policy.
@@ -167,8 +168,15 @@ export async function updateQueue(
         input.repeatIdentityFieldKey === undefined
           ? existing.repeatIdentityFieldKey
           : input.repeatIdentityFieldKey,
+      repeatRestrictionScope:
+        input.repeatRestrictionScope == null
+          ? existing.repeatRestrictionScope
+          : input.repeatRestrictionScope,
     },
     effectiveTimezone,
+    // ADR-049: the schedule state *after* this request, so turning the
+    // schedule off while a per-session limit is on is refused in one place.
+    nextScheduleEnabled,
   );
 
   // ADR-041: switching the service-start code ON must not strand a customer
@@ -181,7 +189,6 @@ export async function updateQueue(
   // Phase 4: every session window is evaluated on the queue's own clock, so
   // scheduling cannot be turned on (or stay on, if this same request also
   // clears the timezone) without a real one resolved.
-  const nextScheduleEnabled = input.scheduleEnabled ?? existing.scheduleEnabled;
   if (nextScheduleEnabled) {
     requireScheduleTimezone(effectiveTimezone);
   }
