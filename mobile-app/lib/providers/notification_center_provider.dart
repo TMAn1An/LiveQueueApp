@@ -106,11 +106,18 @@ class NotificationCenterProvider extends ChangeNotifier {
         //
         // ADR-041: a queue without the code issues none, so the entry must
         // not promise one — it just sends the customer to their counter.
+        //
+        // The counter is named in both cases: the called customer's first
+        // question is *where to go*, and on a code-verified queue (the
+        // default) this entry — and the centered foreground card built from
+        // it — used to say only that a code was ready.
         final counterName = token.counter?.name;
         return (
           'Your token was called',
           token.serviceStartVerificationRequired
-              ? '${token.serialNumber}$where — your verification code is ready'
+              ? counterName != null
+                  ? '${token.serialNumber}$where — please go to $counterName. Your verification code is ready'
+                  : '${token.serialNumber}$where — your verification code is ready'
               : counterName != null
                   ? '${token.serialNumber}$where — please go to $counterName'
                   : '${token.serialNumber}$where — please proceed',

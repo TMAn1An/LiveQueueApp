@@ -116,6 +116,24 @@ void main() {
       expect(provider.notifications.single.body, contains('verification code is ready'));
     });
 
+    test('CALLED on a code-verified queue names the counter as well as the code being ready', () {
+      final provider = _provider();
+      provider.recordStatusChange(
+        _token(
+          status: 'CALLED',
+          calledAt: '2026-01-01T10:00:00.000Z',
+          serviceStartVerificationRequired: true,
+          counter: {'id': 'c1', 'name': 'Counter 3'},
+        ),
+        queueName: 'Pharmacy',
+      );
+
+      final entry = provider.notifications.single;
+      expect(entry.body, contains('please go to Counter 3'));
+      expect(entry.body, contains('verification code is ready'));
+      expect(entry.body, isNot(matches(RegExp(r'\d{4,}'))));
+    });
+
     test('ADR-041: CALLED on a queue without the code never mentions one — it names the counter', () {
       final provider = _provider();
       provider.recordStatusChange(
