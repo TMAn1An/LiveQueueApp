@@ -9,7 +9,7 @@ import { SearchInput } from '../components/SearchInput';
 import { PageHeader } from '../components/PageHeader';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime, formatMinutes } from '../utils/format';
-import type { ServiceHistoryEntry, ServiceHistoryStatus } from '../types/serviceHistory';
+import type { ServiceHistoryStatus } from '../types/serviceHistory';
 
 export function ServiceHistoryPage() {
   const [page, setPage] = useState(1);

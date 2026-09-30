@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { StatusBadge } from './StatusBadge';
 import { QueueBreadcrumb } from './QueueBreadcrumb';
 import { Button } from './Button';
@@ -30,7 +30,6 @@ export function QueueWorkspaceHeader({
   activeSettingsTab = 'general',
   onSelectSettingsTab,
 }: QueueWorkspaceHeaderProps) {
-  const location = useLocation();
   const isLive = currentSection === 'live';
   const isCounters = currentSection === 'counters';
   const isSettings = currentSection === 'settings';
