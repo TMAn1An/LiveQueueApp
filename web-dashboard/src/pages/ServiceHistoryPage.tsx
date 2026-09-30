@@ -110,7 +110,9 @@ export function ServiceHistoryPage() {
           <Spinner label="Loading service history…" />
         ) : !result?.data.length ? (
           <EmptyState
-            message={hasFilters ? 'No service history matches your filters.' : 'No service history recorded yet.'}
+            message={
+              hasFilters ? 'No visits match your search.' : 'No service history yet.'
+            }
           />
         ) : (
           <div className="overflow-x-auto">
@@ -119,72 +121,79 @@ export function ServiceHistoryPage() {
                 <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
                   <th className="py-3 pr-4">Token</th>
                   <th className="py-3 pr-4">Queue</th>
-                  <th className="py-3 pr-4">Service</th>
+                  <th className="py-3 pr-4">Service(s)</th>
                   <th className="py-3 pr-4">Customer Details</th>
-                  <th className="py-3 pr-4">Staff</th>
+                  <th className="py-3 pr-4">Counter</th>
                   <th className="py-3 pr-4">Status</th>
-                  <th className="py-3 pr-4">Wait</th>
-                  <th className="py-3 pr-4">Duration</th>
-                  <th className="py-3 pr-4">Completed</th>
+                  <th className="py-3 pr-4">Wait / Duration</th>
+                  <th className="py-3 pr-4">Finished</th>
                 </tr>
               </thead>
               <tbody>
-                {result.data.map((row) => (
-                  <tr key={row.id} className="border-b border-border transition-colors hover:bg-subtle/50">
-                    <td className="py-3 pr-4">
-                      <span className="inline-flex items-center rounded-md bg-subtle px-2 py-0.5 font-mono text-sm font-bold text-fg border border-border">
-                        {row.serialNumber}
-                      </span>
-                    </td>
-                    <td className="py-3 pr-4 font-medium text-fg">{row.queueName}</td>
-                    <td className="py-3 pr-4 text-fg-soft">{row.serviceName}</td>
-                    <td className="py-3 pr-4">
-                      <CustomerDetailsCell entry={row} />
-                    </td>
-                    <td className="py-3 pr-4 text-xs text-muted">
-                      {row.staffName ? `${row.staffName} (${row.counterName ?? '—'})` : '—'}
-                    </td>
-                    <td className="py-3 pr-4">
-                      <StatusBadge status={row.status} size="sm" />
-                    </td>
-                    <td className="py-3 pr-4 text-xs font-mono text-fg-soft">
-                      {formatMinutes(row.waitingDurationMinutes)}
-                    </td>
-                    <td className="py-3 pr-4 text-xs font-mono text-fg-soft">
-                      {formatMinutes(row.serviceDurationMinutes)}
-                    </td>
-                    <td className="py-3 pr-4 text-xs text-muted whitespace-nowrap">
-                      {formatDateTime(row.completedAt ?? row.createdAt)}
-                    </td>
-                  </tr>
-                ))}
+                {result.data.map((entry) => {
+                  const finishedAt = entry.completedAt ?? entry.skippedAt ?? entry.cancelledAt;
+                  return (
+                    <tr key={entry.tokenId} className="border-b border-border align-top transition-colors hover:bg-subtle/50">
+                      <td className="py-3 pr-4">
+                        <span className="inline-flex items-center rounded-md bg-subtle px-2 py-0.5 font-mono text-sm font-bold text-fg border border-border">
+                          {entry.serialNumber}
+                        </span>
+                        {entry.deviceIdentifier && (
+                          <div className="font-mono text-xs text-faint mt-0.5">{entry.deviceIdentifier}</div>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 font-medium text-fg">{entry.queue.name}</td>
+                      <td className="py-3 pr-4 text-fg-soft">{entry.services.map((s) => s.name).join(', ') || '—'}</td>
+                      <td className="py-3 pr-4">
+                        {entry.formFields.length === 0 ? (
+                          <span className="text-faint">—</span>
+                        ) : (
+                          <dl className="space-y-0.5 text-xs">
+                            {entry.formFields.map((field) => (
+                              <div key={field.key}>
+                                <dt className="inline text-faint">{field.label}: </dt>
+                                <dd className="inline text-fg-soft">{field.value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-xs text-muted">
+                        {entry.counter?.name ?? '—'}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <StatusBadge status={entry.status} size="sm" />
+                        {entry.skipReason?.text && (
+                          <p className="mt-1 max-w-xs text-xs text-fg-soft">
+                            <span className="text-faint">Reason: </span>
+                            {entry.skipReason.text}
+                          </p>
+                        )}
+                        {entry.completionFeedback && (
+                          <p className="mt-1 max-w-xs whitespace-pre-line text-xs text-fg-soft">
+                            <span className="text-faint">Feedback: </span>
+                            {entry.completionFeedback}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-xs font-mono text-fg-soft whitespace-nowrap">
+                        {formatMinutes(entry.actualDurationMinutes)}
+                        <span className="ml-1 text-xs text-faint">
+                          (est. {formatMinutes(entry.expectedDurationMinutes)})
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 text-xs text-muted whitespace-nowrap">
+                        {formatDateTime(finishedAt ?? entry.createdAt)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
         <Pagination pagination={result?.pagination} onPageChange={setPage} />
       </Card>
-    </div>
-  );
-}
-
-function CustomerDetailsCell({ entry }: { entry: ServiceHistoryEntry }) {
-  const parts: string[] = [];
-  if (entry.customerEmail) parts.push(entry.customerEmail);
-  if (entry.customerPhone) parts.push(entry.customerPhone);
-  if (entry.formFields && entry.formFields.length > 0) {
-    for (const f of entry.formFields) {
-      if (f.value) parts.push(`${f.label}: ${f.value}`);
-    }
-  }
-
-  if (parts.length === 0) {
-    return <span className="text-faint">—</span>;
-  }
-
-  return (
-    <div className="max-w-xs truncate text-xs text-fg-soft" title={parts.join(' · ')}>
-      {parts.join(' · ')}
     </div>
   );
 }
