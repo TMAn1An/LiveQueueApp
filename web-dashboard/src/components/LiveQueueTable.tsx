@@ -47,56 +47,72 @@ export function LiveQueueTable({
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                <th className="py-2 pr-4">Token</th>
-                {/* The Queue column only earns its place in the mixed view;
-                    inside one queue every row would repeat the same name. */}
-                {!queueId && <th className="py-2 pr-4">Queue</th>}
-                <th className="py-2 pr-4">Service</th>
-                <th className="py-2 pr-4">Customer</th>
-                <th className="py-2 pr-4">Position</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Counter</th>
-                <th className="py-2 pr-4">Time</th>
-                <th className="py-2 pr-4">Actions</th>
+              <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                <th className="py-3 pr-4">Token</th>
+                {!queueId && <th className="py-3 pr-4">Queue</th>}
+                <th className="py-3 pr-4">Service</th>
+                <th className="py-3 pr-4">Customer</th>
+                <th className="py-3 pr-4">Position</th>
+                <th className="py-3 pr-4">Status</th>
+                <th className="py-3 pr-4">Counter</th>
+                <th className="py-3 pr-4">Time</th>
+                <th className="py-3 pr-4">Actions</th>
               </tr>
             </thead>
             <tbody>
               {liveTable.data.map((row) => (
                 <tr
                   key={row.id}
-                  className="border-b border-border transition-colors duration-150 hover:bg-subtle"
+                  className="border-b border-border transition-colors duration-150 hover:bg-subtle/60"
                 >
-                  <td className="py-2 pr-4">
-                    <span className="text-lg font-bold text-fg">{row.serialNumber}</span>
+                  <td className="py-3 pr-4">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center justify-center rounded-lg bg-subtle px-2.5 py-1 text-base font-extrabold font-mono tracking-tight text-fg border border-border">
+                        {row.serialNumber}
+                      </span>
+                    </div>
                     {row.assignedSession && (
-                      <span className="block text-xs text-muted">
+                      <span className="block mt-1 text-[11px] text-muted font-medium">
                         Session {formatSessionWindow(row.assignedSession)}
                       </span>
                     )}
                   </td>
-                  {!queueId && <td className="py-2 pr-4">{row.queue.name}</td>}
-                  <td className="py-2 pr-4">
+                  {!queueId && <td className="py-3 pr-4 font-medium text-fg">{row.queue.name}</td>}
+                  <td className="py-3 pr-4">
                     <ServicesSummaryCell services={row.services} />
                   </td>
-                  <td className="py-2 pr-4">
+                  <td className="py-3 pr-4">
                     <CustomerSummaryCell row={row} onOpenDetails={() => setDetailsRow(row)} />
                   </td>
-                  <td className="py-2 pr-4">
+                  <td className="py-3 pr-4">
                     {row.actionEligibility?.reason === 'SESSION_NOT_STARTED' ? (
-                      <span className="text-muted" title="Joins the line when the assigned session starts.">
+                      <span className="rounded-md bg-subtle px-2 py-0.5 text-xs text-muted" title="Joins the line when the assigned session starts.">
                         Scheduled
                       </span>
+                    ) : row.position === 1 ? (
+                      <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-bold text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        Next (#1)
+                      </span>
                     ) : (
-                      (row.position ?? '—')
+                      <span className="text-fg-soft font-medium">{row.position ?? '—'}</span>
                     )}
                   </td>
-                  <td className="py-2 pr-4">
-                    <StatusBadge status={row.status} />
+                  <td className="py-3 pr-4">
+                    <StatusBadge status={row.status} size="sm" />
                   </td>
-                  <td className="py-2 pr-4">{row.counter?.name ?? '—'}</td>
-                  <td className="py-2 pr-4">{formatDateTime(row.calledAt ?? row.createdAt)}</td>
-                  <td className="py-2 pr-4">
+                  <td className="py-3 pr-4">
+                    {row.counter?.name ? (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-subtle px-2 py-0.5 text-xs font-medium text-fg border border-border">
+                        {row.counter.name}
+                      </span>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 pr-4 text-xs text-muted whitespace-nowrap">
+                    {formatDateTime(row.calledAt ?? row.createdAt)}
+                  </td>
+                  <td className="py-3 pr-4">
                     <TokenActions
                       tokenId={row.id}
                       queueId={row.queue.id}
