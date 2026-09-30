@@ -3,6 +3,7 @@ import { useExportReport, useReport } from '../hooks/useReports';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
+import { PageHeader } from '../components/PageHeader';
 import { PermissionGate } from '../components/PermissionGate';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { actionErrorMessage } from '../utils/actionError';
@@ -26,127 +27,220 @@ export function ReportsPage() {
   const exportReport = useExportReport();
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-fg">Reports</h1>
-        <PermissionGate permission="export_reports">
-          <Button variant="secondary" onClick={() => exportReport.mutate(query)} disabled={exportReport.isPending}>
-            {exportReport.isPending ? 'Exporting…' : 'Export CSV'}
-          </Button>
-        </PermissionGate>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Reports"
+        description="Analyze customer queue throughput, wait times, counter utilization, and peak traffic hours."
+        actions={
+          <PermissionGate permission="export_reports">
+            <Button
+              variant="secondary"
+              onClick={() => exportReport.mutate(query)}
+              disabled={exportReport.isPending}
+            >
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M4.5 2A1.5 1.5 0 003 3.5v13A1.5 1.5 0 004.5 18h11a1.5 1.5 0 001.5-1.5V7.621a1.5 1.5 0 00-.44-1.06l-4.12-4.122A1.5 1.5 0 0011.378 2H4.5zm4.75 6.75a.75.75 0 011.5 0v3.69l1.22-1.22a.75.75 0 111.06 1.06l-2.5 2.5a.75.75 0 01-1.06 0l-2.5-2.5a.75.75 0 111.06-1.06l1.22 1.22V8.75z" clipRule="evenodd" />
+              </svg>
+              {exportReport.isPending ? 'Exporting…' : 'Export CSV'}
+            </Button>
+          </PermissionGate>
+        }
+      />
+
       <ErrorBanner message={exportReport.error ? actionErrorMessage(exportReport.error) : null} />
 
-      <div className="mb-4 flex flex-wrap items-end gap-2">
+      {/* Date Range Selector Toolbar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface p-2.5 shadow-xs">
         {(Object.keys(RANGE_LABELS) as ReportRangePreset[]).map((r) => (
-          <Button key={r} variant={range === r ? 'primary' : 'secondary'} onClick={() => setRange(r)}>
+          <Button
+            key={r}
+            variant={range === r ? 'primary' : 'ghost'}
+            size="md"
+            onClick={() => setRange(r)}
+          >
             {RANGE_LABELS[r]}
           </Button>
         ))}
         {range === 'custom' && (
-          <>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="rounded-md border border-border-strong px-2 py-1 text-sm" />
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="rounded-md border border-border-strong px-2 py-1 text-sm" />
-          </>
+          <div className="flex items-center gap-2 pl-2 border-l border-border">
+            <input
+              type="date"
+              value={from}
+              aria-label="Start date"
+              onChange={(e) => setFrom(e.target.value)}
+              className="rounded-lg border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg focus:border-brand-500"
+            />
+            <span className="text-xs text-muted">to</span>
+            <input
+              type="date"
+              value={to}
+              aria-label="End date"
+              onChange={(e) => setTo(e.target.value)}
+              className="rounded-lg border border-border-strong bg-surface px-2.5 py-1 text-xs text-fg focus:border-brand-500"
+            />
+          </div>
         )}
       </div>
 
       {isLoading || !report ? (
-        <Spinner />
+        <Spinner label="Generating performance report…" />
       ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-            <Card>
-              <p className="text-xs uppercase text-faint">Created</p>
-              <p className="text-2xl font-bold text-fg">{report.tokensCreated}</p>
+        <div className="space-y-6">
+          {/* KPI Metrics Summary Grid */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <Card className="flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-faint">Created</span>
+                <p className="mt-2 text-3xl font-extrabold tracking-tight text-fg">{report.tokensCreated}</p>
+              </div>
+              <p className="mt-3 text-xs text-muted">Total arrivals</p>
             </Card>
-            <Card>
-              <p className="text-xs uppercase text-faint">Completed</p>
-              <p className="text-2xl font-bold text-fg">{report.tokensCompleted}</p>
+
+            <Card className="flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Completed</span>
+                <p className="mt-2 text-3xl font-extrabold tracking-tight text-fg">{report.tokensCompleted}</p>
+              </div>
+              <p className="mt-3 text-xs text-muted">
+                {report.tokensCreated > 0 ? `${Math.round((report.tokensCompleted / report.tokensCreated) * 100)}% completion rate` : 'No arrivals'}
+              </p>
             </Card>
-            <Card>
-              <p className="text-xs uppercase text-faint">Skipped</p>
-              <p className="text-2xl font-bold text-fg">{report.tokensSkipped}</p>
+
+            <Card className="flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-rose-600 dark:text-rose-400">Skipped</span>
+                <p className="mt-2 text-3xl font-extrabold tracking-tight text-fg">{report.tokensSkipped}</p>
+              </div>
+              <p className="mt-3 text-xs text-muted">No-shows or dropped</p>
             </Card>
-            <Card>
-              <p className="text-xs uppercase text-faint">Avg Wait</p>
-              <p className="text-2xl font-bold text-fg">{formatMinutes(report.averageWaitingTimeMinutes)}</p>
+
+            <Card className="flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-faint">Avg Wait</span>
+                <p className="mt-2 text-3xl font-extrabold tracking-tight text-fg">{formatMinutes(report.averageWaitingTimeMinutes)}</p>
+              </div>
+              <p className="mt-3 text-xs text-muted">In queue line</p>
             </Card>
-            <Card>
-              <p className="text-xs uppercase text-faint">Avg Service</p>
-              <p className="text-2xl font-bold text-fg">{formatMinutes(report.averageServiceDurationMinutes)}</p>
+
+            <Card className="flex flex-col justify-between">
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-wider text-faint">Avg Service</span>
+                <p className="mt-2 text-3xl font-extrabold tracking-tight text-fg">{formatMinutes(report.averageServiceDurationMinutes)}</p>
+              </div>
+              <p className="mt-3 text-xs text-muted">At counter</p>
             </Card>
           </div>
 
+          {/* Queue Performance Table */}
           <Card>
-            <h2 className="mb-3 text-base font-semibold text-fg-soft">Queue Performance</h2>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                  <th className="py-2 pr-4">Queue</th>
-                  <th className="py-2 pr-4">Created</th>
-                  <th className="py-2 pr-4">Completed</th>
-                  <th className="py-2 pr-4">Skipped</th>
-                  <th className="py-2 pr-4">Avg Wait</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.queuePerformance.map((row) => (
-                  <tr key={row.queueId} className="border-b border-border">
-                    <td className="py-2 pr-4">{row.queueName}</td>
-                    <td className="py-2 pr-4">{row.created}</td>
-                    <td className="py-2 pr-4">{row.completed}</td>
-                    <td className="py-2 pr-4">{row.skipped}</td>
-                    <td className="py-2 pr-4">{formatMinutes(row.averageWaitMinutes)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-
-          <Card>
-            <h2 className="mb-3 text-base font-semibold text-fg-soft">Counter Utilization</h2>
-            <p className="mb-2 text-xs text-faint">
-              Share of tokens each counter served — an approximation, since the system does not track
-              wall-clock active/offline duration per counter.
-            </p>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                  <th className="py-2 pr-4">Counter</th>
-                  <th className="py-2 pr-4">Tokens Served</th>
-                  <th className="py-2 pr-4">Utilization</th>
-                </tr>
-              </thead>
-              <tbody>
-                {report.counterUtilization.map((row) => (
-                  <tr key={row.counterId} className="border-b border-border">
-                    <td className="py-2 pr-4">{row.counterName}</td>
-                    <td className="py-2 pr-4">{row.tokensServed}</td>
-                    <td className="py-2 pr-4">{row.utilizationPercent}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-
-          <Card>
-            <h2 className="mb-3 text-base font-semibold text-fg-soft">Peak Hours</h2>
-            <div className="flex items-end gap-1" style={{ height: 120 }}>
-              {report.peakHours.map((entry) => {
-                const max = Math.max(...report.peakHours.map((e) => e.count), 1);
-                return (
-                  <div key={entry.hour} className="flex flex-1 flex-col items-center gap-1">
-                    <div
-                      className="w-full rounded-t bg-brand-500"
-                      style={{ height: `${(entry.count / max) * 100}%` }}
-                      title={`${entry.count} tokens`}
-                    />
-                    <span className="text-[10px] text-faint">{entry.hour}</span>
-                  </div>
-                );
-              })}
+            <div className="mb-4 border-b border-border pb-3">
+              <h2 className="text-base font-bold text-fg">Queue Performance</h2>
+              <p className="text-xs text-muted">Throughput and average wait time per service line</p>
             </div>
+            {report.queuePerformance.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted italic">No queue data for this period.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                      <th className="py-3 pr-4">Queue</th>
+                      <th className="py-3 pr-4">Created</th>
+                      <th className="py-3 pr-4">Completed</th>
+                      <th className="py-3 pr-4">Skipped</th>
+                      <th className="py-3 pr-4">Avg Wait</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.queuePerformance.map((row) => (
+                      <tr key={row.queueId} className="border-b border-border transition-colors hover:bg-subtle/50">
+                        <td className="py-3 pr-4 font-semibold text-fg">{row.queueName}</td>
+                        <td className="py-3 pr-4 font-mono font-medium text-fg-soft">{row.created}</td>
+                        <td className="py-3 pr-4 font-mono font-medium text-emerald-700 dark:text-emerald-400">{row.completed}</td>
+                        <td className="py-3 pr-4 font-mono font-medium text-rose-700 dark:text-rose-400">{row.skipped}</td>
+                        <td className="py-3 pr-4 text-fg-soft">{formatMinutes(row.averageWaitMinutes)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* Counter Utilization Table */}
+          <Card>
+            <div className="mb-4 border-b border-border pb-3">
+              <h2 className="text-base font-bold text-fg">Counter Utilization</h2>
+              <p className="text-xs text-muted">
+                Share of tokens served by each counter desk during this period.
+              </p>
+            </div>
+            {report.counterUtilization.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted italic">No counter activity recorded for this period.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                      <th className="py-3 pr-4">Counter</th>
+                      <th className="py-3 pr-4">Tokens Served</th>
+                      <th className="py-3 pr-4">Utilization</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.counterUtilization.map((row) => (
+                      <tr key={row.counterId} className="border-b border-border transition-colors hover:bg-subtle/50">
+                        <td className="py-3 pr-4 font-semibold text-fg">{row.counterName}</td>
+                        <td className="py-3 pr-4 font-mono font-medium text-fg-soft">{row.tokensServed}</td>
+                        <td className="py-3 pr-4">
+                          <div className="flex items-center gap-3">
+                            <div className="h-2 w-32 rounded-full bg-subtle overflow-hidden">
+                              <div
+                                className="h-full bg-brand-600 rounded-full"
+                                style={{ width: `${Math.min(row.utilizationPercent, 100)}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-xs font-semibold text-fg">
+                              {row.utilizationPercent}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* Peak Traffic Hours Chart */}
+          <Card>
+            <div className="mb-4 border-b border-border pb-3">
+              <h2 className="text-base font-bold text-fg">Peak Hours</h2>
+              <p className="text-xs text-muted">Customer arrival distribution by hour of the day</p>
+            </div>
+            {report.peakHours.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted italic">No hourly traffic data available.</p>
+            ) : (
+              <div className="flex items-end gap-1.5 pt-6 pb-2" style={{ height: 160 }}>
+                {report.peakHours.map((entry) => {
+                  const max = Math.max(...report.peakHours.map((e) => e.count), 1);
+                  const pct = Math.max(Math.round((entry.count / max) * 100), entry.count > 0 ? 6 : 2);
+                  return (
+                    <div key={entry.hour} className="group relative flex flex-1 flex-col items-center gap-1.5 h-full justify-end">
+                      <div
+                        className="w-full rounded-t-md bg-brand-500 transition-all group-hover:bg-brand-600 dark:bg-brand-600 dark:group-hover:bg-brand-500"
+                        style={{ height: `${pct}%` }}
+                        title={`${entry.count} tokens at ${entry.hour}`}
+                      />
+                      <span className="text-[10px] font-mono text-faint group-hover:text-fg transition-colors">
+                        {entry.hour}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </Card>
         </div>
       )}

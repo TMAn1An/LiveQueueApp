@@ -13,6 +13,7 @@ import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { PageHeader } from '../components/PageHeader';
 import { actionErrorMessage } from '../utils/actionError';
 import { PermissionGate } from '../components/PermissionGate';
 import { Pagination } from '../components/Pagination';
@@ -28,8 +29,6 @@ function CreateStaffModal({
   onInvited,
 }: {
   onClose: () => void;
-  /** Reports back whether the invitation actually went out, so the page can
-   * say so plainly rather than the modal claiming success and vanishing. */
   onInvited: (result: { name: string; emailSent: boolean }) => void;
 }) {
   const createStaff = useCreateStaff();
@@ -52,65 +51,70 @@ function CreateStaffModal({
   return (
     <Modal title="Invite Staff Member" onClose={onClose}>
       <ErrorBanner message={error} />
-      <div className="mb-3 grid grid-cols-2 gap-2">
+      <div className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="staff-name">
+              Name
+            </label>
+            <input
+              id="staff-name"
+              value={name}
+              placeholder="e.g. John Doe"
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="staff-role">
+              Role
+            </label>
+            <select
+              id="staff-role"
+              value={role}
+              onChange={(e) => setRole(e.target.value as Exclude<StaffRole, 'OWNER'>)}
+              className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+            >
+              {MANAGEABLE_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
         <div>
-          <label className="mb-1 block text-xs text-muted" htmlFor="staff-name">
-            Name
+          <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="staff-email">
+            Email
           </label>
           <input
-            id="staff-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
+            id="staff-email"
+            type="email"
+            value={email}
+            placeholder="colleague@example.com"
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
           />
         </div>
-        <div>
-          <label className="mb-1 block text-xs text-muted" htmlFor="staff-role">
-            Role
-          </label>
-          <select
-            id="staff-role"
-            value={role}
-            onChange={(e) => setRole(e.target.value as Exclude<StaffRole, 'OWNER'>)}
-            className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
+
+        <p className="rounded-lg bg-subtle p-3 text-xs text-muted">
+          We'll email them a link to set their own password and sign in. Permissions are determined
+          entirely by the selected role and cannot be customized.
+        </p>
+
+        <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            loading={createStaff.isPending}
+            disabled={!name || !email || createStaff.isPending}
+            onClick={() => void handleSubmit()}
           >
-            {MANAGEABLE_ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+            {createStaff.isPending ? 'Sending invitation…' : 'Send invitation'}
+          </Button>
         </div>
-      </div>
-      <div className="mb-3">
-        <label className="mb-1 block text-xs text-muted" htmlFor="staff-email">
-          Email
-        </label>
-        <input
-          id="staff-email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
-        />
-      </div>
-      {/* ADR-035: no password field. They receive a link and choose their
-          own, so an administrator never handles a colleague's password. */}
-      <p className="mb-2 text-xs text-muted">
-        We'll email them a link to set their own password and sign in. Permissions are determined
-        entirely by the selected role and cannot be customized.
-      </p>
-      <div className="mb-4 flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button
-          loading={createStaff.isPending}
-          disabled={!name || !email || createStaff.isPending}
-          onClick={() => void handleSubmit()}
-        >
-          {createStaff.isPending ? 'Sending invitation…' : 'Send invitation'}
-        </Button>
       </div>
     </Modal>
   );
@@ -134,23 +138,40 @@ function StaffRow({ staff }: { staff: Staff }) {
     }
   }
 
+  const initial = staff.name.trim() ? staff.name.trim()[0].toUpperCase() : 'S';
+
   return (
-    <tr className="border-b border-border transition-colors duration-150 hover:bg-subtle">
-      <td className="py-2 pr-4">{staff.name}</td>
-      <td className="py-2 pr-4">{staff.email}</td>
-      <td className="py-2 pr-4">{staff.role}</td>
-      <td className="py-2 pr-4">
+    <tr className="border-b border-border transition-colors hover:bg-subtle/50">
+      <td className="py-3 pr-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-700 text-xs font-bold dark:bg-brand-950 dark:text-brand-300">
+            {initial}
+          </div>
+          <span className="font-semibold text-fg">{staff.name}</span>
+        </div>
+      </td>
+      <td className="py-3 pr-4 text-sm text-fg-soft">{staff.email}</td>
+      <td className="py-3 pr-4">
+        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ${
+          staff.role === 'OWNER'
+            ? 'bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800'
+            : staff.role === 'ADMIN'
+              ? 'bg-brand-50 text-brand-700 border border-brand-200 dark:bg-brand-950/60 dark:text-brand-300 dark:border-brand-800'
+              : 'bg-subtle text-fg-soft border border-border'
+        }`}>
+          {staff.role}
+        </span>
+      </td>
+      <td className="py-3 pr-4">
         {staff.invitationPending ? (
-          // A clearer statement than the raw status: this person has not
-          // finished setting up, and the row offers the way to fix it.
           <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
             Invitation pending
           </span>
         ) : (
-          <StatusBadge status={staff.status} />
+          <StatusBadge status={staff.status} size="sm" />
         )}
       </td>
-      <td className="py-2 pr-4">
+      <td className="py-3 pr-4">
         <PermissionGate permission="manage_staff">
           {staff.role !== 'OWNER' && (
             <div className="flex flex-wrap items-center gap-2">
@@ -193,7 +214,7 @@ function StaffRow({ staff }: { staff: Staff }) {
             </div>
           )}
         </PermissionGate>
-        {rowError && <ErrorBanner message={rowError} />}
+        {rowError && <div className="mt-2"><ErrorBanner message={rowError} /></div>}
         {confirmingDelete && (
           <ConfirmDialog
             title={`Remove staff member "${staff.name}"?`}
@@ -219,8 +240,6 @@ function StaffRow({ staff }: { staff: Staff }) {
 export function StaffPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  // Server-side search: this list is paginated, so filtering only the loaded
-  // page would hide matches sitting on other pages.
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: result, isLoading, isFetching } = useStaffList(page, 20, debouncedSearch);
   const [showCreate, setShowCreate] = useState(false);
@@ -228,29 +247,32 @@ export function StaffPage() {
 
   function handleSearchChange(value: string) {
     setSearch(value);
-    // A new search re-queries from the start; staying on page 3 of the old
-    // result set would usually land past the end of the new one.
     setPage(1);
   }
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-fg">Staff</h1>
-        <PermissionGate permission="manage_staff">
-          <Button onClick={() => setShowCreate(true)}>Invite Staff Member</Button>
-        </PermissionGate>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Staff"
+        description="Invite colleagues, assign operational roles, and manage access to LiveQueue."
+        actions={
+          <PermissionGate permission="manage_staff">
+            <Button size="lg" variant="primary" onClick={() => setShowCreate(true)}>
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+              </svg>
+              Invite Staff Member
+            </Button>
+          </PermissionGate>
+        }
+      />
 
-      {/* Says what actually happened. A created account whose invitation
-          bounced is not a failure to hide — it is a thing to fix with the
-          Resend action on that person's row. */}
       {inviteNotice && (
         <div
           className={
             inviteNotice.emailSent
-              ? 'mb-4 rounded-md border border-border bg-subtle p-3 text-sm text-fg-soft'
-              : 'mb-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200'
+              ? 'rounded-xl border border-border bg-subtle p-4 text-sm font-medium text-fg shadow-xs'
+              : 'rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-900 shadow-xs dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200'
           }
         >
           {inviteNotice.emailSent
@@ -259,7 +281,7 @@ export function StaffPage() {
         </div>
       )}
 
-      <div className="mb-4 flex gap-2">
+      <div className="max-w-md">
         <SearchInput
           value={search}
           onChange={handleSearchChange}
@@ -268,37 +290,38 @@ export function StaffPage() {
         />
       </div>
 
-      {/* Rows already on screen stay put while a new search loads —
-          blanking them on every keystroke would be worse than the wait. */}
       {isFetching && !isLoading && (
-        <div className="mb-2 flex justify-end">
+        <div className="flex justify-end">
           <RefreshIndicator />
         </div>
       )}
+
       <Card>
         {isLoading ? (
-          <Spinner />
+          <Spinner label="Loading staff…" />
         ) : !result?.data.length ? (
           <EmptyState
             message={debouncedSearch ? 'No staff match your search.' : 'No staff found.'}
           />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                <th className="py-2 pr-4">Name</th>
-                <th className="py-2 pr-4">Email</th>
-                <th className="py-2 pr-4">Role</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.data.map((s) => (
-                <StaffRow key={s.id} staff={s} />
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                  <th className="py-3 pr-4">Name</th>
+                  <th className="py-3 pr-4">Email</th>
+                  <th className="py-3 pr-4">Role</th>
+                  <th className="py-3 pr-4">Status</th>
+                  <th className="py-3 pr-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.data.map((s) => (
+                  <StaffRow key={s.id} staff={s} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         <Pagination pagination={result?.pagination} onPageChange={setPage} />
       </Card>
