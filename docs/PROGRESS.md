@@ -230,6 +230,15 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Security/regression** — reviewed: tenant scoping of every new query path (session CRUD via queue→org, scope change via org-scoped queue lookup, cross-org test); no internal field leaks (`identityScopeKey`, fingerprint, OTP cipher stripped; tested); scheduled-token gates race-free (monotonic set); future-slot and daily-cap races tested; cross-week occurrence keys tested; typed custom text never in FCM; notification dedupe unchanged.
 - **Verification:** mobile 360/360, dashboard 254/254.
 
+### V2 Home-PC Final Verification (2026-10-01)
+
+**Status: PASS, from the final committed source (`81e6171`).** Local databases only (`livequeue_dev`; a dedicated local `livequeue_test` was created on this PC so the suite's `resetDb()` never touches the dev database).
+
+- **Backend:** `npx vitest run` 835/835 (76 files); `typecheck`, `lint`, `build` clean; `prisma format` no-op (line endings only), `prisma validate` clean, `prisma migrate status` up to date on both local databases (24 migrations).
+- **Dashboard:** `vitest run` 254/254 (38 files); `tsc -b` clean; `oxlint` the same 5 pre-existing warnings; `npm run build` clean.
+- **Mobile:** `flutter test` 360/360; `flutter analyze` the same 26 pre-existing info hints; `flutter build apk --debug` succeeds; `flutter build apk --release --dart-define=API_BASE_URL=https://livequeueapp.onrender.com` succeeds (67.7 MB) — **debug-signed** (`CN=Android Debug`, verified with `apksigner`; no `android/key.properties` on this machine). Built only — not published, tagged or uploaded.
+- **Nothing deployed; no production database accessed.**
+
 ### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
 
 **Status: PASS. No code changes required — every V2 checkpoint (1-9) plus every ad-hoc fix through today's skip-reason/completion-feedback work verified together as one system for the first time.**
