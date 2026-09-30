@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/models/counter_info.dart';
 import 'package:mobile_app/models/live_queue_token.dart';
+import 'package:mobile_app/models/queue_schedule_status.dart';
 import 'package:mobile_app/providers/token_tracking_provider.dart';
 import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
@@ -68,8 +69,10 @@ LiveQueueToken _token({
   String? skipReasonCode,
   String? skipReasonText,
   String? completionFeedback,
+  QueueSessionWindow? assignedSession,
 }) {
   return LiveQueueToken(
+    assignedSession: assignedSession,
     serviceStartVerificationRequired: serviceStartVerificationRequired,
     skipReasonCode: skipReasonCode,
     skipReasonText: skipReasonText,
@@ -143,6 +146,57 @@ void main() {
 
     // Never a fabricated "0 minutes" — but not a bare "unavailable" either.
     expect(find.text('Waiting for an active counter'), findsOneWidget);
+  });
+
+  testWidgets('ADR-048: a token awaiting its later session shows the session, never a position or ETA',
+      (tester) async {
+    final provider = _FakeTokenTrackingProvider();
+    provider.pushState(
+      token: _token(
+        status: TokenStatus.waiting,
+        position: null,
+        estimatedWaitMinutes: null,
+        etaUnavailableReason: LiveQueueToken.reasonSessionNotStarted,
+        assignedSession: QueueSessionWindow(
+          startMinute: 840,
+          endMinute: 1020,
+          startsAt: DateTime.now().add(const Duration(hours: 3)),
+        ),
+      ),
+    );
+    await _pump(tester, provider);
+
+    expect(find.text('Scheduled for'), findsOneWidget);
+    expect(find.text('14:00–17:00'), findsOneWidget);
+    expect(find.text('Position'), findsNothing);
+    expect(find.text('Estimated Wait'), findsNothing);
+    expect(find.text('Estimated time unavailable'), findsNothing);
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is Text && RegExp(r'^\d{1,2}:\d{2}$').hasMatch(widget.data ?? ''),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('once the session has started, the session is shown beside the normal position and ETA',
+      (tester) async {
+    final provider = _FakeTokenTrackingProvider();
+    provider.pushState(
+      token: _token(
+        status: TokenStatus.waiting,
+        position: 2,
+        estimatedWaitMinutes: 10,
+        estimatedReadyAt: DateTime.now().add(const Duration(minutes: 10)),
+        assignedSession: const QueueSessionWindow(startMinute: 840, endMinute: 1020),
+      ),
+    );
+    await _pump(tester, provider);
+
+    expect(find.text('Scheduled for'), findsNothing);
+    expect(find.text('Position'), findsOneWidget);
+    expect(find.text('Session'), findsOneWidget);
+    expect(find.text('14:00–17:00'), findsOneWidget);
   });
 
   testWidgets('falls back to a plain message when the reason is unknown', (tester) async {

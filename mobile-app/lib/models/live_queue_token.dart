@@ -126,7 +126,15 @@ class LiveQueueToken {
   bool get isWaitingForActiveCounter =>
       etaUnavailableReason == LiveQueueToken.reasonNoActiveCounter;
 
+  /// ADR-048: this token was given a place in a later session today, which
+  /// has not started yet. Until it does the backend gives no position and no
+  /// ETA — any number would suggest being served before the session starts —
+  /// so the app shows "Scheduled for 14:00–17:00" instead.
+  bool get isAwaitingSessionStart =>
+      etaUnavailableReason == LiveQueueToken.reasonSessionNotStarted;
+
   static const String reasonNoActiveCounter = 'NO_ACTIVE_COUNTER';
+  static const String reasonSessionNotStarted = 'SESSION_NOT_STARTED';
 
   final CounterInfo? counter;
   final DateTime createdAt;

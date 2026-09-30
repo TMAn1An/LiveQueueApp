@@ -48,12 +48,22 @@ class QueueDetailsScreen extends StatelessWidget {
                   // reason (closed today / opens at 09:00 / session full,
                   // etc.) — shown here, before a form is filled in, the same
                   // way the identity/repeat notices above already are.
-                  else if (config.schedule.scheduleEnabled && !config.schedule.isOpenNow)
+                  else if (config.schedule.scheduleEnabled && !config.schedule.acceptingJoins)
                     _Notice(text: config.schedule.message ?? 'This queue is not currently open.')
                   else if (_repeatNotice(config) != null)
                     _Notice(text: _repeatNotice(config)!),
+                  // ADR-048: before the next session starts the queue still
+                  // accepts joins — the customer is told they will be served
+                  // later today, not turned away.
                   if (config.schedule.scheduleEnabled &&
-                      config.schedule.isOpenNow &&
+                      config.schedule.acceptingJoins &&
+                      !config.schedule.isOpenNow &&
+                      config.schedule.message != null) ...[
+                    const SizedBox(height: 8),
+                    Text(config.schedule.message!),
+                  ],
+                  if (config.schedule.scheduleEnabled &&
+                      config.schedule.acceptingJoins &&
                       config.schedule.todaySessions.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     Text(

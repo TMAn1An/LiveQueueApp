@@ -456,6 +456,26 @@ describe('TokenActions — Skip unlocks exactly with Call', () => {
     );
   });
 
+  it('ADR-048: a row awaiting its assigned session reads "Scheduled", with neither Call nor Skip', () => {
+    render(
+      <TokenActions
+        tokenId="t1"
+        queueId="q1"
+        status="WAITING"
+        position={null}
+        actionEligibility={{ eligible: false, reason: 'SESSION_NOT_STARTED' }}
+      />,
+    );
+
+    expect(screen.queryByText('Call')).not.toBeInTheDocument();
+    expect(screen.queryByText('Skip')).not.toBeInTheDocument();
+    expect(screen.queryByText('Locked')).not.toBeInTheDocument();
+    expect(screen.getByText('Scheduled')).toHaveAttribute(
+      'title',
+      "This customer's assigned session has not started yet.",
+    );
+  });
+
   it('explains a locked row caused by earlier customers differently', () => {
     render(
       <TokenActions

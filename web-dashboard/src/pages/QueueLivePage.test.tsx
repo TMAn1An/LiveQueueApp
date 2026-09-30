@@ -129,6 +129,25 @@ describe('QueueLivePage', () => {
     expect(useLiveQueueTable).toHaveBeenCalledWith(1, 20, 'qA');
   });
 
+  it('ADR-048: a row awaiting its assigned session shows "Scheduled" and the session window', () => {
+    mockTable([
+      row({
+        id: 't2',
+        serialNumber: 'A002',
+        position: null,
+        estimatedWaitMinutes: null,
+        actionEligibility: { eligible: false, reason: 'SESSION_NOT_STARTED' },
+        assignedSession: { startMinute: 840, endMinute: 1020, startsAt: '2026-09-09T14:00:00.000Z' },
+      }),
+    ]);
+
+    renderPage();
+
+    expect(screen.getByText('Session 14:00–17:00')).toBeInTheDocument();
+    expect(screen.getAllByText('Scheduled').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByRole('button', { name: 'Call' })).not.toBeInTheDocument();
+  });
+
   it('shows the queue it belongs to, and its own customers', () => {
     renderPage();
 

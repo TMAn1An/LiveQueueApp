@@ -5,7 +5,7 @@ import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
 import { TokenActions } from '../components/TokenActions';
 import { Modal } from '../components/Modal';
-import { formatDateTime } from '../utils/format';
+import { formatDateTime, formatSessionWindow } from '../utils/format';
 import type { LiveQueueTokenRow } from '../types/dashboard';
 
 /**
@@ -67,7 +67,14 @@ export function LiveQueueTable({
                   key={row.id}
                   className="border-b border-border transition-colors duration-150 hover:bg-subtle"
                 >
-                  <td className="py-2 pr-4 text-lg font-bold text-fg">{row.serialNumber}</td>
+                  <td className="py-2 pr-4">
+                    <span className="text-lg font-bold text-fg">{row.serialNumber}</span>
+                    {row.assignedSession && (
+                      <span className="block text-xs text-muted">
+                        Session {formatSessionWindow(row.assignedSession)}
+                      </span>
+                    )}
+                  </td>
                   {!queueId && <td className="py-2 pr-4">{row.queue.name}</td>}
                   <td className="py-2 pr-4">
                     <ServicesSummaryCell services={row.services} />
@@ -75,7 +82,15 @@ export function LiveQueueTable({
                   <td className="py-2 pr-4">
                     <CustomerSummaryCell row={row} onOpenDetails={() => setDetailsRow(row)} />
                   </td>
-                  <td className="py-2 pr-4">{row.position ?? '—'}</td>
+                  <td className="py-2 pr-4">
+                    {row.actionEligibility?.reason === 'SESSION_NOT_STARTED' ? (
+                      <span className="text-muted" title="Joins the line when the assigned session starts.">
+                        Scheduled
+                      </span>
+                    ) : (
+                      (row.position ?? '—')
+                    )}
+                  </td>
                   <td className="py-2 pr-4">
                     <StatusBadge status={row.status} />
                   </td>

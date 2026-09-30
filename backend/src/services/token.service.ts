@@ -545,16 +545,16 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     // and run only now, after the queue row lock, which is what makes them
     // race-free against a concurrent createToken call for the same queue
     // (see assignSessionForNewToken's own doc comment).
+    const scheduleTimezone = resolveQueueTimezone(queue, queue.organization) ?? 'UTC';
     const sessionAssignment = queue.scheduleEnabled
       ? await assignSessionForNewToken(tx, {
           queueId: input.queueId,
           dailyCapacity: queue.scheduleDailyCapacity,
-          moment: resolveLocalMoment(
-            new Date(),
-            resolveQueueTimezone(queue, queue.organization) ?? 'UTC',
-          ),
+          moment: resolveLocalMoment(new Date(), scheduleTimezone),
+          timezone: scheduleTimezone,
         })
       : null;
+
 
     const sequenceNumber = lockedQueue.nextTokenNumber;
     await tx.queue.update({
@@ -595,6 +595,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         assignedSessionDate: sessionAssignment?.assignedSessionDate ?? null,
         assignedSessionStartMinute: sessionAssignment?.assignedSessionStartMinute ?? null,
         assignedSessionEndMinute: sessionAssignment?.assignedSessionEndMinute ?? null,
+        assignedSessionStartsAt: sessionAssignment?.assignedSessionStartsAt ?? null,
         tokenServices: { create: input.serviceIds.map((serviceId) => ({ serviceId })) },
       },
     });
@@ -621,14 +622,36 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
  * of a bare "not available" — it names a queue-level operational state, not
  * anything about staff or other customers.
  */
-export type EtaUnavailableReason = 'NO_ACTIVE_COUNTER';
+export type EtaUnavailableReason = 'NO_ACTIVE_COUNTER' | 'SESSION_NOT_STARTED';
+
+/**
+ * ADR-048: a WAITING token assigned to a session that has not started yet is
+ * *scheduled* — held out of the callable line until that instant. True when
+ * the token carries a start instant still in the future. One definition,
+ * mirrored exactly by the `assigned_session_starts_at` condition in the three
+ * SQL paths (callToken's FCFS check, getWaitingTokenActionEligibility, nextToken).
+ *
+ * Those conditions compare against `(${now} AT TIME ZONE 'UTC')`, never the
+ * bare parameter: Prisma stores DateTime as a UTC wall-clock `timestamp`
+ * (no zone) but binds a JS Date as `timestamptz`, and Postgres would bridge
+ * the two through the *session* TimeZone — silently off by the server's
+ * offset anywhere that is not UTC.
+ */
+export function isAwaitingSessionStart(
+  token: { assignedSessionStartsAt: Date | null },
+  now: Date = new Date(),
+): boolean {
+  return token.assignedSessionStartsAt != null && token.assignedSessionStartsAt.getTime() > now.getTime();
+}
 
 interface QueueEtaEntry {
   id: string;
   organizationId: string;
   queueId: string;
   sequenceNumber: number;
-  position: number;
+  /** 1-based place in the callable line; null while the token is scheduled
+   * for a session that has not started (ADR-048). */
+  position: number | null;
   estimatedWaitMinutes: number | null;
   estimatedReadyAt: Date | null;
   etaUnavailableReason: EtaUnavailableReason | null;
@@ -670,20 +693,41 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
     }),
   ]);
 
+  // ADR-048: a token whose assigned session has not started yet is not in
+  // the callable line at all — it has no position, cannot be called, and is
+  // given no ETA (any number would suggest service before its session
+  // starts). It rejoins this computation, in sequence order, the moment its
+  // session begins.
+  const scheduled = waitingTokens.filter((token) => isAwaitingSessionStart(token, now));
+  const callable = waitingTokens.filter((token) => !isAwaitingSessionStart(token, now));
+  const scheduledEntries: QueueEtaEntry[] = scheduled.map((token) => ({
+    id: token.id,
+    organizationId: token.organizationId,
+    queueId: token.queueId,
+    sequenceNumber: token.sequenceNumber,
+    position: null,
+    estimatedWaitMinutes: null,
+    estimatedReadyAt: null,
+    etaUnavailableReason: 'SESSION_NOT_STARTED' as const,
+  }));
+
   if (activeCounters.length === 0) {
     // No meaningful denominator — an estimate here would imply active
     // service that isn't happening (approved product decision, carried
     // forward unchanged from the pre-Checkpoint-4 design).
-    return waitingTokens.map((token, index) => ({
-      id: token.id,
-      organizationId: token.organizationId,
-      queueId: token.queueId,
-      sequenceNumber: token.sequenceNumber,
-      position: index + 1,
-      estimatedWaitMinutes: null,
-      estimatedReadyAt: null,
-      etaUnavailableReason: 'NO_ACTIVE_COUNTER' as const,
-    }));
+    return [
+      ...callable.map((token, index) => ({
+        id: token.id,
+        organizationId: token.organizationId,
+        queueId: token.queueId,
+        sequenceNumber: token.sequenceNumber,
+        position: index + 1,
+        estimatedWaitMinutes: null,
+        estimatedReadyAt: null,
+        etaUnavailableReason: 'NO_ACTIVE_COUNTER' as const,
+      })),
+      ...scheduledEntries,
+    ];
   }
 
   const counterOccupancy: CounterOccupancy[] = activeCounters.map((counter) => {
@@ -707,14 +751,14 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
     return { freeAt: computeEffectiveEndTime(anchor, durationMinutes, now) };
   });
 
-  const waitingInputs: WaitingTokenInput[] = waitingTokens.map((token) => ({
+  const waitingInputs: WaitingTokenInput[] = callable.map((token) => ({
     id: token.id,
     durationMinutes: sumServiceDurations(token.tokenServices),
   }));
 
   const etaByTokenId = simulateWaitingTokenEtas(counterOccupancy, waitingInputs);
 
-  return waitingTokens.map((token, index) => {
+  const callableEntries = callable.map((token, index) => {
     const estimatedReadyAt = etaByTokenId.get(token.id) ?? null;
     return {
       id: token.id,
@@ -730,6 +774,7 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
       etaUnavailableReason: null,
     };
   });
+  return [...callableEntries, ...scheduledEntries];
 }
 
 async function computeComputedFields(token: Token): Promise<ComputedFields> {
@@ -851,7 +896,15 @@ function toCustomerView(
      * any token created before this feature existed. */
     assignedSession:
       token.assignedSessionStartMinute != null && token.assignedSessionEndMinute != null
-        ? { startMinute: token.assignedSessionStartMinute, endMinute: token.assignedSessionEndMinute }
+        ? {
+            startMinute: token.assignedSessionStartMinute,
+            endMinute: token.assignedSessionEndMinute,
+            /** ADR-048: the occurrence's absolute start. While it is in the
+             * future the token is scheduled, and the app shows "Scheduled for
+             * 14:00–17:00" instead of an ETA. Null on tokens assigned before
+             * this existed (always to an already-open session). */
+            startsAt: token.assignedSessionStartsAt,
+          }
         : null,
     createdAt: token.createdAt,
     calledAt: token.calledAt,
@@ -991,6 +1044,13 @@ export async function callToken(organizationId: string, tokenId: string, counter
     );
   }
   assertValidTransition(token.status, 'CALLED');
+  // ADR-048: assignedSessionStartsAt is fixed at creation, so this read
+  // needs no lock — a scheduled token can only ever become callable, never
+  // the reverse.
+  const now = new Date();
+  if (isAwaitingSessionStart(token, now)) {
+    throw new AppError(409, 'SESSION_NOT_STARTED', SESSION_NOT_STARTED_MESSAGE);
+  }
 
   return prisma.$transaction(async (tx) => {
     const counterRows = await tx.$queryRaw<{ id: string; status: string }[]>`
@@ -1014,12 +1074,20 @@ export async function callToken(organizationId: string, tokenId: string, counter
     // check runs — there is no window in which a concurrent transaction can
     // turn a true "no earlier token" result into a false one before this
     // transaction's own compare-and-swap UPDATE commits.
+    //
+    // ADR-048: "earlier" means earlier *in the callable line* — a token
+    // scheduled for a session that has not started is not waiting its turn
+    // yet, so it must not block the customers whose session is running. The
+    // exclusion is monotonic in the same way: a scheduled token can only
+    // join the callable set as time passes, and it does so with its own
+    // (fixed) sequence number, so this check stays race-free.
     const earlierWaitingRows = await tx.$queryRaw<{ exists: boolean }[]>`
       SELECT EXISTS (
         SELECT 1 FROM tokens
         WHERE queue_id = ${token.queueId}
           AND status = 'WAITING'
           AND sequence_number < ${token.sequenceNumber}
+          AND (assigned_session_starts_at IS NULL OR assigned_session_starts_at <= (${now} AT TIME ZONE 'UTC'))
       ) AS "exists"
     `;
     if (earlierWaitingRows[0]?.exists) {
@@ -1070,7 +1138,10 @@ export async function callToken(organizationId: string, tokenId: string, counter
  * Why a WAITING token cannot currently be acted on. Both reasons are
  * queue-operational facts staff can act on, not internal detail.
  */
-export type WaitingActionBlockedReason = 'EARLIER_WAITING' | 'NO_AVAILABLE_COUNTER';
+export type WaitingActionBlockedReason = 'SESSION_NOT_STARTED' | 'EARLIER_WAITING' | 'NO_AVAILABLE_COUNTER';
+
+const SESSION_NOT_STARTED_MESSAGE =
+  "This customer's assigned session has not started yet. They can be called once it begins.";
 
 export interface WaitingActionEligibility {
   eligible: boolean;
@@ -1100,14 +1171,22 @@ export interface WaitingActionEligibility {
  */
 export async function getWaitingTokenActionEligibility(
   client: Prisma.TransactionClient,
-  token: { id: string; queueId: string; sequenceNumber: number },
+  token: { id: string; queueId: string; sequenceNumber: number; assignedSessionStartsAt: Date | null },
+  now: Date = new Date(),
 ): Promise<WaitingActionEligibility> {
+  // ADR-048: checked first — a scheduled customer is not in the line yet,
+  // so neither order nor capacity is the reason they cannot be handled.
+  if (isAwaitingSessionStart(token, now)) {
+    return { eligible: false, reason: 'SESSION_NOT_STARTED' };
+  }
+
   const earlierWaitingRows = await client.$queryRaw<{ exists: boolean }[]>`
     SELECT EXISTS (
       SELECT 1 FROM tokens
       WHERE queue_id = ${token.queueId}
         AND status = 'WAITING'
         AND sequence_number < ${token.sequenceNumber}
+        AND (assigned_session_starts_at IS NULL OR assigned_session_starts_at <= (${now} AT TIME ZONE 'UTC'))
     ) AS "exists"
   `;
   if (earlierWaitingRows[0]?.exists) {
@@ -1164,7 +1243,12 @@ export async function hasFreeActiveCounter(queueId: string): Promise<boolean> {
 export function waitingActionEligibilityFrom(
   position: number | null,
   queueHasFreeCounter: boolean,
+  /** ADR-048: the row's ETA entry says its session has not started. */
+  awaitingSessionStart = false,
 ): WaitingActionEligibility {
+  if (awaitingSessionStart) {
+    return { eligible: false, reason: 'SESSION_NOT_STARTED' };
+  }
   if (position !== 1) {
     return { eligible: false, reason: 'EARLIER_WAITING' };
   }
@@ -1175,6 +1259,7 @@ export function waitingActionEligibilityFrom(
 }
 
 const WAITING_ACTION_BLOCKED_MESSAGE: Record<WaitingActionBlockedReason, string> = {
+  SESSION_NOT_STARTED: SESSION_NOT_STARTED_MESSAGE,
   EARLIER_WAITING: 'An earlier customer is still waiting. The earliest eligible customer must be handled first.',
   NO_AVAILABLE_COUNTER: 'No active counter is free right now, so this customer cannot be handled yet.',
 };
@@ -1292,7 +1377,11 @@ export const skipToken = (organizationId: string, tokenId: string, reason: SkipR
       }
       throw new AppError(
         409,
-        eligibility.reason === 'EARLIER_WAITING' ? 'FCFS_VIOLATION' : 'COUNTER_NOT_AVAILABLE',
+        eligibility.reason === 'EARLIER_WAITING'
+          ? 'FCFS_VIOLATION'
+          : eligibility.reason === 'SESSION_NOT_STARTED'
+            ? 'SESSION_NOT_STARTED'
+            : 'COUNTER_NOT_AVAILABLE',
         WAITING_ACTION_BLOCKED_MESSAGE[eligibility.reason],
       );
     },
@@ -1692,9 +1781,12 @@ export async function nextToken(organizationId: string, queueId: string, counter
     // — not the sequence-allocation lock in createToken) lets two counters
     // calling /next concurrently claim two different waiting tokens without
     // blocking on each other.
+    // ADR-048: a token scheduled for a session that has not started yet is
+    // passed over — it is not in the callable line until that instant.
     const eligibleRows = await tx.$queryRaw<{ id: string }[]>`
       SELECT id FROM tokens
       WHERE queue_id = ${queueId} AND status = 'WAITING'
+        AND (assigned_session_starts_at IS NULL OR assigned_session_starts_at <= (${new Date()} AT TIME ZONE 'UTC'))
       ORDER BY sequence_number ASC
       LIMIT 1
       FOR UPDATE SKIP LOCKED

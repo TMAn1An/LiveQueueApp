@@ -167,7 +167,19 @@ export async function getLiveQueueTable(
           ? waitingActionEligibilityFrom(
               position?.position ?? null,
               queueHasFreeCounter.get(token.queueId) ?? false,
+              position?.etaUnavailableReason === 'SESSION_NOT_STARTED',
             )
+          : null,
+      // ADR-048: the token's fixed session assignment, so staff can see why
+      // a scheduled row is held and when it will join the line. The
+      // snapshotted window only — never the internal queueSessionId.
+      assignedSession:
+        token.assignedSessionStartMinute != null && token.assignedSessionEndMinute != null
+          ? {
+              startMinute: token.assignedSessionStartMinute,
+              endMinute: token.assignedSessionEndMinute,
+              startsAt: token.assignedSessionStartsAt,
+            }
           : null,
       createdAt: token.createdAt,
       calledAt: token.calledAt,

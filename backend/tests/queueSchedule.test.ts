@@ -3,13 +3,13 @@ import { api, createQueue, createService, createTokenRequest, registerOwner } fr
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 import { resolveLocalMoment } from '../src/utils/customerIdentity';
-import { assignSessionForNewToken, resolveOpenSessionsNow } from '../src/services/queueSchedule.service';
+import { assignSessionForNewToken, resolveTodaysSchedule } from '../src/services/queueSchedule.service';
 
 /**
  * Phase 4: optional per-queue weekly schedule + session capacity.
  *
  * Time-of-day branch coverage (closed/before/between/after/open) is
- * exercised directly against resolveOpenSessionsNow/assignSessionForNewToken
+ * exercised directly against resolveTodaysSchedule/assignSessionForNewToken
  * with a literal moment — the same functions createToken calls, but
  * deterministic regardless of when this suite actually runs. HTTP-level
  * tests use a session window built relative to the real current time (in
@@ -50,43 +50,52 @@ function enableSchedule(accessToken: string, queueId: string, body: Record<strin
     .send({ scheduleEnabled: true, ...body });
 }
 
-describe('resolveOpenSessionsNow (pure time-of-day decision)', () => {
+describe('resolveTodaysSchedule (pure time-of-day decision, ADR-048)', () => {
   const wide = [{ id: 's-wide', startMinute: 0, endMinute: 1439, capacity: null }];
 
   it('closed today: zero sessions for the weekday', () => {
-    const result = resolveOpenSessionsNow([], 600);
-    expect(result).toEqual({ open: [], unavailableCode: 'SCHEDULE_CLOSED_TODAY', nextStartMinute: null });
+    const result = resolveTodaysSchedule([], 600);
+    expect(result).toEqual({
+      open: [],
+      candidates: [],
+      unavailableCode: 'SCHEDULE_CLOSED_TODAY',
+      nextStartMinute: null,
+    });
   });
 
-  it('not yet open: before the first session', () => {
+  it('before the first session: joinable, with that session as the first candidate', () => {
     const sessions = [{ id: 's1', startMinute: 540, endMinute: 720, capacity: null }];
-    const result = resolveOpenSessionsNow(sessions, 100);
-    expect(result.unavailableCode).toBe('SCHEDULE_NOT_YET_OPEN');
-    expect(result.nextStartMinute).toBe(540);
+    const result = resolveTodaysSchedule(sessions, 100);
+    expect(result.unavailableCode).toBeNull();
     expect(result.open).toEqual([]);
+    expect(result.candidates.map((s) => s.id)).toEqual(['s1']);
+    expect(result.nextStartMinute).toBe(540);
   });
 
-  it('between sessions: after one ends, before the next starts', () => {
+  it('between sessions: the ended one is dropped, the later one is the candidate', () => {
     const sessions = [
       { id: 's1', startMinute: 540, endMinute: 720, capacity: null },
       { id: 's2', startMinute: 840, endMinute: 1020, capacity: null },
     ];
-    const result = resolveOpenSessionsNow(sessions, 780);
-    expect(result.unavailableCode).toBe('SCHEDULE_BETWEEN_SESSIONS');
+    const result = resolveTodaysSchedule(sessions, 780);
+    expect(result.unavailableCode).toBeNull();
+    expect(result.candidates.map((s) => s.id)).toEqual(['s2']);
     expect(result.nextStartMinute).toBe(840);
   });
 
   it('ended today: at or after the last session ends', () => {
     const sessions = [{ id: 's1', startMinute: 540, endMinute: 720, capacity: null }];
-    const result = resolveOpenSessionsNow(sessions, 720);
+    const result = resolveTodaysSchedule(sessions, 720);
     expect(result.unavailableCode).toBe('SCHEDULE_ENDED_TODAY');
+    expect(result.candidates).toEqual([]);
     expect(result.nextStartMinute).toBeNull();
   });
 
   it('open: currently inside a session window', () => {
-    const result = resolveOpenSessionsNow(wide, 700);
+    const result = resolveTodaysSchedule(wide, 700);
     expect(result.unavailableCode).toBeNull();
     expect(result.open.map((s) => s.id)).toEqual(['s-wide']);
+    expect(result.nextStartMinute).toBeNull();
   });
 
   it('open: two overlapping sessions both count as currently open', () => {
@@ -94,8 +103,20 @@ describe('resolveOpenSessionsNow (pure time-of-day decision)', () => {
       { id: 'a', startMinute: 0, endMinute: 1439, capacity: 1 },
       { id: 'b', startMinute: 0, endMinute: 1439, capacity: 1 },
     ];
-    const result = resolveOpenSessionsNow(sessions, 700);
+    const result = resolveTodaysSchedule(sessions, 700);
     expect(result.open.map((s) => s.id)).toEqual(['a', 'b']);
+  });
+
+  it('candidate order is chronological and deterministic regardless of input order', () => {
+    const sessions = [
+      { id: 'later', startMinute: 840, endMinute: 1020, capacity: null },
+      { id: 'z-open', startMinute: 540, endMinute: 720, capacity: null },
+      { id: 'a-open', startMinute: 540, endMinute: 720, capacity: null },
+      { id: 'ended', startMinute: 300, endMinute: 400, capacity: null },
+    ];
+    const result = resolveTodaysSchedule(sessions, 630);
+    expect(result.candidates.map((s) => s.id)).toEqual(['a-open', 'z-open', 'later']);
+    expect(result.open.map((s) => s.id)).toEqual(['a-open', 'z-open']);
   });
 });
 
@@ -122,7 +143,7 @@ describe('assignSessionForNewToken (authoritative, DB-backed)', () => {
     });
 
     const assignment = await prisma.$transaction((tx) =>
-      assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: null, moment }),
+      assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: null, moment, timezone: 'UTC' }),
     );
     expect(assignment.assignedSessionStartMinute).toBe(0);
     expect(assignment.assignedSessionEndMinute).toBe(1439);
@@ -158,12 +179,12 @@ describe('assignSessionForNewToken (authoritative, DB-backed)', () => {
     });
 
     const assignment = await prisma.$transaction((tx) =>
-      assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: null, moment }),
+      assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: null, moment, timezone: 'UTC' }),
     );
     expect(assignment.queueSessionId).toBe(roomy.id);
   });
 
-  it('rejects with SCHEDULE_SESSION_FULL when every open session is full', async () => {
+  it('rejects with SCHEDULE_SESSION_FULL when every remaining session today is full', async () => {
     const { queue } = await orgWithQueue();
     const moment = nowUtcMoment();
     await prisma.queueSession.create({
@@ -171,7 +192,7 @@ describe('assignSessionForNewToken (authoritative, DB-backed)', () => {
     });
 
     await expect(
-      prisma.$transaction((tx) => assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: null, moment })),
+      prisma.$transaction((tx) => assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: null, moment, timezone: 'UTC' })),
     ).rejects.toMatchObject({ code: 'SCHEDULE_SESSION_FULL' });
   });
 
@@ -199,7 +220,7 @@ describe('assignSessionForNewToken (authoritative, DB-backed)', () => {
     });
 
     await expect(
-      prisma.$transaction((tx) => assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: 1, moment })),
+      prisma.$transaction((tx) => assignSessionForNewToken(tx, { queueId: queue.id, dailyCapacity: 1, moment, timezone: 'UTC' })),
     ).rejects.toMatchObject({ code: 'SCHEDULE_DAILY_CAPACITY_REACHED' });
   });
 });
@@ -291,7 +312,7 @@ describe('fixed session assignment (spec 4D)', () => {
 
     const created = await createTokenRequest({ queueId: queue.id, serviceId: service.id });
     expect(created.status).toBe(201);
-    expect(created.body.data.assignedSession).toEqual({ startMinute: 0, endMinute: 1439 });
+    expect(created.body.data.assignedSession).toMatchObject({ startMinute: 0, endMinute: 1439 });
 
     const stored = await prisma.token.findUniqueOrThrow({ where: { id: created.body.data.id } });
     expect(stored.queueSessionId).toBe(session.id);

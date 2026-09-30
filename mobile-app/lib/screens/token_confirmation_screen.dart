@@ -45,7 +45,19 @@ class TokenConfirmationScreen extends StatelessWidget {
               if (token.position != null) Text('Position: ${token.position}'),
               if (token.estimatedWaitMinutes != null)
                 Text('Estimated Wait: ${token.estimatedWaitMinutes} minutes'),
-              if (token.assignedSession != null) ...[
+              if (token.isAwaitingSessionStart) ...[
+                // ADR-048: placed in a later session today — say when, and
+                // never show a wait estimate that would suggest otherwise.
+                Text(
+                  'Scheduled for ${token.assignedSession?.label ?? 'a later session today'}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Your service session starts later today. Please come back in time for it.',
+                  textAlign: TextAlign.center,
+                ),
+              ] else if (token.assignedSession != null) ...[
                 const SizedBox(height: 8),
                 Text('Assigned session: ${token.assignedSession!.label}'),
               ],

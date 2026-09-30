@@ -72,9 +72,11 @@ export function TokenActions({
       : { eligible: false, reason: 'EARLIER_WAITING' });
   const isFcfsEligible = eligibility.eligible;
   const lockedTitle =
-    eligibility.reason === 'NO_AVAILABLE_COUNTER'
-      ? 'Waiting for an available counter.'
-      : 'Earlier customers must be handled first.';
+    eligibility.reason === 'SESSION_NOT_STARTED'
+      ? "This customer's assigned session has not started yet."
+      : eligibility.reason === 'NO_AVAILABLE_COUNTER'
+        ? 'Waiting for an available counter.'
+        : 'Earlier customers must be handled first.';
   const [pickingCounter, setPickingCounter] = useState(false);
   const [adjustingDuration, setAdjustingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('');
@@ -161,7 +163,7 @@ export function TokenActions({
         )}
         {status === 'WAITING' && !isFcfsEligible && (
           <Button variant="secondary" disabled title={lockedTitle}>
-            Locked
+            {eligibility.reason === 'SESSION_NOT_STARTED' ? 'Scheduled' : 'Locked'}
           </Button>
         )}
         {status === 'WAITING' && pickingCounter && (

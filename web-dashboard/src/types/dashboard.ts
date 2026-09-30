@@ -13,9 +13,10 @@ export interface DashboardStats {
   skippedToday: number;
 }
 
-/** Why a waiting customer cannot be acted on yet. Both are operational
- * facts staff can do something about, not internal detail. */
-export type WaitingActionBlockedReason = 'EARLIER_WAITING' | 'NO_AVAILABLE_COUNTER';
+/** Why a waiting customer cannot be acted on yet — operational facts, not
+ * internal detail. SESSION_NOT_STARTED (ADR-048): the customer was assigned
+ * a later session today and joins the line when it starts. */
+export type WaitingActionBlockedReason = 'SESSION_NOT_STARTED' | 'EARLIER_WAITING' | 'NO_AVAILABLE_COUNTER';
 
 /**
  * The backend's own answer to "can this waiting customer be called or
@@ -41,6 +42,9 @@ export interface LiveQueueTokenRow {
   estimatedWaitMinutes: number | null;
   /** Null for rows that are not WAITING, where the concept does not apply. */
   actionEligibility: WaitingActionEligibility | null;
+  /** The token's fixed session assignment on a scheduled queue (ADR-046/048);
+   * null on an unscheduled queue. Minutes are on the queue's own clock. */
+  assignedSession?: { startMinute: number; endMinute: number; startsAt: string | null } | null;
   createdAt: string;
   calledAt: string | null;
   startedAt: string | null;

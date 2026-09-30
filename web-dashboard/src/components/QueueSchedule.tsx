@@ -349,6 +349,13 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
             description="Off: the app still explains why a join failed, just not the full schedule."
           />
 
+          <p className="text-sm text-muted">
+            A customer who joins while the current session is full, between sessions, or before the
+            first session is placed in the next session today that has room, and joins the line when
+            that session starts — they cannot be called earlier. Once today&apos;s last session has
+            ended, or every remaining session is full, new joins are refused.
+          </p>
+
           <div>
             <h3 className="mb-2 text-sm font-semibold text-fg-soft">Sessions</h3>
             {isLoading ? (

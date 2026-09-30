@@ -593,6 +593,16 @@ model Token {
   /// would go null via onDelete: SetNull, but these two survive).
   assignedSessionStartMinute Int?          @map("assigned_session_start_minute")
   assignedSessionEndMinute   Int?          @map("assigned_session_end_minute")
+  /// ADR-048: the absolute instant the assigned session occurrence starts
+  /// (assignedSessionDate + assignedSessionStartMinute, resolved in the
+  /// queue's timezone at assignment time). A token may be assigned to a
+  /// later session today, and until this instant passes it is *scheduled*:
+  /// not callable, not skippable, not part of the FCFS head and given no
+  /// ETA. Snapshotted like the minutes above, so a later session or
+  /// timezone edit never moves it. Null = no gate (unscheduled queues, and
+  /// tokens assigned before this column existed — always to an already-open
+  /// session).
+  assignedSessionStartsAt    DateTime?     @map("assigned_session_starts_at")
 
   notificationPreferences NotificationPreference[]
   /// At most one — this token's hold on a restricted queue (ADR-034).

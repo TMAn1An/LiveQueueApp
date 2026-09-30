@@ -52,11 +52,14 @@ class QueueConfig {
   final String? timezone;
 
   /// Phase 4 — whether this queue's optional weekly schedule currently
-  /// allows a join. Off (isOpenNow: true) for every queue that has never
-  /// turned scheduling on.
+  /// allows a join. Always accepting for every queue that has never turned
+  /// scheduling on.
   final QueueScheduleStatus schedule;
 
-  bool get isAcceptingCustomers => status == 'ACTIVE' && schedule.isOpenNow;
+  /// ADR-048: a scheduled queue accepts joins while any session remains
+  /// today — a customer scanning before a session opens is given a place in
+  /// it rather than turned away.
+  bool get isAcceptingCustomers => status == 'ACTIVE' && schedule.acceptingJoins;
 
   factory QueueConfig.fromJson(Map<String, dynamic> json) {
     return QueueConfig(

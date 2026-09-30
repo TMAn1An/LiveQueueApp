@@ -10,6 +10,7 @@ import {
   startPendingRegistrationCleanupScheduler,
   stopPendingRegistrationCleanupScheduler,
 } from './scheduler/pendingRegistrationCleanupScheduler';
+import { startSessionStartScheduler, stopSessionStartScheduler } from './scheduler/sessionStartScheduler';
 
 const app = createApp();
 const server = http.createServer(app);
@@ -22,12 +23,14 @@ server.listen(env.PORT, () => {
   reportEmailConfiguration();
   startReminderScheduler();
   startPendingRegistrationCleanupScheduler();
+  startSessionStartScheduler();
 });
 
 async function shutdown(signal: string) {
   logger.info(`${signal} received, shutting down gracefully`);
   await stopReminderScheduler();
   await stopPendingRegistrationCleanupScheduler();
+  await stopSessionStartScheduler();
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);

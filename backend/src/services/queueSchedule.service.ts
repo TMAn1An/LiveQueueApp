@@ -1,7 +1,12 @@
 import type { Prisma, Queue, QueueSession } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
-import { isValidTimezone, resolveLocalMoment, type QueueLocalMoment } from '../utils/customerIdentity';
+import {
+  instantFromLocalParts,
+  isValidTimezone,
+  resolveLocalMoment,
+  type QueueLocalMoment,
+} from '../utils/customerIdentity';
 import { assertQueueMutable, requireOwnedQueue } from '../utils/tenantScope';
 
 /**
@@ -15,23 +20,23 @@ import { assertQueueMutable, requireOwnedQueue } from '../utils/tenantScope';
  * exactly as before (spec 4K).
  *
  * Sessions on the same weekday are allowed to overlap by design — that
- * models two concurrent capacity pools, not a mistake — so "the next
- * eligible session" (spec 4E) means the next *currently active* overlapping
- * session with room, never a session that hasn't started yet. Spec 4C is
- * explicit that joining outside every session's live window is a rejection
- * ("before first session" / "between sessions" / "after the last one ends"),
- * not a future pre-booking.
+ * models two concurrent capacity pools, not a mistake.
+ *
+ * ADR-048 changed assignment from "only a session open right now" to "the
+ * first eligible session that has not ended yet *today*": a customer who
+ * scans while the morning session is full, between two sessions, or before
+ * the first session opens is given a place in the next session with room
+ * instead of being turned away. There is still no cross-day pre-booking —
+ * once every session today has ended, a join is refused.
  */
 
 export type ScheduleUnavailableCode =
   | 'SCHEDULE_CLOSED_TODAY'
-  | 'SCHEDULE_NOT_YET_OPEN'
-  | 'SCHEDULE_BETWEEN_SESSIONS'
   | 'SCHEDULE_ENDED_TODAY'
   | 'SCHEDULE_SESSION_FULL'
   | 'SCHEDULE_DAILY_CAPACITY_REACHED';
 
-function formatMinute(totalMinutes: number): string {
+export function formatMinute(totalMinutes: number): string {
   const hour = Math.floor(totalMinutes / 60)
     .toString()
     .padStart(2, '0');
@@ -46,68 +51,64 @@ interface SessionWindow {
   capacity: number | null;
 }
 
+export interface TodaysScheduleResolution<T extends SessionWindow> {
+  /** Sessions whose window contains this minute right now. */
+  open: T[];
+  /**
+   * Every session that has not ended yet today, in deterministic
+   * chronological order: (startMinute, id) — so a currently-open session is
+   * always tried before a later one, and two sessions starting together are
+   * always tried in the same order. This is the full list assignment may
+   * choose from; an ended session never appears in it.
+   */
+  candidates: T[];
+  /** Set only when no session is left to join today. */
+  unavailableCode: 'SCHEDULE_CLOSED_TODAY' | 'SCHEDULE_ENDED_TODAY' | null;
+  /** When nothing is open right now but a later session remains: its start. */
+  nextStartMinute: number | null;
+}
+
 /**
  * Pure time-of-day decision, no capacity, no DB — shared by the
  * authoritative in-transaction assignment below and the read-only public
  * preview (publicQueue.service.ts) so the two can never disagree about
- * "is this queue currently open," only about whether a slot has room.
+ * "can this queue still be joined today," only about whether a slot has room.
  *
- * `todaysSessions` must already be filtered to the moment's weekday and
- * sorted by startMinute ascending (both callers query it that way).
+ * `todaysSessions` must already be filtered to the moment's weekday; it is
+ * re-sorted here so the candidate order never depends on the caller.
  */
-export function resolveOpenSessionsNow(
-  todaysSessions: SessionWindow[],
+export function resolveTodaysSchedule<T extends SessionWindow>(
+  todaysSessions: T[],
   minuteOfDay: number,
-): { open: SessionWindow[]; unavailableCode: ScheduleUnavailableCode | null; nextStartMinute: number | null } {
+): TodaysScheduleResolution<T> {
   if (todaysSessions.length === 0) {
-    return { open: [], unavailableCode: 'SCHEDULE_CLOSED_TODAY', nextStartMinute: null };
+    return { open: [], candidates: [], unavailableCode: 'SCHEDULE_CLOSED_TODAY', nextStartMinute: null };
   }
 
-  const open = todaysSessions.filter(
-    (s) => minuteOfDay >= s.startMinute && minuteOfDay < s.endMinute,
-  );
-  if (open.length > 0) {
-    return { open, unavailableCode: null, nextStartMinute: null };
+  const candidates = todaysSessions
+    .filter((s) => minuteOfDay < s.endMinute)
+    .sort((a, b) => a.startMinute - b.startMinute || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  if (candidates.length === 0) {
+    return { open: [], candidates: [], unavailableCode: 'SCHEDULE_ENDED_TODAY', nextStartMinute: null };
   }
 
-  const firstStart = todaysSessions[0]!.startMinute;
-  const lastEnd = todaysSessions.reduce((max, s) => Math.max(max, s.endMinute), 0);
-
-  if (minuteOfDay < firstStart) {
-    return { open: [], unavailableCode: 'SCHEDULE_NOT_YET_OPEN', nextStartMinute: firstStart };
-  }
-  if (minuteOfDay >= lastEnd) {
-    return { open: [], unavailableCode: 'SCHEDULE_ENDED_TODAY', nextStartMinute: null };
-  }
-  const next = todaysSessions
-    .filter((s) => s.startMinute > minuteOfDay)
-    .sort((a, b) => a.startMinute - b.startMinute)[0];
+  const open = candidates.filter((s) => s.startMinute <= minuteOfDay);
   return {
-    open: [],
-    unavailableCode: 'SCHEDULE_BETWEEN_SESSIONS',
-    nextStartMinute: next ? next.startMinute : null,
+    open,
+    candidates,
+    unavailableCode: null,
+    nextStartMinute: open.length > 0 ? null : candidates[0]!.startMinute,
   };
 }
 
-export function describeScheduleUnavailable(
-  code: ScheduleUnavailableCode,
-  nextStartMinute: number | null,
-): string {
+export function describeScheduleUnavailable(code: ScheduleUnavailableCode): string {
   switch (code) {
     case 'SCHEDULE_CLOSED_TODAY':
       return 'This queue is closed today.';
-    case 'SCHEDULE_NOT_YET_OPEN':
-      return nextStartMinute != null
-        ? `This queue opens today at ${formatMinute(nextStartMinute)}.`
-        : 'This queue is not open yet today.';
-    case 'SCHEDULE_BETWEEN_SESSIONS':
-      return nextStartMinute != null
-        ? `This queue reopens today at ${formatMinute(nextStartMinute)}.`
-        : 'This queue is between sessions right now.';
     case 'SCHEDULE_ENDED_TODAY':
-      return 'This queue is closed for the rest of today.';
+      return 'All of today\'s sessions have ended. Please come back on another day.';
     case 'SCHEDULE_SESSION_FULL':
-      return 'This session is full. Please try again during the next session.';
+      return 'Every remaining session today is full. Please try again on another day.';
     case 'SCHEDULE_DAILY_CAPACITY_REACHED':
       return 'This queue has reached its capacity for today.';
     default:
@@ -120,6 +121,25 @@ export interface SessionAssignment {
   assignedSessionDate: Date;
   assignedSessionStartMinute: number;
   assignedSessionEndMinute: number;
+  /** The session occurrence's start as an absolute instant (ADR-048). */
+  assignedSessionStartsAt: Date;
+}
+
+/** The instant a given local minute of a local calendar date occurs in a
+ * zone. `dateKey` is a QueueLocalMoment date key (midnight UTC of the local
+ * date), so its UTC fields *are* the local year/month/day. */
+function sessionStartInstant(dateKey: Date, startMinute: number, timezone: string): Date {
+  return instantFromLocalParts(
+    {
+      year: dateKey.getUTCFullYear(),
+      month: dateKey.getUTCMonth() + 1,
+      day: dateKey.getUTCDate(),
+      hour: Math.floor(startMinute / 60),
+      minute: startMinute % 60,
+      second: 0,
+    },
+    timezone,
+  );
 }
 
 /**
@@ -130,26 +150,35 @@ export interface SessionAssignment {
  * device-active-token check already rely on). A capacity COUNT read here is
  * therefore race-free without any extra locking: no other transaction can be
  * counting or inserting against this queue until this one commits or rolls
- * back.
+ * back. That holds for a future session exactly as for an open one — the
+ * lock is per queue, not per session.
+ *
+ * Algorithm (ADR-048):
+ *  1. no session today → SCHEDULE_CLOSED_TODAY; every session ended →
+ *     SCHEDULE_ENDED_TODAY;
+ *  2. daily capacity reached → SCHEDULE_DAILY_CAPACITY_REACHED;
+ *  3. otherwise walk today's not-yet-ended sessions in (startMinute, id)
+ *     order — currently open ones first by construction — and take the first
+ *     with room; none has room → SCHEDULE_SESSION_FULL.
  *
  * Throws AppError (409, one of the ScheduleUnavailableCode values) when no
- * session can accept the join right now. Callers must run this inside the
- * same `tx` as the queue lock — never standalone.
+ * session can accept the join. Callers must run this inside the same `tx` as
+ * the queue lock — never standalone.
  */
 export async function assignSessionForNewToken(
   tx: Prisma.TransactionClient,
-  params: { queueId: string; dailyCapacity: number | null; moment: QueueLocalMoment },
+  params: { queueId: string; dailyCapacity: number | null; moment: QueueLocalMoment; timezone: string },
 ): Promise<SessionAssignment> {
-  const { queueId, dailyCapacity, moment } = params;
+  const { queueId, dailyCapacity, moment, timezone } = params;
 
   const todaysSessions = await tx.queueSession.findMany({
     where: { queueId, weekday: moment.weekday },
     orderBy: [{ startMinute: 'asc' }, { id: 'asc' }],
   });
 
-  const { open, unavailableCode, nextStartMinute } = resolveOpenSessionsNow(todaysSessions, moment.minuteOfDay);
+  const { candidates, unavailableCode } = resolveTodaysSchedule(todaysSessions, moment.minuteOfDay);
   if (unavailableCode) {
-    throw new AppError(409, unavailableCode, describeScheduleUnavailable(unavailableCode, nextStartMinute));
+    throw new AppError(409, unavailableCode, describeScheduleUnavailable(unavailableCode));
   }
 
   if (dailyCapacity != null) {
@@ -160,54 +189,55 @@ export async function assignSessionForNewToken(
       throw new AppError(
         409,
         'SCHEDULE_DAILY_CAPACITY_REACHED',
-        describeScheduleUnavailable('SCHEDULE_DAILY_CAPACITY_REACHED', null),
+        describeScheduleUnavailable('SCHEDULE_DAILY_CAPACITY_REACHED'),
       );
     }
   }
 
-  for (const session of open) {
-    if (session.capacity == null) {
-      return {
-        queueSessionId: session.id,
-        assignedSessionDate: moment.dateKey,
-        assignedSessionStartMinute: session.startMinute,
-        assignedSessionEndMinute: session.endMinute,
-      };
+  for (const session of candidates) {
+    if (session.capacity != null) {
+      const sessionCount = await tx.token.count({
+        where: { queueSessionId: session.id, assignedSessionDate: moment.dateKey },
+      });
+      if (sessionCount >= session.capacity) {
+        continue;
+      }
     }
-    const sessionCount = await tx.token.count({
-      where: { queueSessionId: session.id, assignedSessionDate: moment.dateKey },
-    });
-    if (sessionCount < session.capacity) {
-      return {
-        queueSessionId: session.id,
-        assignedSessionDate: moment.dateKey,
-        assignedSessionStartMinute: session.startMinute,
-        assignedSessionEndMinute: session.endMinute,
-      };
-    }
+    return {
+      queueSessionId: session.id,
+      assignedSessionDate: moment.dateKey,
+      assignedSessionStartMinute: session.startMinute,
+      assignedSessionEndMinute: session.endMinute,
+      assignedSessionStartsAt: sessionStartInstant(moment.dateKey, session.startMinute, timezone),
+    };
   }
 
-  throw new AppError(
-    409,
-    'SCHEDULE_SESSION_FULL',
-    describeScheduleUnavailable('SCHEDULE_SESSION_FULL', null),
-  );
+  throw new AppError(409, 'SCHEDULE_SESSION_FULL', describeScheduleUnavailable('SCHEDULE_SESSION_FULL'));
 }
 
 /**
- * Read-only preview for the public (pre-join) queue-config endpoint: is this
- * queue open right now, and — only when the admin has left schedule details
- * visible — today's session windows. Deliberately never checks capacity: a
- * COUNT taken outside the join transaction could not be authoritative by the
- * time the customer actually submits, so the real capacity/full rejection is
- * always the createToken call's own error, exactly as every other join
- * failure in this codebase already works.
+ * Read-only preview for the public (pre-join) queue-config endpoint: can this
+ * queue still be joined today, is a session running right now, and — only
+ * when the admin has left schedule details visible — today's session
+ * windows. Deliberately never checks capacity: a COUNT taken outside the join
+ * transaction could not be authoritative by the time the customer actually
+ * submits, so the real capacity/full rejection is always the createToken
+ * call's own error, exactly as every other join failure in this codebase
+ * already works.
  */
 export interface PublicScheduleView {
   scheduleEnabled: boolean;
+  /** A session is running right now. */
   isOpenNow: boolean;
+  /** ADR-048: a session remains today, so a join can still be assigned —
+   * possibly to a later session. This, not isOpenNow, gates joining. */
+  acceptingJoins: boolean;
   unavailableCode: ScheduleUnavailableCode | null;
+  /** Why joining is refused, or — when accepting joins before the next
+   * session starts — that the customer will be served later today. */
   message: string | null;
+  /** When nothing is running now: the start of the next session today. */
+  nextSessionStartMinute: number | null;
   todaySessions: { startMinute: number; endMinute: number }[] | null;
 }
 
@@ -217,7 +247,15 @@ export async function describePublicSchedule(
   now: Date = new Date(),
 ): Promise<PublicScheduleView> {
   if (!queue.scheduleEnabled) {
-    return { scheduleEnabled: false, isOpenNow: true, unavailableCode: null, message: null, todaySessions: null };
+    return {
+      scheduleEnabled: false,
+      isOpenNow: true,
+      acceptingJoins: true,
+      unavailableCode: null,
+      message: null,
+      nextSessionStartMinute: null,
+      todaySessions: null,
+    };
   }
 
   const moment = resolveLocalMoment(now, timezone ?? 'UTC');
@@ -225,17 +263,43 @@ export async function describePublicSchedule(
     where: { queueId: queue.id, weekday: moment.weekday },
     orderBy: [{ startMinute: 'asc' }, { id: 'asc' }],
   });
-  const { open, unavailableCode, nextStartMinute } = resolveOpenSessionsNow(todaysSessions, moment.minuteOfDay);
+  const { open, unavailableCode, nextStartMinute } = resolveTodaysSchedule(todaysSessions, moment.minuteOfDay);
+
+  let message: string | null = null;
+  if (unavailableCode) {
+    message = describeScheduleUnavailable(unavailableCode);
+  } else if (nextStartMinute != null) {
+    message = `The next session starts today at ${formatMinute(nextStartMinute)}. You can join now and will be served in a later session.`;
+  }
 
   return {
     scheduleEnabled: true,
     isOpenNow: open.length > 0,
+    acceptingJoins: unavailableCode == null,
     unavailableCode,
-    message: unavailableCode ? describeScheduleUnavailable(unavailableCode, nextStartMinute) : null,
+    message,
+    nextSessionStartMinute: nextStartMinute,
     todaySessions: queue.scheduleVisibleToCustomers
       ? todaysSessions.map((s) => ({ startMinute: s.startMinute, endMinute: s.endMinute }))
       : null,
   };
+}
+
+/**
+ * ADR-048: queues holding a WAITING token whose assigned session started in
+ * (from, to] — i.e. tokens that just stopped being scheduled and joined the
+ * callable line. Nothing changes in the database at that instant (the gate
+ * is a pure comparison against the fixed start), so the session-start
+ * scheduler uses this to know whose ETAs and positions to re-broadcast.
+ * A Prisma query rather than raw SQL, so DateTime comparison is zone-safe.
+ */
+export async function listQueuesWithSessionsStartingBetween(from: Date, to: Date): Promise<string[]> {
+  const rows = await prisma.token.findMany({
+    where: { status: 'WAITING', assignedSessionStartsAt: { gt: from, lte: to } },
+    select: { queueId: true },
+    distinct: ['queueId'],
+  });
+  return rows.map((row) => row.queueId);
 }
 
 // ---------------------------------------------------------------------------

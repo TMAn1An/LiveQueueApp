@@ -139,8 +139,22 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  if (token.status == TokenStatus.waiting) ...[
+                  if (token.status == TokenStatus.waiting && token.isAwaitingSessionStart) ...[
+                    // ADR-048: a place in a later session today. No position
+                    // and no ETA exist until it starts — the backend gives
+                    // none — so the session itself is the headline.
+                    _InfoRow(
+                      label: 'Scheduled for',
+                      value: token.assignedSession?.label ?? 'A later session today',
+                    ),
+                    const Text(
+                      'Your session starts later today. You will join the line and see your '
+                      'position when it begins.',
+                    ),
+                  ] else if (token.status == TokenStatus.waiting) ...[
                     _InfoRow(label: 'Position', value: '${token.position ?? '-'}'),
+                    if (token.assignedSession != null)
+                      _InfoRow(label: 'Session', value: token.assignedSession!.label),
                     if (token.estimatedReadyAt != null) ...[
                       // The countdown is timezone-independent and stays the
                       // headline. The absolute time beneath it is what needs

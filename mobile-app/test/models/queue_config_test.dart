@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/models/dynamic_form_field.dart';
 import 'package:mobile_app/models/queue_config.dart';
+import 'package:mobile_app/models/queue_schedule_status.dart';
 
 void main() {
   test('parses the actual public queue config shape (no organization_name/state block)', () {
@@ -77,6 +78,53 @@ void main() {
     expect(config.isAcceptingCustomers, isFalse);
     expect(config.schedule.message, 'This queue opens today at 09:00.');
     expect(config.schedule.todaySessions.single.label, '09:00–12:00');
+  });
+
+  test('ADR-048: before the next session the queue still accepts joins, with the backend note', () {
+    final config = QueueConfig.fromJson({
+      'id': 'queue-1',
+      'name': 'Q',
+      'status': 'ACTIVE',
+      'schedule': {
+        'scheduleEnabled': true,
+        'isOpenNow': false,
+        'acceptingJoins': true,
+        'nextSessionStartMinute': 840,
+        'message': 'The next session starts today at 14:00. You can join now and will be served in a later session.',
+        'todaySessions': null,
+      },
+    });
+    expect(config.isAcceptingCustomers, isTrue);
+    expect(config.schedule.isOpenNow, isFalse);
+    expect(config.schedule.nextSessionStartMinute, 840);
+    expect(config.schedule.todaySessions, isEmpty);
+  });
+
+  test('ADR-048: once every session today has ended, joining is refused', () {
+    final config = QueueConfig.fromJson({
+      'id': 'queue-1',
+      'name': 'Q',
+      'status': 'ACTIVE',
+      'schedule': {
+        'scheduleEnabled': true,
+        'isOpenNow': false,
+        'acceptingJoins': false,
+        'unavailableCode': 'SCHEDULE_ENDED_TODAY',
+        'message': "All of today's sessions have ended. Please come back on another day.",
+      },
+    });
+    expect(config.isAcceptingCustomers, isFalse);
+  });
+
+  test('ADR-048: an assigned session carries its absolute start instant', () {
+    final window = QueueSessionWindow.fromJson({
+      'startMinute': 840,
+      'endMinute': 1020,
+      'startsAt': '2026-10-01T08:00:00.000Z',
+    });
+    expect(window.label, '14:00–17:00');
+    expect(window.startsAt, DateTime.utc(2026, 10, 1, 8));
+    expect(QueueSessionWindow.fromJson({'startMinute': 0, 'endMinute': 60}).startsAt, isNull);
   });
 
   test('an unrecognized field type maps to unknown rather than throwing', () {

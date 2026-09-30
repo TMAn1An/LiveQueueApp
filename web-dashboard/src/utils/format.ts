@@ -3,6 +3,19 @@ export function formatDateTime(value: string | null): string {
   return new Date(value).toLocaleString();
 }
 
+/** Minutes since local midnight → "14:00". Session windows are always on the
+ * queue's own clock, so this never converts through the browser's zone. */
+export function formatMinuteOfDay(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
+  const m = (totalMinutes % 60).toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+/** "14:00–17:00" for a session window. */
+export function formatSessionWindow(window: { startMinute: number; endMinute: number }): string {
+  return `${formatMinuteOfDay(window.startMinute)}–${formatMinuteOfDay(window.endMinute)}`;
+}
+
 export function formatMinutes(value: number | null): string {
   if (value === null) return '—';
   return `${value} min`;

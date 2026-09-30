@@ -10,6 +10,8 @@ class QueueScheduleStatus {
   const QueueScheduleStatus({
     this.scheduleEnabled = false,
     this.isOpenNow = true,
+    this.acceptingJoins = true,
+    this.nextSessionStartMinute,
     this.message,
     this.todaySessions = const [],
   });
@@ -18,18 +20,30 @@ class QueueScheduleStatus {
   /// accepted at any time, exactly as before this feature existed.
   final bool scheduleEnabled;
 
-  /// Meaningless when [scheduleEnabled] is false (always true in that case).
+  /// A session is running right now. Meaningless when [scheduleEnabled] is
+  /// false (always true in that case). Informational only — [acceptingJoins]
+  /// decides whether the customer may continue.
   final bool isOpenNow;
 
-  /// A ready-to-show sentence explaining why the queue is closed right now
-  /// ("This queue opens today at 09:00.", etc.) — null while open, or when
-  /// scheduling is off.
+  /// ADR-048: a session remains today, so a join can still be given a place
+  /// — possibly in a later session. False only when today is closed or every
+  /// session has ended.
+  final bool acceptingJoins;
+
+  /// When nothing is running now: the start of the next session today, in
+  /// minutes since midnight on the queue's clock.
+  final int? nextSessionStartMinute;
+
+  /// A ready-to-show sentence from the backend: why joining is refused
+  /// ("This queue is closed today.") or, before the next session, that the
+  /// customer will be served later today. Null while a session is running,
+  /// or when scheduling is off.
   final String? message;
 
   /// This weekday's session windows, only when the organization has left
   /// them visible to customers (Queue.scheduleVisibleToCustomers) — empty
   /// (not necessarily closed) when hidden, so the app must not treat an
-  /// empty list here as "closed today"; use [isOpenNow] / [message] for that.
+  /// empty list here as "closed today"; use [acceptingJoins] / [message] for that.
   final List<QueueSessionWindow> todaySessions;
 
   factory QueueScheduleStatus.fromJson(Map<String, dynamic>? json) {
@@ -37,6 +51,9 @@ class QueueScheduleStatus {
     return QueueScheduleStatus(
       scheduleEnabled: json['scheduleEnabled'] as bool? ?? false,
       isOpenNow: json['isOpenNow'] as bool? ?? true,
+      // A backend older than ADR-048 gated joining on isOpenNow itself.
+      acceptingJoins: json['acceptingJoins'] as bool? ?? json['isOpenNow'] as bool? ?? true,
+      nextSessionStartMinute: json['nextSessionStartMinute'] as int?,
       message: json['message'] as String?,
       todaySessions: (json['todaySessions'] as List<dynamic>?)
               ?.map((e) => QueueSessionWindow.fromJson(e as Map<String, dynamic>))
@@ -47,15 +64,22 @@ class QueueScheduleStatus {
 }
 
 class QueueSessionWindow {
-  const QueueSessionWindow({required this.startMinute, required this.endMinute});
+  const QueueSessionWindow({required this.startMinute, required this.endMinute, this.startsAt});
 
   final int startMinute;
   final int endMinute;
 
+  /// ADR-048: on a token's assigned session, the absolute instant the session
+  /// occurrence starts. Null on the public schedule preview and on tokens
+  /// assigned before this existed.
+  final DateTime? startsAt;
+
   factory QueueSessionWindow.fromJson(Map<String, dynamic> json) {
+    final startsAt = json['startsAt'] as String?;
     return QueueSessionWindow(
       startMinute: json['startMinute'] as int,
       endMinute: json['endMinute'] as int,
+      startsAt: startsAt == null ? null : DateTime.parse(startsAt),
     );
   }
 
