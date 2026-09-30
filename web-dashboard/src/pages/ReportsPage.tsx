@@ -4,6 +4,8 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { PermissionGate } from '../components/PermissionGate';
+import { ErrorBanner } from '../components/ErrorBanner';
+import { actionErrorMessage } from '../utils/actionError';
 import { formatMinutes } from '../utils/format';
 import type { ReportRangePreset } from '../types/report';
 
@@ -33,6 +35,7 @@ export function ReportsPage() {
           </Button>
         </PermissionGate>
       </div>
+      <ErrorBanner message={exportReport.error ? actionErrorMessage(exportReport.error) : null} />
 
       <div className="mb-4 flex flex-wrap items-end gap-2">
         {(Object.keys(RANGE_LABELS) as ReportRangePreset[]).map((r) => (

@@ -218,6 +218,18 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Clients:** dashboard scope control with helper text (disabled while the schedule is off); the app words the notice and the refusal per session.
 - **Verification:** 20 new backend tests across all three identity modes and cross-organization isolation; dashboard 251/251; mobile 359/359.
 
+### V2 Master-Roadmap Audit (2026-10-01)
+
+**Status: audit complete; two genuine defects fixed. No migration. See ADR-050.** Source + tests were treated as authoritative, not earlier checkboxes.
+
+- **Called counter** — verified: `Token.counterId` set by both Call and Next; customer view `counter {id,name}`; Live Tracking shows it only while CALLED; Active Tokens `counterName` only for CALLED (re-derived on resync); FCM CALLED push names it; WAITING shows no counter anywhere. **Fixed:** on code-verified queues (the default) the Notification Center entry / centered card said only "verification code is ready" — it now also names the counter, still without digits.
+- **Centered popup** — verified in `foreground_banner_service.dart` + its 13 tests: centered (`Alignment.center`, max width 320), dimmed backdrop, no timer/auto-dismiss, × and View, FIFO queue, `dedupeKey`, per-token routing (`openActiveToken`, History for finished tokens), status icon; skip reason and completion feedback come from the synced token view, never from push payloads.
+- **Dashboard UX** — verified: Create Queue and Open Queue/Manage Counters/token actions use `size="lg"`; explicit Open Queue / Settings / Pause-Resume / Delete per row; `QueueBreadcrumb` on Live, Settings and Counters pages.
+- **Schedule/capacity** — verified and extended by ADR-048/049 above.
+- **Error UX** — mobile join flow maps every listed customer case (closed/ended/full/daily capacity, paused, archived, duplicate, repeat incl. per-session, verification, blocked, invalid QR, network). **Fixed:** a set of dashboard actions failed silently — most importantly Call (FCFS / counter busy / session not started). All now show the backend's message.
+- **Security/regression** — reviewed: tenant scoping of every new query path (session CRUD via queue→org, scope change via org-scoped queue lookup, cross-org test); no internal field leaks (`identityScopeKey`, fingerprint, OTP cipher stripped; tested); scheduled-token gates race-free (monotonic set); future-slot and daily-cap races tested; cross-week occurrence keys tested; typed custom text never in FCM; notification dedupe unchanged.
+- **Verification:** mobile 360/360, dashboard 254/254.
+
 ### V2 Checkpoint 10 — V2 production verification (final regression pass) (2026-09-30)
 
 **Status: PASS. No code changes required — every V2 checkpoint (1-9) plus every ad-hoc fix through today's skip-reason/completion-feedback work verified together as one system for the first time.**

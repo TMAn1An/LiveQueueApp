@@ -63,6 +63,7 @@ function SessionRow({
   const [end, setEnd] = useState(minutesToTimeInput(session.endMinute));
   const [capacity, setCapacity] = useState(session.capacity != null ? String(session.capacity) : '');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const startMinute = timeInputToMinutes(start);
@@ -164,11 +165,18 @@ function SessionRow({
             message="Customers already assigned to it keep their original time — only future joins are affected. This cannot be undone."
             confirming={deleteSession.isPending}
             onConfirm={() =>
-              deleteSession.mutate(session.id, { onSuccess: () => setConfirmingDelete(false) })
+              deleteSession.mutate(session.id, {
+                onSuccess: () => setConfirmingDelete(false),
+                onError: (err) => {
+                  setConfirmingDelete(false);
+                  setDeleteError(err instanceof ApiError ? err.message : 'Could not remove this session.');
+                },
+              })
             }
             onCancel={() => setConfirmingDelete(false)}
           />
         )}
+        {deleteError && <ErrorBanner message={deleteError} />}
       </td>
     </tr>
   );

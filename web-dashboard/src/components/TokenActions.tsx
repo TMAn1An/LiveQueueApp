@@ -94,6 +94,7 @@ export function TokenActions({
   const [skipping, setSkipping] = useState(false);
   const [completingWithFeedback, setCompletingWithFeedback] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  const [callError, setCallError] = useState<string | null>(null);
 
   function handleComplete() {
     setCompleteError(null);
@@ -174,7 +175,14 @@ export function TokenActions({
             onBlur={() => setPickingCounter(false)}
             onChange={(e) => {
               if (e.target.value) {
-                callToken.mutate({ tokenId, counterId: e.target.value });
+                setCallError(null);
+                // The backend's refusal (earlier customer waiting, counter
+                // busy or inactive, session not started) is written for
+                // staff — shown as-is rather than failing silently.
+                callToken.mutate(
+                  { tokenId, counterId: e.target.value },
+                  { onError: (err) => setCallError(actionErrorMessage(err)) },
+                );
               }
               setPickingCounter(false);
             }}
@@ -298,6 +306,7 @@ export function TokenActions({
           </Button>
         )}
       </div>
+      {callError && <ErrorBanner message={callError} />}
       {skipping && <SkipTokenDialog tokenId={tokenId} onClose={() => setSkipping(false)} />}
       {completingWithFeedback && (
         <CompleteWithFeedbackDialog tokenId={tokenId} onClose={() => setCompletingWithFeedback(false)} />

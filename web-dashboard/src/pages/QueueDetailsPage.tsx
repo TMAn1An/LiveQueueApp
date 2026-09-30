@@ -1,3 +1,5 @@
+import { actionErrorMessage } from '../utils/actionError';
+import { ErrorBanner } from '../components/ErrorBanner';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
@@ -25,6 +27,7 @@ export function QueueDetailsPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [allowMultipleServices, setAllowMultipleServices] = useState(true);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
 
@@ -32,6 +35,7 @@ export function QueueDetailsPage() {
     setName(queue!.name);
     setDescription(queue!.description ?? '');
     setAllowMultipleServices(queue!.allowMultipleServices);
+    setDetailsError(null);
     setEditing(true);
   }
 
@@ -76,6 +80,7 @@ export function QueueDetailsPage() {
         </div>
         {editing ? (
           <div className="space-y-3">
+            <ErrorBanner message={detailsError} />
             <div>
               <label className="mb-1 block text-xs text-muted">Name</label>
               <input
@@ -119,8 +124,11 @@ export function QueueDetailsPage() {
                   updateQueue.mutate(
                     { name, description, allowMultipleServices },
                     // Closed only once the change lands, so a rejected save
-                    // never looks like it succeeded.
-                    { onSuccess: () => setEditing(false) },
+                    // never looks like it succeeded — and says why it failed.
+                    {
+                      onSuccess: () => setEditing(false),
+                      onError: (err) => setDetailsError(actionErrorMessage(err)),
+                    },
                   )
                 }
               >

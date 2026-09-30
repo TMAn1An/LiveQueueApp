@@ -13,6 +13,7 @@ import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { actionErrorMessage } from '../utils/actionError';
 import { PermissionGate } from '../components/PermissionGate';
 import { Pagination } from '../components/Pagination';
 import { SearchInput } from '../components/SearchInput';
@@ -120,6 +121,7 @@ function StaffRow({ staff }: { staff: Staff }) {
   const deleteStaff = useDeleteStaff();
   const resendInvitation = useResendInvitation();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
   const [resendNote, setResendNote] = useState<string | null>(null);
 
   async function handleResend() {
@@ -168,12 +170,16 @@ function StaffRow({ staff }: { staff: Staff }) {
               <Button
                 variant="secondary"
                 loading={updateStaff.isPending}
-                onClick={() =>
-                  updateStaff.mutate({
-                    staffId: staff.id,
-                    input: { status: staff.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' },
-                  })
-                }
+                onClick={() => {
+                  setRowError(null);
+                  updateStaff.mutate(
+                    {
+                      staffId: staff.id,
+                      input: { status: staff.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' },
+                    },
+                    { onError: (err) => setRowError(actionErrorMessage(err)) },
+                  );
+                }}
               >
                 {updateStaff.isPending
                   ? 'Updating…'
@@ -187,13 +193,20 @@ function StaffRow({ staff }: { staff: Staff }) {
             </div>
           )}
         </PermissionGate>
+        {rowError && <ErrorBanner message={rowError} />}
         {confirmingDelete && (
           <ConfirmDialog
             title={`Remove staff member "${staff.name}"?`}
             message="They will immediately lose access to the dashboard. This cannot be undone."
             confirming={deleteStaff.isPending}
             onConfirm={() =>
-              deleteStaff.mutate(staff.id, { onSuccess: () => setConfirmingDelete(false) })
+              deleteStaff.mutate(staff.id, {
+                onSuccess: () => setConfirmingDelete(false),
+                onError: (err) => {
+                  setConfirmingDelete(false);
+                  setRowError(actionErrorMessage(err));
+                },
+              })
             }
             onCancel={() => setConfirmingDelete(false)}
           />

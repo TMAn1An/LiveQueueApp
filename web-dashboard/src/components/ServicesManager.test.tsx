@@ -1,3 +1,4 @@
+import { ApiError } from '../api/client';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -79,5 +80,22 @@ describe('ServicesManager — delete confirmation', () => {
     await userEvent.click(deleteButtons[deleteButtons.length - 1]);
 
     expect(mutate).toHaveBeenCalledWith('service-42', expect.anything());
+  });
+
+  it('a refused delete (the service is still in use) is shown, not swallowed', async () => {
+    const message = 'This service is referenced by existing tokens and cannot be deleted.';
+    const mutate = vi.fn((_id: string, options: { onError: (err: unknown) => void }) =>
+      options.onError(new ApiError(409, 'SERVICE_IN_USE', message)),
+    );
+    vi.mocked(useDeleteService).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<
+      typeof useDeleteService
+    >);
+    render(<ServicesManager queueId="q1" services={[service({ id: 'service-42' })]} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+    await userEvent.click(deleteButtons[deleteButtons.length - 1]);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
   });
 });

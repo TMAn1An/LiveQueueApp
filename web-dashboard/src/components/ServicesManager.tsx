@@ -10,6 +10,8 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { StatusBadge } from './StatusBadge';
 import { PermissionGate } from './PermissionGate';
 import { EmptyState } from './Spinner';
+import { ErrorBanner } from './ErrorBanner';
+import { actionErrorMessage } from '../utils/actionError';
 import type { QueueServiceItem } from '../types/queue';
 
 function ServiceRow({ queueId, service }: { queueId: string; service: QueueServiceItem }) {
@@ -22,6 +24,8 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
   // V2 Product Completion checkpoint, Part B: this Delete previously called
   // the mutation directly on click, with no way to back out of a mis-click.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const showRowError = (err: unknown) => setRowError(actionErrorMessage(err));
 
   if (editing) {
     return (
@@ -51,7 +55,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             onClick={() =>
               updateService.mutate(
                 { serviceId: service.id, input: { serviceName: name, durationMinutes: duration } },
-                { onSuccess: () => setEditing(false) },
+                { onSuccess: () => setEditing(false), onError: showRowError },
               )
             }
           >
@@ -60,6 +64,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
           <Button variant="ghost" onClick={() => setEditing(false)}>
             Cancel
           </Button>
+          {rowError && <ErrorBanner message={rowError} />}
         </td>
       </tr>
     );
@@ -81,7 +86,10 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             <Button
               variant="secondary"
               loading={setStatus.isPending}
-              onClick={() => setStatus.mutate({ serviceId: service.id, isActive: !service.isActive })}
+              onClick={() => {
+                setRowError(null);
+                setStatus.mutate({ serviceId: service.id, isActive: !service.isActive }, { onError: showRowError });
+              }}
             >
               {setStatus.isPending ? 'Updating…' : service.isActive ? 'Deactivate' : 'Activate'}
             </Button>
@@ -90,13 +98,21 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             </Button>
           </div>
         </PermissionGate>
+        {rowError && <ErrorBanner message={rowError} />}
         {confirmingDelete && (
           <ConfirmDialog
             title={`Delete service "${service.serviceName}"?`}
             message="Customers will no longer be able to select this service. This cannot be undone."
             confirming={deleteService.isPending}
             onConfirm={() =>
-              deleteService.mutate(service.id, { onSuccess: () => setConfirmingDelete(false) })
+              deleteService.mutate(service.id, {
+                onSuccess: () => setConfirmingDelete(false),
+                // e.g. SERVICE_IN_USE: history still references it.
+                onError: (err) => {
+                  setConfirmingDelete(false);
+                  showRowError(err);
+                },
+              })
             }
             onCancel={() => setConfirmingDelete(false)}
           />

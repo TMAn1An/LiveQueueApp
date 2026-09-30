@@ -1,3 +1,5 @@
+import { actionErrorMessage } from '../utils/actionError';
+import { ErrorBanner } from '../components/ErrorBanner';
 import { useState } from 'react';
 import { useDevices, useBlockDevice, useUnblockDevice } from '../hooks/useDevices';
 import { Card } from '../components/Card';
@@ -114,6 +116,8 @@ export function BlockedDevicesPage() {
   const { data: result, isLoading, isFetching } = useDevices(page, 20, statusFilter, debouncedSearch);
   const blockDevice = useBlockDevice();
   const unblockDevice = useUnblockDevice();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const showActionError = { onError: (err: unknown) => setActionError(actionErrorMessage(err)) };
 
   function handleSearchChange(value: string) {
     setSearch(value);
@@ -156,6 +160,7 @@ export function BlockedDevicesPage() {
           <RefreshIndicator />
         </div>
       )}
+      <ErrorBanner message={actionError} />
       <Card>
         {isLoading ? (
           <Spinner />
@@ -169,8 +174,14 @@ export function BlockedDevicesPage() {
               <DeviceRow
                 key={device.id}
                 device={device}
-                onBlock={(deviceId) => blockDevice.mutate(deviceId)}
-                onUnblock={(deviceId) => unblockDevice.mutate(deviceId)}
+                onBlock={(deviceId) => {
+                  setActionError(null);
+                  blockDevice.mutate(deviceId, showActionError);
+                }}
+                onUnblock={(deviceId) => {
+                  setActionError(null);
+                  unblockDevice.mutate(deviceId, showActionError);
+                }}
                 // Scoped to the row actually being changed, so one block
                 // does not freeze the buttons on every other device.
                 isPending={

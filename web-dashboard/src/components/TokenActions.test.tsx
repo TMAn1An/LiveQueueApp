@@ -97,7 +97,34 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
     const select = screen.getByRole('combobox');
     await user.selectOptions(select, 'c1');
 
-    expect(callMutate).toHaveBeenCalledWith({ tokenId: 't1', counterId: 'c1' });
+    expect(callMutate).toHaveBeenCalledWith({ tokenId: 't1', counterId: 'c1' }, expect.anything());
+  });
+
+  it('a refused Call (e.g. an earlier customer is waiting) is shown to staff, never swallowed', async () => {
+    const user = userEvent.setup();
+    const message = 'An earlier customer is still waiting. The earliest eligible customer must be called first.';
+    callMutate.mockImplementationOnce((_vars, options: { onError: (err: unknown) => void }) =>
+      options.onError(new ApiError(409, 'FCFS_VIOLATION', message)),
+    );
+    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" />);
+
+    await user.click(screen.getByText('Call'));
+    await user.selectOptions(screen.getByRole('combobox'), 'c1');
+
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+  });
+
+  it('a Call that never reached the server says so', async () => {
+    const user = userEvent.setup();
+    callMutate.mockImplementationOnce((_vars, options: { onError: (err: unknown) => void }) =>
+      options.onError(new TypeError('Failed to fetch')),
+    );
+    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" />);
+
+    await user.click(screen.getByText('Call'));
+    await user.selectOptions(screen.getByRole('combobox'), 'c1');
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/Could not reach the server/);
   });
 
   it('the counter picker only offers ACTIVE counters, not OFFLINE ones', async () => {

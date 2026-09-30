@@ -8,6 +8,7 @@ import { Spinner, EmptyState } from '../components/Spinner';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { actionErrorMessage } from '../utils/actionError';
 import { PermissionGate } from '../components/PermissionGate';
 import { SearchInput } from '../components/SearchInput';
 import { Switch } from '../components/Switch';
@@ -109,6 +110,7 @@ function QueueRow({ queue }: { queue: Queue }) {
   const updateStatus = useUpdateQueueStatus(queue.id);
   const deleteQueue = useDeleteQueue();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [rowError, setRowError] = useState<string | null>(null);
 
   const nextStatus: QueueStatus = queue.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
 
@@ -156,7 +158,12 @@ function QueueRow({ queue }: { queue: Queue }) {
                 <Button
                   variant="secondary"
                   loading={updateStatus.isPending}
-                  onClick={() => updateStatus.mutate(nextStatus)}
+                  onClick={() => {
+                    setRowError(null);
+                    updateStatus.mutate(nextStatus, {
+                      onError: (err) => setRowError(actionErrorMessage(err)),
+                    });
+                  }}
                 >
                   {updateStatus.isPending
                     ? 'Updating…'
@@ -171,6 +178,11 @@ function QueueRow({ queue }: { queue: Queue }) {
             )}
           </PermissionGate>
         </div>
+        {rowError && (
+          <div className="mt-2">
+            <ErrorBanner message={rowError} />
+          </div>
+        )}
         {confirmingDelete && (
           <ConfirmDialog
             title={`Delete queue "${queue.name}"?`}
@@ -181,7 +193,13 @@ function QueueRow({ queue }: { queue: Queue }) {
             }
             confirming={deleteQueue.isPending}
             onConfirm={() =>
-              deleteQueue.mutate(queue.id, { onSuccess: () => setConfirmingDelete(false) })
+              deleteQueue.mutate(queue.id, {
+                onSuccess: () => setConfirmingDelete(false),
+                onError: (err) => {
+                  setConfirmingDelete(false);
+                  setRowError(actionErrorMessage(err));
+                },
+              })
             }
             onCancel={() => setConfirmingDelete(false)}
           />
