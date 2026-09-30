@@ -373,27 +373,49 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
                 const daySessions = (sessions ?? [])
                   .filter((s) => s.weekday === weekday)
                   .sort((a, b) => a.startMinute - b.startMinute);
+                const isOpen = daySessions.length > 0;
                 return (
-                  <div key={weekday} className="mb-4">
-                    <p className="text-sm font-medium text-fg-soft">{dayName}</p>
+                  <div key={weekday} className="mb-4 rounded-xl border border-border bg-surface p-4 shadow-2xs">
+                    <div className="mb-3 flex items-center justify-between border-b border-border pb-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2 w-2 rounded-full ${isOpen ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'}`} />
+                        <p className="text-sm font-bold text-fg">{dayName}</p>
+                      </div>
+                      {isOpen && (
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                          {daySessions.length} {daySessions.length === 1 ? 'session' : 'sessions'}
+                        </span>
+                      )}
+                    </div>
                     {daySessions.length === 0 ? (
                       <EmptyState message="Closed" />
                     ) : (
-                      <table className="w-full text-sm">
-                        <tbody>
-                          {daySessions.map((session) => (
-                            <SessionRow
-                              key={session.id}
-                              queueId={queue.id}
-                              session={session}
-                              canEdit={canEdit}
-                            />
-                          ))}
-                        </tbody>
-                      </table>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                              <th className="py-2 pr-4">Hours</th>
+                              <th className="py-2 pr-4">Capacity</th>
+                              <th className="py-2 pr-4">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {daySessions.map((session) => (
+                              <SessionRow
+                                key={session.id}
+                                queueId={queue.id}
+                                session={session}
+                                canEdit={canEdit}
+                              />
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                     <PermissionGate permission="manage_queues">
-                      <AddSessionRow queueId={queue.id} weekday={weekday} />
+                      <div className="mt-3 border-t border-border pt-3">
+                        <AddSessionRow queueId={queue.id} weekday={weekday} />
+                      </div>
                     </PermissionGate>
                   </div>
                 );
