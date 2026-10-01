@@ -1,0 +1,53 @@
+name: Mobile CI
+
+on:
+  push:
+    paths:
+      - 'mobile-app/**'
+      - '.github/workflows/mobile-ci.yml'
+  pull_request:
+    paths:
+      - 'mobile-app/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.44.9
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      # Info-level lints are pre-existing style hints; warnings and errors fail.
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test
+
+      - name: Release build refuses debug signing
+        run: |
+          set -uo pipefail
+          [ ! -f android/key.properties ] || { echo "::error::unexpected key.properties"; exit 1; }
+          flutter build apk --release --dart-define=API_BASE_URL=https://livequeueapp.onrender.com 2>&1 | tee "$RUNNER_TEMP/build.log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 0 ]; then
+            echo "::error::release build succeeded without release signing"; exit 1
+          fi
+          grep -q "Release signing is not configured" "$RUNNER_TEMP/build.log" \
+            || { echo "::error::release build failed for a reason other than the signing gate"; exit 1; }
+          echo "Release build correctly refused to sign with the debug key."
