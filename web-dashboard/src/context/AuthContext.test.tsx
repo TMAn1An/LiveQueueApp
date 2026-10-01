@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AuthProvider, useAuth } from './AuthContext';
 import * as authApi from '../api/auth.api';
+import { ApiError } from '../api/client';
 
 vi.mock('../api/auth.api');
 
@@ -70,7 +71,11 @@ describe('AuthProvider — session restore on load', () => {
 
   it('clears storage and becomes unauthenticated when the stored refresh token is rejected', async () => {
     localStorage.setItem(REFRESH_TOKEN_KEY, 'stale-refresh');
-    vi.mocked(authApi.refresh).mockRejectedValue(new Error('invalid'));
+    // An answer from the backend, not a failure to reach it — that case is
+    // AuthSessionRestore.test.tsx.
+    vi.mocked(authApi.refresh).mockRejectedValue(
+      new ApiError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token is invalid.'),
+    );
 
     render(
       <AuthProvider>

@@ -1523,3 +1523,27 @@ SKIPPED and CANCELLED still delete the hold (never an entitlement); COMPLETED st
 - *No dependency added.* The glyph is an inline SVG like every other icon in the dashboard.
 
 **Consequence.** New pages should pass their blurb as `description`/`help` and never render it under the title. The queue-settings tab bar lost its one-line blurb entirely — it restated what the sections beneath it already explain.
+
+## ADR-054: Only an answer from the backend ends a dashboard session (2026-10-02)
+
+**Status:** Implemented on `feature/web-ui-ux-redesign`. Dashboard only; no backend change.
+
+**Problem.** Session restore treated every failure alike: `catch { clearAuth() }`. A backend that was restarting, a laptop waking before its network, a timeout — each discarded the stored refresh token and redirected to sign-in, exactly as a revoked session would. The same happened mid-session when a token refresh could not be made.
+
+**Decision.** A failed request is one of two things, and they are handled differently:
+
+- *The backend refused the session* — a 4xx it actually sent about the request (other than 408 and 429): invalid, expired, revoked, reused or superseded token, suspended account or organization. The session is over: local credentials are cleared and the user goes to sign-in, immediately, as before. Nothing about this path changed, and real 401/403 responses are never swallowed.
+- *The backend gave no answer* — no network, connection refused, timeout, 5xx, a gateway's non-JSON error page, 429. Nothing has been learned about the session, so nothing is concluded:
+  - On page load the app enters `reconnecting`. The stored refresh token is kept. **No protected screen is rendered and no cached identity is used** — the person is not treated as signed in on the strength of a token nobody has checked. They see what is true ("the server isn't answering; you're still signed in on this device"), with *Retry now* and *Sign out*.
+  - Mid-session, the request that needed the refresh fails with the network error; the session is left for the next request to try again.
+
+**Retrying safely.** The refresh token is single-use, so a blind retry loop is not free: if a rotation reached the server and only its response was lost, presenting the old token again is — correctly — suspicious. Therefore:
+- every retry first makes a health check that carries no credentials and changes nothing, and the refresh token is sent again only once the server answers;
+- the refresh request itself is never abandoned on a timer: a backend that is slow to wake may still process a request the client gave up on, and re-sending the token would then be refused. It waits as long as the browser does, exactly as before;
+- the first retries come quickly (1s, 2s, 5s), so the retry that follows a lost response normally lands inside the server's 10-second duplicate leeway (ADR-052) and is answered "superseded", not "reused";
+- new tokens obtained before a failed identity request are kept, so a retry does not spend the refresh token a second time;
+- the schedule backs off (1s … 60s) and stays under the auth rate limit.
+
+**Why this does not accept stale authorization.** Authorization is never granted by the client. While reconnecting, the app holds a token and shows nothing; the first thing it does when the backend returns is have that token checked, and a refusal signs the user out. The token itself still expires and can still be revoked server-side during the outage — the wait cannot outlive either.
+
+**Residual.** A rotation whose response is lost, followed by more than 10 seconds before the server is reachable again, is still reported as reuse and revokes that user's sessions. Closing that fully needs an idempotency key on the refresh exchange (a schema and protocol change); not done here, recorded so it is not rediscovered.

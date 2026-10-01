@@ -1,12 +1,27 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import * as authApi from '../api/auth.api';
 import { registerAuthHandlers } from '../api/client';
-import { REFRESH_TOKEN_STORAGE_KEY, refreshSession } from '../api/sessionRefresh';
+import { REFRESH_TOKEN_STORAGE_KEY, isAuthRejection, refreshSession } from '../api/sessionRefresh';
 import { browserTimezone } from '../utils/timezone';
 import type { Organization, Permission, Staff } from '../types/auth';
 
+/**
+ * How long to wait before each new attempt to reach the backend while a
+ * session restore is pending. Short at first — most interruptions are a
+ * restart or a brief drop — then spaced out, so a long outage (or a rate
+ * limit) is not hammered. The last value repeats.
+ */
+const RECONNECT_DELAYS_MS = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000, 60_000];
+
 interface AuthState {
-  status: 'loading' | 'authenticated' | 'unauthenticated';
+  /**
+   * `reconnecting`: there is a stored session, but the backend could not be
+   * reached to confirm it. Nothing is assumed either way — the person is
+   * neither treated as signed in (no protected screen is shown, no cached
+   * identity is used) nor signed out (the stored session is kept). It ends
+   * only when the backend answers: with an identity, or with a refusal.
+   */
+  status: 'loading' | 'authenticated' | 'unauthenticated' | 'reconnecting';
   staff: Staff | null;
   organization: Organization | null;
   permissions: Permission[];
@@ -22,6 +37,9 @@ interface AuthContextValue extends AuthState {
    * the backend — e.g. after the account's email was verified in another
    * tab. Returns the fresh staff record, or null when signed out. */
   refreshIdentity: () => Promise<Staff | null>;
+  /** While `reconnecting`: try the backend again now instead of waiting for
+   * the next scheduled attempt. Does nothing in any other state. */
+  retrySessionRestore: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -68,12 +86,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }
 
-  function clearAuth() {
+  const clearAuth = useCallback(() => {
     accessTokenRef.current = null;
     refreshTokenRef.current = null;
     localStorage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
     setState({ status: 'unauthenticated', staff: null, organization: null, permissions: [] });
-  }
+  }, []);
 
   useEffect(() => {
     registerAuthHandlers({
@@ -90,17 +108,67 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           accessTokenRef.current = tokens.accessToken;
           refreshTokenRef.current = tokens.refreshToken;
           return tokens.accessToken;
-        } catch {
+        } catch (err) {
+          // Only the backend refusing the session ends it. If the exchange
+          // simply could not be made (offline, timeout, server error), the
+          // request that needed it fails with that error and the session is
+          // left alone for the next request to try again.
+          if (!isAuthRejection(err)) throw err;
           clearAuth();
           return null;
         }
       },
     });
-  }, []);
+  }, [clearAuth]);
 
-  // Silent session restore on load: a stored refresh token gets exchanged
-  // for a fresh access token, then /me re-confirms current staff/org/
-  // permissions from the database rather than trusting anything cached.
+  /**
+   * Confirms the stored session with the backend: the refresh token is
+   * exchanged for a fresh access token, then /me re-reads staff, organization
+   * and permissions from the database rather than trusting anything cached.
+   *
+   * Three outcomes, and only the backend can produce the first two:
+   * - it answers with an identity: authenticated;
+   * - it refuses (invalid, expired, revoked, suspended): signed out, and the
+   *   stored session is discarded;
+   * - it cannot be reached: `reconnecting`. The stored session is kept
+   *   untouched and nothing is concluded. Being offline is not evidence that
+   *   a session is invalid, and treating it as such signed people out every
+   *   time the backend restarted.
+   */
+  const restoreSession = useCallback(async (): Promise<'authenticated' | 'signed-out' | 'unreachable'> => {
+    try {
+      // A previous attempt may have got as far as new tokens before /me
+      // failed; those are still good, so the single-use refresh token is not
+      // spent a second time.
+      if (!accessTokenRef.current) {
+        const tokens = await refreshSession(refreshTokenRef.current);
+        if (!tokens) {
+          clearAuth();
+          return 'signed-out';
+        }
+        accessTokenRef.current = tokens.accessToken;
+        refreshTokenRef.current = tokens.refreshToken;
+      }
+
+      const { data: identity } = await authApi.me();
+      setState({
+        status: 'authenticated',
+        staff: identity.staff,
+        organization: identity.organization,
+        permissions: identity.permissions,
+      });
+      return 'authenticated';
+    } catch (err) {
+      if (isAuthRejection(err)) {
+        clearAuth();
+        return 'signed-out';
+      }
+      setState((s) => (s.status === 'authenticated' ? s : { ...s, status: 'reconnecting' }));
+      return 'unreachable';
+    }
+  }, [clearAuth]);
+
+  // Silent session restore on load.
   //
   // React StrictMode runs this effect twice in development. Both runs share
   // the one exchange in flight, so the stored token is still sent only once.
@@ -109,29 +177,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setState((s) => ({ ...s, status: 'unauthenticated' }));
       return;
     }
+    void restoreSession();
+  }, [restoreSession]);
 
-    (async () => {
-      try {
-        const tokens = await refreshSession();
-        if (!tokens) {
-          clearAuth();
-          return;
-        }
-        accessTokenRef.current = tokens.accessToken;
-        refreshTokenRef.current = tokens.refreshToken;
+  // While the backend is unreachable, keep trying: on a schedule, and at
+  // once when the browser comes back online, the tab becomes visible again,
+  // or the person asks.
+  //
+  // Each attempt first asks the backend whether it is there at all (a plain
+  // health check: no credentials, nothing changed). The refresh token is
+  // single-use, so it is only sent again once the server is known to answer.
+  const retryNowRef = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    if (state.status !== 'reconnecting') return;
 
-        const { data: identity } = await authApi.me();
-        setState({
-          status: 'authenticated',
-          staff: identity.staff,
-          organization: identity.organization,
-          permissions: identity.permissions,
-        });
-      } catch {
-        clearAuth();
-      }
-    })();
-  }, []);
+    let cancelled = false;
+    let running = false;
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const schedule = () => {
+      const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
+      timer = setTimeout(() => void tryNow(), delay);
+    };
+
+    const tryNow = async () => {
+      if (cancelled || running) return;
+      running = true;
+      clearTimeout(timer);
+      const reachable = await authApi.checkBackendReachable();
+      const outcome = reachable && !cancelled ? await restoreSession() : 'unreachable';
+      running = false;
+      if (cancelled || outcome !== 'unreachable') return;
+      attempt += 1;
+      schedule();
+    };
+
+    const onOnline = () => void tryNow();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void tryNow();
+    };
+
+    retryNowRef.current = () => void tryNow();
+    schedule();
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      retryNowRef.current = () => undefined;
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [state.status, restoreSession]);
+
+  const retrySessionRestore = useCallback(() => retryNowRef.current(), []);
 
   // Stable identity, so a consumer can depend on it in an effect without
   // re-subscribing on every render. Reads only refs and storage.
@@ -196,7 +296,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ ...state, login, register, logout, changePassword, hasPermission, refreshIdentity }}
+      value={{
+        ...state,
+        login,
+        register,
+        logout,
+        changePassword,
+        hasPermission,
+        refreshIdentity,
+        retrySessionRestore,
+      }}
     >
       {children}
     </AuthContext.Provider>

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from './client';
 import * as authApi from './auth.api';
-import { REFRESH_TOKEN_STORAGE_KEY, refreshSession } from './sessionRefresh';
+import { REFRESH_TOKEN_STORAGE_KEY, isAuthRejection, refreshSession } from './sessionRefresh';
 
 vi.mock('./auth.api');
 
@@ -190,5 +190,33 @@ describe('refreshSession — across tabs', () => {
 
     expect(seen.presented).toEqual(['refresh-1', 'refresh-1']);
     expect(seen.maxActive).toBe(2);
+  });
+});
+
+describe('isAuthRejection — did the backend refuse the session, or just not answer?', () => {
+  it.each([
+    [401, 'INVALID_REFRESH_TOKEN'],
+    [401, 'REFRESH_TOKEN_EXPIRED'],
+    [401, 'REFRESH_TOKEN_REUSED'],
+    [401, 'UNAUTHENTICATED'],
+    [403, 'ORGANIZATION_SUSPENDED'],
+    [409, 'REFRESH_TOKEN_SUPERSEDED'],
+    [400, 'VALIDATION_ERROR'],
+  ])('%i %s is a refusal: the session really is over', (status, code) => {
+    expect(isAuthRejection(new ApiError(status, code, code))).toBe(true);
+  });
+
+  it.each([
+    ['a dropped connection', new TypeError('Failed to fetch')],
+    ['a timed-out request', new DOMException('The operation was aborted.', 'AbortError')],
+    ['a gateway error page that is not JSON', new SyntaxError('Unexpected token < in JSON')],
+    ['500', new ApiError(500, 'INTERNAL_ERROR', 'Something went wrong.')],
+    ['502', new ApiError(502, 'BAD_GATEWAY', 'Bad gateway.')],
+    ['503', new ApiError(503, 'UNAVAILABLE', 'Unavailable.')],
+    ['being rate limited (429)', new ApiError(429, 'RATE_LIMITED', 'Too many requests.')],
+    ['a request timeout (408)', new ApiError(408, 'REQUEST_TIMEOUT', 'Timeout.')],
+    ['something that is not an error at all', undefined],
+  ])('%s is not: nothing was learned about the session', (_label, err) => {
+    expect(isAuthRejection(err)).toBe(false);
   });
 });

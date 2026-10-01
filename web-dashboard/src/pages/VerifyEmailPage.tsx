@@ -32,7 +32,10 @@ export function VerifyEmailPage() {
   const attempted = useRef(false);
   const navigate = useNavigate();
   const { status: authStatus, refreshIdentity } = useAuth();
-  const destination = authStatus === 'authenticated' ? '/dashboard' : '/login';
+  // `reconnecting` still has a session — the dashboard route shows the
+  // reconnecting screen and carries on from there; only a tab with no session
+  // at all goes to sign-in.
+  const destination = authStatus === 'unauthenticated' ? '/login' : '/dashboard';
 
   useEffect(() => {
     if (attempted.current || !token) return;

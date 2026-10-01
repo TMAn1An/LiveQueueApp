@@ -11,6 +11,23 @@ export interface RefreshedTokens {
   refreshToken: string;
 }
 
+/**
+ * Whether a failed request means the backend *refused* the session, as
+ * opposed to never having given an answer about it.
+ *
+ * Only a refusal may end a session. A dropped connection, a timeout, a 5xx,
+ * a gateway's HTML error page, or being rate-limited (429) says nothing about
+ * whether the refresh token is still good — treating those as a sign-out is
+ * how a backend restart used to log every open dashboard out. So this is
+ * true only for a 4xx the server actually sent about this request (other
+ * than 408 and 429): invalid, expired, revoked, reused, superseded,
+ * suspended.
+ */
+export function isAuthRejection(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false;
+  return err.status >= 400 && err.status < 500 && err.status !== 408 && err.status !== 429;
+}
+
 function readStoredRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_TOKEN_STORAGE_KEY);
 }
@@ -68,7 +85,9 @@ let inFlight: Promise<RefreshedTokens | null> | null = null;
  * exchange started here and receive its result.
  *
  * Resolves with the new tokens (already stored), or `null` when there is no
- * refresh token to exchange. Rejects when the backend refuses the token.
+ * refresh token to exchange. Rejects when the backend refuses the token, and
+ * also when it could not be reached — `isAuthRejection` tells the two apart,
+ * and only the first is a reason to sign anyone out.
  *
  * `fallbackToken` is used only when storage holds none.
  */

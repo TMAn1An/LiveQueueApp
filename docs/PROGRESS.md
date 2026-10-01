@@ -266,6 +266,16 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Deliberately left on the page:** errors, warnings and the delete-organization warning; "Saved." and other confirmations; current status (timezone inheritance, service-start verification on/off, counter and queue status); what a switch does when off; field-level hints needed to fill a value in; the repeat-visit identity guidance; empty states and the first-run steps; dialogs; permission notices; the sign-in, registration and email-verification pages.
 - **Verification:** backend 868/868; dashboard 341/341 (23 new); typecheck, lint and both builds clean. In the browser: every icon opened on every screen at 1440, 1024, 768 and 390 px — all inside the viewport, none wider than 300 px, no horizontal page scroll — plus dark and light themes, keyboard (Tab, Enter, Escape), tap and tap-outside, and flipping above the icon at the bottom edge.
 
+#### Session restore survives an unreachable backend (2026-10-02)
+
+**Status: implemented and verified in the browser; not committed at the time of writing, not deployed. See ADR-054. Dashboard only.**
+
+- **Fault:** any failure while restoring a session on page load — including the backend simply not answering — discarded the stored session and sent the user to sign-in. A backend restart signed out every open dashboard.
+- **Fix:** only an answer from the backend ends a session. A refusal (401/403, an expired, revoked, reused or superseded token, a suspended account) signs out exactly as before. No answer at all (offline, connection refused, timeout, 5xx, a gateway error page, 429) leaves the stored session untouched and shows a "Can't reach LiveQueue — reconnecting" screen with Retry now and Sign out. Nothing protected is rendered and no cached identity is used while it waits.
+- **Retrying:** on a schedule (1s, 2s, 5s … capped at 60s) and at once when the browser comes back online, the tab becomes visible, or the user asks. Each attempt first makes a credential-free health check; the single-use refresh token is only sent again once the server answers. The refresh request itself has no timer, so a backend that is slow to wake is waited for, as before.
+- **Mid-session:** a token refresh that cannot reach the backend now fails that one request instead of signing the user out; the next request tries again.
+- **Verification:** dashboard 387/387 (46 new); with network errors treated as refusals again, 16 of the new tests fail. In the browser: backend stopped, two reloads — reconnecting screen on the same URL, stored session unchanged; backend started — signed in by itself within about ten seconds; a token the backend never issued — straight to sign-in.
+
 ### V2 Home-PC Final Verification (2026-10-01)
 
 **Status: PASS, from the final committed source (`81e6171`).** Local databases only (`livequeue_dev`; a dedicated local `livequeue_test` was created on this PC so the suite's `resetDb()` never touches the dev database).
