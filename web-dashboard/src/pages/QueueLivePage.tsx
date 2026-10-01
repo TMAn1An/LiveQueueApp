@@ -2,6 +2,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQueue } from '../hooks/useQueues';
 import { useCounters } from '../hooks/useCounters';
 import { Card } from '../components/Card';
+import { SectionHeading } from '../components/SectionHeading';
 import { Button } from '../components/Button';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { StatusBadge } from '../components/StatusBadge';
@@ -99,19 +100,18 @@ export function QueueLivePage() {
 
       {/* Waiting Line & Active Tokens Table */}
       <Card>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
-          <div>
-            <h2 className="text-base font-bold text-fg">Waiting Line</h2>
-            <p className="text-xs text-muted">First-come, first-served customer tokens</p>
-          </div>
-          <div className="flex items-center gap-2">
+        <SectionHeading
+          title="Waiting Line"
+          help="Everyone waiting, called or being served in this queue, in the order they joined — first come, first served."
+          className="flex-wrap"
+          actions={
             <span className="inline-flex items-center gap-1.5 rounded-full bg-subtle px-2.5 py-1 text-xs font-semibold text-fg-soft border border-border">
               <span className={`h-1.5 w-1.5 rounded-full ${activeCounters.length > 0 ? 'bg-emerald-500' : 'bg-slate-400'}`} />
               {activeCounters.length} active{' '}
               {activeCounters.length === 1 ? 'counter' : 'counters'}
             </span>
-          </div>
-        </div>
+          }
+        />
         <LiveQueueTable
           queueId={queue.id}
           emptyMessage="Nobody is waiting, called, or in progress in this queue."

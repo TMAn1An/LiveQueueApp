@@ -11,6 +11,7 @@ import { Button } from './Button';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ErrorBanner } from './ErrorBanner';
 import { Switch } from './Switch';
+import { InfoHelp } from './InfoHelp';
 import { PermissionGate } from './PermissionGate';
 import { ApiError } from '../api/client';
 import type { QueueSessionInput } from '../api/queueSchedule.api';
@@ -376,15 +377,16 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
             description="Off: the app still explains why a join failed, just not the full schedule."
           />
 
-          <p className="text-sm text-muted">
-            A customer who joins while the current session is full, between sessions, or before the
-            first session is placed in the next session today that has room, and joins the line when
-            that session starts — they cannot be called earlier. Once today&apos;s last session has
-            ended, or every remaining session is full, new joins are refused.
-          </p>
-
           <div>
-            <h3 className="mb-2 text-sm font-semibold text-fg-soft">Sessions</h3>
+            <div className="mb-2 flex items-center gap-0.5">
+              <h3 className="text-sm font-semibold text-fg-soft">Sessions</h3>
+              <InfoHelp label="how customers are placed in sessions">
+                A customer who joins while the current session is full, between sessions, or before
+                the first session is placed in the next session today that has room, and joins the
+                line when that session starts — they cannot be called earlier. Once today&apos;s
+                last session has ended, or every remaining session is full, new joins are refused.
+              </InfoHelp>
+            </div>
             {isLoading ? (
               <p className="text-sm text-muted">Loading…</p>
             ) : (

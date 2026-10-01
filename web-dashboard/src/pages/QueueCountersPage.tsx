@@ -12,6 +12,7 @@ import {
 } from '../hooks/useCounters';
 import { useStaffList } from '../hooks/useStaff';
 import { Card } from '../components/Card';
+import { InfoHelp } from '../components/InfoHelp';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
@@ -220,10 +221,12 @@ export function QueueCountersPage() {
           backTo={`/queues/${queueId}`}
           backLabel={`Back to ${queue?.name ?? 'Queue'}`}
         />
-        <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Counters</h1>
-        <p className="mt-1 text-sm text-muted">
-          Desks and service points where staff call and serve customers for this queue.
-        </p>
+        <div className="flex items-center gap-1">
+          <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Counters</h1>
+          <InfoHelp label="Counters">
+            Desks and service points where staff call and serve customers for this queue.
+          </InfoHelp>
+        </div>
       </div>
 
       <ErrorBanner message={error} />

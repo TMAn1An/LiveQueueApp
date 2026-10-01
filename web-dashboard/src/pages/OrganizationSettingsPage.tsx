@@ -8,6 +8,7 @@ import {
   useUpdateOrganization,
 } from '../hooks/useOrganization';
 import { Card } from '../components/Card';
+import { SectionHeading } from '../components/SectionHeading';
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { ErrorBanner } from '../components/ErrorBanner';
@@ -70,24 +71,25 @@ export function OrganizationSettingsPage() {
       />
 
       <Card>
-        <div className="mb-4 border-b border-border pb-3 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-bold text-fg">Organization Profile</h2>
-            <p className="text-xs text-muted">Legal name and default timezone for all queues</p>
-          </div>
-          {isOwner && !editing && (
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setName(organization.name);
-                setTimezone(organization.timezone ?? browserTimezone() ?? '');
-                setEditing(true);
-              }}
-            >
-              Edit
-            </Button>
-          )}
-        </div>
+        <SectionHeading
+          title="Organization Profile"
+          help="Your organization’s name, and the timezone every queue uses unless it sets its own."
+          actions={
+            isOwner &&
+            !editing && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setName(organization.name);
+                  setTimezone(organization.timezone ?? browserTimezone() ?? '');
+                  setEditing(true);
+                }}
+              >
+                Edit
+              </Button>
+            )
+          }
+        />
 
         <ErrorBanner message={error} />
 
@@ -175,13 +177,10 @@ export function OrganizationSettingsPage() {
       {/* Owner Guided Tour / Setup Guide */}
       {isOwner && (
         <Card>
-          <div className="mb-3 border-b border-border pb-3">
-            <h2 className="text-base font-bold text-fg">Setup Guide</h2>
-            <p className="text-xs text-muted">
-              Walk through the guided tour of setting up a queue again — creating a queue, adding
-              services and counters, inviting staff, and generating a QR code.
-            </p>
-          </div>
+          <SectionHeading
+            title="Setup Guide"
+            help="Walk through the guided tour of setting up a queue again — creating a queue, adding services and counters, inviting staff, and generating a QR code."
+          />
           <Button
             variant="secondary"
             loading={restartOnboarding.isPending}

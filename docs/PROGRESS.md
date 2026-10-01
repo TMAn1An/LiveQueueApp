@@ -256,6 +256,16 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Local API port:** the dashboard's development fallback is `http://localhost:4000` again — the backend's own default `PORT` — matching `backend/.env.example`, the mobile app and the specification. (A machine whose backend runs elsewhere sets `VITE_API_BASE_URL` in `web-dashboard/.env`.)
 - **Verification:** backend 868/868; dashboard 318/318; typecheck, lint and both builds clean (backend lint now has no warnings).
 
+#### Help-text cleanup — descriptions moved behind an info icon (2026-10-02)
+
+**Status: implemented and verified in the browser; not deployed. See ADR-053.**
+
+- **Why:** every page title, card and settings section carried a permanent sentence explaining itself, and the dashboard read as a wall of small grey text.
+- **Shared components:** `InfoHelp` (the "ⓘ" and its popover), `SectionHeading` (card/section title + help + actions), and `PageHeader` now puts its `description` behind the icon instead of under the title. Hover, keyboard focus and tap all open it; Escape, a tap elsewhere or moving on close it; it is positioned against the viewport, so it never shifts the page and never leaves the screen.
+- **Converted (35 icons on 17 screens):** all eight page headers; Operational Queues; Waiting Line; Counters; Queue Details, Queue Timezone, Service Start Verification, Services, Dynamic Form Fields, Schedule & Availability, the Sessions assignment rules, Repeat Visits, QR Code; Queue Performance, Counter Utilization, Peak Hours; Organization Profile, Setup Guide; Change Password. The sentence under the queue-settings tab bar was removed outright — it only repeated what the sections below it say.
+- **Deliberately left on the page:** errors, warnings and the delete-organization warning; "Saved." and other confirmations; current status (timezone inheritance, service-start verification on/off, counter and queue status); what a switch does when off; field-level hints needed to fill a value in; the repeat-visit identity guidance; empty states and the first-run steps; dialogs; permission notices; the sign-in, registration and email-verification pages.
+- **Verification:** backend 868/868; dashboard 341/341 (23 new); typecheck, lint and both builds clean. In the browser: every icon opened on every screen at 1440, 1024, 768 and 390 px — all inside the viewport, none wider than 300 px, no horizontal page scroll — plus dark and light themes, keyboard (Tab, Enter, Escape), tap and tap-outside, and flipping above the icon at the bottom edge.
+
 ### V2 Home-PC Final Verification (2026-10-01)
 
 **Status: PASS, from the final committed source (`81e6171`).** Local databases only (`livequeue_dev`; a dedicated local `livequeue_test` was created on this PC so the suite's `resetDb()` never touches the dev database).

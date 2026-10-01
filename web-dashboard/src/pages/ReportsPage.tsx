@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useExportReport, useReport } from '../hooks/useReports';
 import { Card } from '../components/Card';
+import { SectionHeading } from '../components/SectionHeading';
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { PageHeader } from '../components/PageHeader';
@@ -133,10 +134,10 @@ export function ReportsPage() {
 
           {/* Queue Performance Table */}
           <Card>
-            <div className="mb-4 border-b border-border pb-3">
-              <h2 className="text-base font-bold text-fg">Queue Performance</h2>
-              <p className="text-xs text-muted">Throughput and average wait time per service line</p>
-            </div>
+            <SectionHeading
+              title="Queue Performance"
+              help="Throughput and average wait time for each queue during this period."
+            />
             {report.queuePerformance.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted italic">No queue data for this period.</p>
             ) : (
@@ -169,12 +170,10 @@ export function ReportsPage() {
 
           {/* Counter Utilization Table */}
           <Card>
-            <div className="mb-4 border-b border-border pb-3">
-              <h2 className="text-base font-bold text-fg">Counter Utilization</h2>
-              <p className="text-xs text-muted">
-                Share of tokens served by each counter desk during this period.
-              </p>
-            </div>
+            <SectionHeading
+              title="Counter Utilization"
+              help="Share of tokens served by each counter desk during this period."
+            />
             {report.counterUtilization.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted italic">No counter activity recorded for this period.</p>
             ) : (
@@ -215,10 +214,10 @@ export function ReportsPage() {
 
           {/* Peak Traffic Hours Chart */}
           <Card>
-            <div className="mb-4 border-b border-border pb-3">
-              <h2 className="text-base font-bold text-fg">Peak Hours</h2>
-              <p className="text-xs text-muted">Customer arrival distribution by hour of the day</p>
-            </div>
+            <SectionHeading
+              title="Peak Hours"
+              help="When customers arrive: the number of arrivals in each hour of the day."
+            />
             {report.peakHours.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted italic">No hourly traffic data available.</p>
             ) : (

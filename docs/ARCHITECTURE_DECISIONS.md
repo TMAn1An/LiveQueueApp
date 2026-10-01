@@ -1505,3 +1505,21 @@ SKIPPED and CANCELLED still delete the hold (never an entitlement); COMPLETED st
 **Consequence.** A client that mishandles `409 REFRESH_TOKEN_SUPERSEDED` ends up signed out on that device only; nothing is revoked. The mobile app is unaffected (customers have no refresh tokens). Dashboards cached from before this change keep working: the server never punishes their duplicate, though that tab may still drop to the sign-in page until it loads the new build.
 
 **Verification.** Backend `auth.refreshRotation.test.ts` — simultaneous and near-simultaneous duplicates (one winner, no fork, nobody signed out, repeated with fan-out of 5), genuine reuse (aged rotation, different user agent, thief-rotates-first, revoked successor), normal rotation, logout and password-change revocation. Run against the previous `rotateSession`, the duplicate cases fail (`[200, 200]`, and `401` + global revocation). Dashboard `sessionRefresh.test.ts`, `AuthSessionRefresh.test.tsx` (real context and client against a fake backend with *no* leeway: StrictMode restore, six consecutive reloads, six concurrent requests at access-token expiry) and `client.test.ts`; with the single-flight removed, those sign the user out.
+
+## ADR-053: Explanations sit behind an info icon; anything needed to act stays on the page (2026-10-02)
+
+**Status:** Implemented on `feature/web-ui-ux-redesign`. Dashboard only; no backend or mobile change.
+
+**Decision.** A heading says what a thing is. The sentence explaining what it is *for* no longer sits under it: it goes behind a small "ⓘ" beside the heading (`InfoHelp`), reached by hover, keyboard focus or tap. `PageHeader` does this with its `description`; card and section titles use `SectionHeading`. One component, one behaviour, everywhere.
+
+**The rule for what may be hidden.** Only explanation. Text stays on the page when a person needs it to act correctly or safely: errors, warnings, destructive-action consequences, confirmations, current status, what a toggle does, hints required to fill in a field, empty-state and first-run guidance, permission notices, and anything in a confirmation dialog. When in doubt it stays visible — a hidden warning is a defect, a visible explanation is only clutter.
+
+**Behaviour, and why.**
+- *Not a native `title`.* A `title` never appears on touch, cannot be reached by keyboard, and is announced inconsistently.
+- *Always in the document.* The explanation is rendered but hidden, and the button references it with `aria-describedby`, so a screen reader reads "More information about X" followed by the explanation on focus whether or not it is showing. `aria-expanded` reflects whether it is.
+- *Hover follows the pointer; a click, tap or Enter pins it.* A pinned one stays until Escape, a second activation, a tap outside, or focus leaving. Nothing depends on hover, so it works on a phone.
+- *Positioned against the viewport (`position: fixed`), not in the flow.* Opening it cannot move the page, a scrolling or clipping container cannot cut it off, and it is clamped inside the left/right edges and flipped above the icon when there is no room below. It follows the icon on scroll and resize.
+- *Small icon, real target.* 16 px glyph in a 32 px button (40 px on coarse pointers), with negative margins so the larger target does not make the heading row taller.
+- *No dependency added.* The glyph is an inline SVG like every other icon in the dashboard.
+
+**Consequence.** New pages should pass their blurb as `description`/`help` and never render it under the title. The queue-settings tab bar lost its one-line blurb entirely — it restated what the sections beneath it already explain.

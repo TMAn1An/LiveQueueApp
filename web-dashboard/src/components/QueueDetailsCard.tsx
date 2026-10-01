@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { useUpdateQueue } from '../hooks/useQueues';
 import { Card } from './Card';
+import { SectionHeading } from './SectionHeading';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
 import { PermissionGate } from './PermissionGate';
@@ -70,19 +71,20 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
 
   return (
     <Card>
-      <div className="mb-3 flex items-center justify-between border-b border-border pb-3">
-        <div>
-          <h2 className="text-base font-bold text-fg">Queue Details</h2>
-          <p className="text-xs text-muted">Core identification and service rules</p>
-        </div>
-        {!queue.deletedAt && !editing && (
-          <PermissionGate permission="manage_queues">
-            <Button variant="secondary" onClick={startEditing}>
-              Edit Details
-            </Button>
-          </PermissionGate>
-        )}
-      </div>
+      <SectionHeading
+        title="Queue Details"
+        help="How this queue is identified and its basic service rules: name, token prefix, timing and reminders."
+        actions={
+          !queue.deletedAt &&
+          !editing && (
+            <PermissionGate permission="manage_queues">
+              <Button variant="secondary" onClick={startEditing}>
+                Edit Details
+              </Button>
+            </PermissionGate>
+          )
+        }
+      />
 
       {editing ? (
         <div className="space-y-4">

@@ -113,10 +113,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted">
-          Define customer form questions. Responses appear on token rows for counter staff.
-        </p>
+      <div className="flex items-center justify-end">
         <button
           type="button"
           onClick={() => setShowPreview(!showPreview)}

@@ -14,23 +14,25 @@ import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
 import { ServiceStartVerificationSetting } from '../components/ServiceStartVerificationSetting';
 import { QueueSchedule } from '../components/QueueSchedule';
 import { QueueDetailsCard } from '../components/QueueDetailsCard';
+import { SectionHeading } from '../components/SectionHeading';
 
 type SettingsTab = 'general' | 'services' | 'form' | 'schedule' | 'repeat' | 'qr' | 'all';
 
 interface TabDef {
   id: SettingsTab;
   label: string;
-  description: string;
 }
 
+// No per-tab blurb: each section explains itself behind its own "ⓘ", and a
+// sentence under the tab bar only repeated what those say.
 const SETTINGS_TABS: TabDef[] = [
-  { id: 'general', label: 'General & Timezone', description: 'Basic queue details, token prefix, and operating timezone.' },
-  { id: 'services', label: 'Services & Verification', description: 'Offered services, durations, and customer service-start verification.' },
-  { id: 'form', label: 'Customer Form', description: 'Dynamic questions customers answer before joining the line.' },
-  { id: 'schedule', label: 'Schedule & Capacity', description: 'Weekly operating hours, session windows, and daily capacity.' },
-  { id: 'repeat', label: 'Repeat Visits', description: 'Policies restricting how frequently verified customers may rejoin.' },
-  { id: 'qr', label: 'QR Code & Entry', description: 'Download and print customer check-in QR code.' },
-  { id: 'all', label: 'View All', description: 'Display all queue configuration sections at once.' },
+  { id: 'general', label: 'General & Timezone' },
+  { id: 'services', label: 'Services & Verification' },
+  { id: 'form', label: 'Customer Form' },
+  { id: 'schedule', label: 'Schedule & Capacity' },
+  { id: 'repeat', label: 'Repeat Visits' },
+  { id: 'qr', label: 'QR Code & Entry' },
+  { id: 'all', label: 'View All' },
 ];
 
 export function QueueDetailsPage() {
@@ -125,23 +127,13 @@ export function QueueDetailsPage() {
         </div>
       </div>
 
-      {/* Tab Context Description */}
-      {currentTab !== 'all' && (
-        <div className="text-xs text-muted px-1">
-          {SETTINGS_TABS.find((t) => t.id === currentTab)?.description}
-        </div>
-      )}
-
       {/* SECTION: General & Timezone */}
       {showGeneral && (
         <div className="space-y-6">
           <QueueDetailsCard queue={queue} />
 
           <Card>
-            <div className="mb-3 border-b border-border pb-3">
-              <h2 className="text-base font-bold text-fg">Queue Timezone</h2>
-              <p className="text-xs text-muted">The local clock used for schedule hours and repeat limits</p>
-            </div>
+            <SectionHeading title="Queue Timezone" help="The local clock this queue runs on. Schedule hours and repeat-visit limits are measured against it." />
             <QueueTimezoneSetting queue={queue} organizationTimezone={organization?.timezone ?? null} />
           </Card>
         </div>
@@ -151,18 +143,12 @@ export function QueueDetailsPage() {
       {showServices && (
         <div className="space-y-6">
           <Card>
-            <div className="mb-3 border-b border-border pb-3">
-              <h2 className="text-base font-bold text-fg">Service Start Verification</h2>
-              <p className="text-xs text-muted">Customer verification code required before service starts</p>
-            </div>
+            <SectionHeading title="Service Start Verification" help="Whether staff must enter the code shown in the customer’s app before service can start." />
             <ServiceStartVerificationSetting queue={queue} />
           </Card>
 
           <Card>
-            <div className="mb-3 border-b border-border pb-3">
-              <h2 className="text-base font-bold text-fg">Services</h2>
-              <p className="text-xs text-muted">Services offered in this queue and estimated duration per customer</p>
-            </div>
+            <SectionHeading title="Services" help="The services offered in this queue, and how long each one usually takes per customer." />
             <ServicesManager queueId={queue.id} services={queue.services} />
           </Card>
         </div>
@@ -171,10 +157,7 @@ export function QueueDetailsPage() {
       {/* SECTION: Customer Form */}
       {showForm && (
         <Card>
-          <div className="mb-3 border-b border-border pb-3">
-            <h2 className="text-base font-bold text-fg">Dynamic Form Fields</h2>
-            <p className="text-xs text-muted">Custom questions customers must answer when scanning the QR code</p>
-          </div>
+          <SectionHeading title="Dynamic Form Fields" help="Custom questions customers answer when they scan the QR code, before joining the line. Their answers appear on the token row for counter staff." />
           <FormBuilder queueId={queue.id} />
         </Card>
       )}
@@ -182,10 +165,7 @@ export function QueueDetailsPage() {
       {/* SECTION: Schedule & Capacity */}
       {showSchedule && (
         <Card>
-          <div className="mb-3 border-b border-border pb-3">
-            <h2 className="text-base font-bold text-fg">Schedule &amp; Availability</h2>
-            <p className="text-xs text-muted">Restrict customer joins to defined weekly hours and session capacity</p>
-          </div>
+          <SectionHeading title="Schedule & Availability" help="Limit when customers can join: weekly opening hours, session windows, and how many people each session takes." />
           <QueueSchedule queue={queue} />
         </Card>
       )}
@@ -193,10 +173,7 @@ export function QueueDetailsPage() {
       {/* SECTION: Repeat Visits */}
       {showRepeat && (
         <Card>
-          <div className="mb-3 border-b border-border pb-3">
-            <h2 className="text-base font-bold text-fg">Repeat Visits</h2>
-            <p className="text-xs text-muted">Prevent duplicate visits by requiring customer identity verification</p>
-          </div>
+          <SectionHeading title="Repeat Visits" help="Limit how often the same customer may rejoin, by having them verify who they are." />
           <RepeatVisitPolicy
             queue={queue}
             effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
@@ -207,10 +184,7 @@ export function QueueDetailsPage() {
       {/* SECTION: QR Code & Customer Entry */}
       {showQr && (
         <Card>
-          <div className="mb-3 border-b border-border pb-3">
-            <h2 className="text-base font-bold text-fg">QR Code</h2>
-            <p className="text-xs text-muted">Display or print this QR code at your physical location for customer self-checkin</p>
-          </div>
+          <SectionHeading title="QR Code" help="Display or print this QR code at your location. Customers scan it to join the queue themselves." />
           <QrCodeDisplay
             qrCodeUri={queue.qrCodeUri}
             organizationName={organization?.name ?? ''}

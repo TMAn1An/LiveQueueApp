@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/Card';
+import { SectionHeading } from '../components/SectionHeading';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { ErrorBanner } from '../components/ErrorBanner';
@@ -116,10 +117,11 @@ function ChangePasswordCard() {
 
   return (
     <Card>
-      <div className="mb-4 border-b border-border pb-3">
-        <h3 className="text-base font-bold text-fg">Change Password</h3>
-        <p className="text-xs text-muted">Update your login password to keep your account secure</p>
-      </div>
+      <SectionHeading
+        level={3}
+        title="Change Password"
+        help="Update the password you sign in with. Your other signed-in devices are signed out when it changes."
+      />
 
       <ErrorBanner message={error} />
       {success && (

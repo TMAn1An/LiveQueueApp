@@ -3,6 +3,7 @@ import { useDashboardStats } from '../hooks/useDashboard';
 import { useQueues } from '../hooks/useQueues';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/Card';
+import { InfoHelp } from '../components/InfoHelp';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
@@ -124,6 +125,7 @@ export function DashboardPage() {
       <PageHeader
         title={getGreeting(staff?.name)}
         description={`Here is what needs your attention today across ${organization?.name ?? 'your organization'}.`}
+        helpLabel="this overview"
         actions={
           <div className="flex items-center gap-2.5">
             <Link to="/queues">
@@ -240,9 +242,11 @@ export function DashboardPage() {
       {/* Operational Queues Workspace Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex items-center gap-0.5">
             <h2 className="text-lg font-bold tracking-tight text-fg">Operational Queues</h2>
-            <p className="text-xs text-muted">Select a queue to call tokens or configure settings</p>
+            <InfoHelp label="Operational Queues">
+              Your active queues. Open one to call tokens, or go to its counters and settings.
+            </InfoHelp>
           </div>
           <Link to="/queues" className="text-xs font-semibold text-brand-fg hover:underline">
             Manage all queues →
