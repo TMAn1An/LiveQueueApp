@@ -15,11 +15,15 @@ vi.mock('../context/AuthContext', () => ({
   useAuth: vi.fn(),
 }));
 vi.mock('../hooks/useOrganization');
+vi.mock('../hooks/useOrganizationNameAvailability', () => ({ useOrganizationNameAvailability: () => 'idle' }));
+
+const refreshIdentity = vi.fn().mockResolvedValue(null);
 
 function mockRole(role: 'OWNER' | 'ADMIN' | 'STAFF') {
   vi.mocked(useAuth).mockReturnValue({
     staff: { id: 's1', name: 'Owner', role },
     logout: vi.fn(),
+    refreshIdentity,
   } as unknown as ReturnType<typeof useAuth>);
 }
 
@@ -79,6 +83,28 @@ describe('OrganizationSettingsPage — Restart tutorial', () => {
     renderPage();
 
     expect(screen.queryByRole('button', { name: 'Restart tutorial' })).not.toBeInTheDocument();
+  });
+});
+
+describe('OrganizationSettingsPage — rename', () => {
+  it('re-reads the session identity after saving, so the sidebar shows the new name', async () => {
+    const mutateAsync = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(useUpdateOrganization).mockReturnValue({
+      mutateAsync,
+    } as unknown as ReturnType<typeof useUpdateOrganization>);
+    refreshIdentity.mockResolvedValue(null);
+    mockRole('OWNER');
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const nameInput = screen.getByLabelText('Organization Name');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Acme Clinic');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ name: 'Acme Clinic' }));
+    expect(refreshIdentity).toHaveBeenCalledTimes(1);
   });
 });
 

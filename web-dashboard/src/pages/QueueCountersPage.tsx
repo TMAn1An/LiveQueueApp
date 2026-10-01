@@ -12,6 +12,7 @@ import {
 } from '../hooks/useCounters';
 import { useStaffList } from '../hooks/useStaff';
 import { Card } from '../components/Card';
+import { InfoHelp } from '../components/InfoHelp';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
@@ -43,12 +44,7 @@ function CounterRow({
   const setStatus = useSetCounterStatus(queueId);
   const assignCounter = useAssignCounter(queueId);
   const deleteCounter = useDeleteCounter(queueId);
-  // V2 Product Completion checkpoint, Part B: Delete previously called the
-  // mutation directly on click, with no way to back out of a mis-click.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Only staff who could actually take this counter: free ones, plus whoever
-  // currently holds it. The backend decides — a client-side filter over the
-  // full staff list would go stale the moment another admin assigned someone.
   const canAssign = hasPermission('manage_staff');
   const { data: assignableStaff, isLoading: loadingStaff } = useAssignableStaff(
     counter.id,
@@ -58,30 +54,40 @@ function CounterRow({
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(counter.name);
 
-  // Resolved from the full staff list rather than the assignable one, so the
-  // name still shows if this person somehow falls out of availability.
   const staffName = staffResult?.data.find((s) => s.id === counter.staffId)?.name ?? '—';
 
   return (
-    <tr className="border-b border-border">
-      <td className="py-2 pr-4">
+    <tr className="border-b border-border transition-colors hover:bg-subtle/50">
+      <td className="py-3 pr-4 font-semibold text-fg">
         {editing ? (
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="rounded-md border border-border-strong px-2 py-1 text-sm"
+            className="rounded-md border border-border-strong px-2 py-1 text-sm bg-surface text-fg focus:border-brand-500"
           />
         ) : (
-          counter.name
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-brand-500" />
+            <span>{counter.name}</span>
+          </div>
         )}
       </td>
-      <td className="py-2 pr-4">
-        <StatusBadge status={counter.status} />
+      <td className="py-3 pr-4">
+        <StatusBadge status={counter.status} size="sm" />
       </td>
-      <td className="py-2 pr-4">{staffName}</td>
-      <td className="py-2 pr-4">
+      <td className="py-3 pr-4 text-sm text-fg-soft font-medium">
+        {staffName !== '—' ? (
+          <span className="inline-flex items-center gap-1.5 rounded-md bg-subtle px-2 py-0.5 text-xs text-fg">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            {staffName}
+          </span>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </td>
+      <td className="py-3 pr-4">
         <PermissionGate permission="manage_counters">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {editing ? (
               <>
                 <Button
@@ -91,8 +97,6 @@ function CounterRow({
                     updateCounter.mutate(
                       { counterId: counter.id, name },
                       {
-                        // The editor stays open until the rename actually
-                        // lands, so a rejected save does not look accepted.
                         onSuccess: () => setEditing(false),
                         onError: (err) => onError(errorMessage(err, 'Failed to rename counter.')),
                       },
@@ -128,7 +132,7 @@ function CounterRow({
                   { onError: (err) => onError(errorMessage(err, 'Failed to change counter status.')) },
                 );
               }}
-              className="rounded-md border border-border-strong px-2 py-1 text-sm"
+              className="rounded-md border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-fg focus:border-brand-500"
             >
               {COUNTER_STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -136,18 +140,11 @@ function CounterRow({
                 </option>
               ))}
             </select>
-            {/* ADR-036: deciding who stands at a counter is a staffing
-                decision reserved to owners and admins. The backend refuses it
-                for anyone else regardless — this keeps the control from
-                appearing at all rather than failing when used. */}
             <PermissionGate permission="manage_staff">
               <div className="flex items-center gap-1">
                 <select
                   value={counter.staffId ?? ''}
                   aria-label="Assigned staff"
-                  // Locked while the request is in flight so a second change
-                  // cannot race the first, and while options are still loading
-                  // so nobody picks from an empty list.
                   disabled={assignCounter.isPending || loadingStaff}
                   onChange={(e) => {
                     onError('');
@@ -159,10 +156,8 @@ function CounterRow({
                       },
                     );
                   }}
-                  className="rounded-md border border-border-strong px-2 py-1 text-sm"
+                  className="rounded-md border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-fg focus:border-brand-500"
                 >
-                  {/* Selecting this clears the assignment, which is what frees
-                      the person for every other counter. */}
                   <option value="">Unassigned</option>
                   {(assignableStaff ?? []).map((s) => (
                     <option key={s.id} value={s.id}>
@@ -217,66 +212,79 @@ export function QueueCountersPage() {
   if (!queueId) return null;
 
   return (
-    <div>
-      <QueueBreadcrumb
-        queueId={queueId}
-        queueName={queue?.name ?? 'Queue'}
-        section="Counters"
-        backTo={`/queues/${queueId}`}
-        backLabel={`Back to ${queue?.name ?? 'Queue'}`}
-      />
-      <h1 className="mb-4 text-2xl font-semibold text-fg">Counters</h1>
+    <div className="space-y-6">
+      <div>
+        <QueueBreadcrumb
+          queueId={queueId}
+          queueName={queue?.name ?? 'Queue'}
+          section="Counters"
+          backTo={`/queues/${queueId}`}
+          backLabel={`Back to ${queue?.name ?? 'Queue'}`}
+        />
+        <div className="flex items-center gap-1">
+          <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Counters</h1>
+          <InfoHelp label="Counters">
+            Desks and service points where staff call and serve customers for this queue.
+          </InfoHelp>
+        </div>
+      </div>
 
       <ErrorBanner message={error} />
 
       <Card>
         {isLoading ? (
-          <Spinner />
+          <Spinner label="Loading counters…" />
         ) : !counters?.length ? (
           <EmptyState message="No counters yet." />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                <th className="py-2 pr-4">Name</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Assigned Staff</th>
-                <th className="py-2 pr-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {counters.map((c) => (
-                <CounterRow key={c.id} queueId={queueId} counter={c} onError={setError} />
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                  <th className="py-3 pr-4">Name</th>
+                  <th className="py-3 pr-4">Status</th>
+                  <th className="py-3 pr-4">Assigned Staff</th>
+                  <th className="py-3 pr-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {counters.map((c) => (
+                  <CounterRow key={c.id} queueId={queueId} counter={c} onError={setError} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         <PermissionGate permission="manage_counters">
-          <div className="mt-4 flex items-end gap-2 border-t border-border pt-4">
-            <div>
-              <label className="mb-1 block text-xs text-muted">New counter name</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="rounded-md border border-border-strong px-2 py-1 text-sm"
-              />
+          <div className="mt-5 border-t border-border pt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">
+              Add Service Counter
+            </h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="w-full sm:max-w-xs">
+                <label className="mb-1 block text-xs text-muted">New counter name</label>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Counter 1, Window A"
+                  className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+                />
+              </div>
+              <Button
+                disabled={!name}
+                loading={createCounter.isPending}
+                onClick={() => {
+                  setError(null);
+                  createCounter.mutate(name, {
+                    onSuccess: () => setName(''),
+                    onError: (err) => setError(errorMessage(err, 'Failed to create counter.')),
+                  });
+                }}
+              >
+                {createCounter.isPending ? 'Adding…' : 'Add Counter'}
+              </Button>
             </div>
-            <Button
-              disabled={!name}
-              loading={createCounter.isPending}
-              onClick={() => {
-                setError(null);
-                createCounter.mutate(name, {
-                  // Cleared only once the counter exists — a failed create
-                  // must not silently discard what was typed.
-                  onSuccess: () => setName(''),
-                  onError: (err) => setError(errorMessage(err, 'Failed to create counter.')),
-                });
-              }}
-            >
-              {createCounter.isPending ? 'Adding…' : 'Add Counter'}
-            </Button>
           </div>
         </PermissionGate>
       </Card>

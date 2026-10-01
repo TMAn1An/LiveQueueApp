@@ -137,7 +137,7 @@
 
 **Reason:** Spec section 7.2 and section 19 call for token revocation/session management in production; the user named this as one of the key risk areas up front. A DB-backed session with rotation and reuse detection is standard practice for refresh tokens and satisfies "sessions must be revocable" without needing a distributed store (fits ADR-010, no Redis at MVP).
 
-**Consequence:** Every refresh call is a write (rotate), and reuse detection means a client that races two refresh calls with the same token will have one succeed and the other revoke the whole session family — this is intentional and client SDKs (web/mobile) must serialize their own refresh calls to avoid self-triggering it. Refresh tokens use SHA-256 (not bcrypt/Argon2) because they are high-entropy random values, not low-entropy user secrets — offline brute force is not the threat model there, unlike passwords.
+**Consequence:** Every refresh call is a write (rotate), and reuse detection means a client that races two refresh calls with the same token will have one succeed and the other revoke the whole session family — this is intentional and client SDKs (web/mobile) must serialize their own refresh calls to avoid self-triggering it. *(Amended by ADR-052: the dashboard now does serialize them, and the server no longer revokes the family for the same client's immediate duplicate.)* Refresh tokens use SHA-256 (not bcrypt/Argon2) because they are high-entropy random values, not low-entropy user secrets — offline brute force is not the threat model there, unlike passwords.
 
 ---
 
@@ -1448,3 +1448,102 @@ SKIPPED and CANCELLED still delete the hold (never an entitlement); COMPLETED st
 **Everything else audited and confirmed as built** (evidence in PROGRESS.md's "Master-roadmap audit" entry): called-counter on Call, Next, Live Tracking, Active Tokens and the FCM push; the centered card's queue/dedupe/no-auto-dismiss/×/View/routing; dashboard button sizing, labels and breadcrumbs; schedule/capacity; the mobile join-error mapping; and the security/regression items.
 
 **Verification:** mobile 360/360 (1 new), dashboard 254/254 (3 new). No backend change.
+
+## ADR-051: Product decisions from the dashboard review — no overlapping sessions, unique organization names, and the fixes found alongside (2026-10-01)
+
+**Status:** Implemented and tested on `feature/web-ui-ux-redesign`. One additive migration (`20261001000131_add_organization_name_key`). Not deployed.
+
+**1. Sessions on the same weekday may not overlap — reverses ADR-046.** ADR-046 allowed overlaps as "two concurrent capacity pools"; the product owner ruled them invalid: a customer belongs to exactly one window, and two windows covering the same minutes made both "which session am I in" and each session's capacity unclear to the people configuring them. Windows are half-open `[start, end)`, so back-to-back sessions stay valid. The backend refuses an overlapping create or edit with `409 SESSION_OVERLAP`, naming the clashing window; the check runs inside a transaction holding the queue-row lock, so two administrators adding sessions at once cannot both pass. Existing overlapping rows (created before this rule) are left as they are — assignment handles them as before — and can only be edited into a non-overlapping shape. The dashboard flags an overlap before saving and suggests the next free slot after the day's last session.
+
+**2. Organization names are unique like usernames.** `Organization.nameKey` (unique) holds NFKC + trimmed + collapsed-whitespace + lower-case; `name` keeps exactly what was typed for display. Registration and rename both claim the key, and a concurrent duplicate is caught by the unique index and returned as `409 ORGANIZATION_NAME_TAKEN`. A name held only by a sign-up that expired unverified is released (the same thing the cleanup job does). `GET /api/auth/organization-name-availability?name=` (public, rate-limited) answers `{available}` only — never anything about the holder — and the registration and rename forms use it as you type (debounced). **Migration:** backfills every row from its own name; where existing organizations already shared a name, the oldest keeps the plain key and each later one gets the key plus ` #<its own id>` (the whole id, so two duplicates can never collide), and the unique index can be created without changing or deleting anything. Trade-off accepted: the endpoint reveals whether a name is in use, which is inherent to a "username available?" check.
+
+*Backfill parity with `organizationNameKey()`.* The SQL reproduces the application's `normalize('NFKC') → trim → collapse whitespace → toLowerCase` rather than approximating it: `normalize(name, NFKC)`; a whitespace class spelled out code point by code point (PostgreSQL's `\s` follows the database locale, JavaScript's does not) and collapsed before trimming, so tabs and newlines at the ends are removed too; and lower-casing under ICU's root collation (`und-x-icu`), which is the same Unicode algorithm JavaScript uses, context-sensitive cases included. Rehearsed over 28 deliberately awkward legacy names (leading/trailing/repeated whitespace, tabs, no-break and ideographic spaces, full-width letters, ligatures, accented/Cyrillic/Bengali text, Greek final sigma, Turkish dotted İ): every key was identical to the application's. What cannot be made identical:
+- *A server built without ICU* has no `und-x-icu`; the migration then falls back to plain `lower()` rather than fail. That follows the database locale and maps one character at a time, so `İ` (application: `i̇`), a word-final `Σ` (application: `ς`) and, on some locales, `ẞ` (application: `ß`) come out differently. The effect is confined to pre-existing names containing those letters: such a row's key would not block a later look-alike registration until the organization is next renamed (which re-keys it in the application).
+- *Unicode version skew.* The database's ICU and the Node.js runtime each carry their own Unicode tables; a character added to Unicode after the older of the two was built could normalize or lower-case differently. Not reproducible with any current letter, and equally unavoidable for any database/application pair.
+- `normalize()` needs PostgreSQL 13+ and a UTF8 database. This is a precondition, not a difference: on anything older the migration fails as a whole and changes nothing (DEPLOYMENT.md §3a).
+
+**3. Unverified owners can sign back in.** `login()` and session refresh rejected every non-`ACTIVE` account — including a just-registered owner waiting for their email — with the misleading "This account has been suspended", and refresh logged them out on page reload. With registration also refusing their email ("already registered"), anyone whose email did not arrive was locked out for an hour. Sessions are now allowed for `PENDING_EMAIL_VERIFICATION` owners inside their registration window (`requireVerified` still closes every queue feature); after it, sign-in says the registration expired and re-registering with that email replaces the lapsed sign-up. Invited staff (pending, no registration deadline, unusable password) and suspended accounts are unchanged.
+
+**4. The signed-in organization now carries its timezone.** The auth response omitted `timezone` and `onboardingCompletedAt`, so a queue inheriting its organization's zone showed "No timezone set" and Organization Settings showed "Not set". The queue timezone card also offers the device's own zone in one click — deliberately a choice, never applied automatically, because a queue's clock must not move with whoever opens settings from wherever they are; no IP or GPS geolocation (unchanged from ADR-035).
+
+**5. Dashboard UX.** Every `Button` now has a fixed height per size (an outline button used to be 2px taller than a filled one; only the outline variant draws a border), and each action row uses one size; the dashboard queue card puts "Open Queue" on its own full-width row above "Manage Counters (n)" and "Settings", all real buttons; Queue Details shows and edits the same fields (form version read-only); Schedule days sit in a 2–3 column grid with an aligned session list (the old table's header and cells were misaligned); Repeat Visits opens with the full settings form already filled in; sidebar logout is a full-width labelled button; the desktop sidebar is sticky, so navigation stays in reach on a long page (the mobile drawer is unchanged); renaming the organization refreshes the name shown in the sidebar; and the timezone pickers offer `UTC` and always list the zone currently in use, so a set zone is never displayed as "Not set".
+
+**6. A built dashboard has no default API address.** `VITE_API_BASE_URL` used to fall back to `localhost` in every build. That is right for a development server and silently wrong for a deployment — every visitor's requests would go to their own machine. `vite build` now refuses to run without it (and, on Cloudflare Pages, with a loopback value), and the runtime resolver throws a named error rather than guess; only the dev server keeps the local fallback (DEPLOYMENT.md §11b).
+
+**7. The development seed script holds no password.** `src/scripts/seedDevOwner.ts` sets a known password on an owner account, so it reads it from `DEV_SEED_OWNER_PASSWORD`, never prints it, and refuses to run unless `NODE_ENV=development` *and* the database is on the local machine.
+
+**Verification:** see PROGRESS.md ("V2 Dashboard Review Fixes" and its final verification pass) for the counts. Migration applied to the local databases and rehearsed through `prisma migrate deploy` on a throwaway database — empty, with the 28 legacy names above, without the ICU collation, and with a forced failure on its final statement (rolled back whole; recovered with `migrate resolve --rolled-back`).
+
+## ADR-052: Refresh rotation is atomic, and a client's own immediate duplicate is not theft (2026-10-01)
+
+**Status:** Implemented and tested on `feature/web-ui-ux-redesign`. No migration, no new environment variable. Amends ADR-013.
+
+**Problem.** Users were intermittently signed out — on every device — by nothing more than reloading the dashboard. Two faults combined:
+
+1. *The dashboard sent the same refresh token more than once.* ADR-013 said clients "must serialize their own refresh calls"; the dashboard never did. The session-restore effect and the expired-access-token handler each exchanged the stored token independently. React StrictMode runs the restore effect twice in development, and — in production — every request in flight when the 15-minute access token expires started its own exchange.
+2. *The server's rotation was not atomic.* `rotateSession` read the session, saw it unrevoked, and only then revoked it and created the successor. Two requests arriving together both passed the check and each minted a successor (the session silently forked — which also meant a replay racing the legitimate refresh was not detected at all). A request arriving a few milliseconds later instead found the token revoked, was treated as theft, and revoked every session the user had.
+
+**Decision — both sides, because each fix alone leaves a hole.**
+
+*Dashboard: one exchange at a time* (`src/api/sessionRefresh.ts`). All callers share a single in-flight exchange and receive its result; across tabs the exchange runs under a Web Lock, and the token is read inside the lock, so a second tab presents what the first one stored. A request whose `TOKEN_EXPIRED` response arrives after a sibling already refreshed retries with the new access token instead of rotating again.
+
+*Server: exactly one rotation per token* (`session.service.ts`). The claim is one conditional `UPDATE … WHERE revoked_at IS NULL`; whichever request claims the row creates the successor, and any other creates nothing. A revoked token being presented is still reuse, and still revokes every session, **unless all of these hold** — in which case it is answered `409 REFRESH_TOKEN_SUPERSEDED`, with no tokens and no revocation:
+- it was revoked by a rotation (it has a successor) — never a token ended by logout, password change or an earlier reuse response;
+- the rotation happened within the last 10 seconds (`REFRESH_REUSE_LEEWAY_MS`);
+- its successor is still active;
+- the request has the same user agent as the one that performed the rotation.
+
+**Why a window at all, and why this is not a weakening.** Requests that leave a client together can reach the server seconds apart, and a response can be lost on the way back; the server cannot tell either from a replay except by proximity in time. That is the same trade every rotation scheme with a "reuse interval" makes. The difference from the usual form is that the duplicate here is *refused*: it receives no access token and no refresh token. So:
+- A thief replaying a rotated token gains nothing, inside the window or outside it.
+- Outside the window, from another user agent, or once the successor has been revoked, presenting a rotated token revokes every session exactly as before — including the case that matters most, where the thief rotated first and the owner's later request exposes it.
+- Simultaneous presentations can no longer fork a session, which the old code allowed.
+- What is given up: if a thief rotates the token first *and* the owner's own request for the same token arrives within 10 seconds *and* the thief copied the owner's user-agent string, that one presentation is not treated as the theft signal. The owner is still refused (and so signs in again), but the thief's session is not revoked by that event. Narrow, and it requires winning a race the thief cannot schedule; recorded here rather than hidden.
+- The IP address is deliberately not part of the check: `trust proxy` is not configured (DEPLOYMENT.md), so two requests from one browser can appear to come from different proxy addresses, and a false mismatch would sign a legitimate user out everywhere — the very fault being fixed.
+
+**Rejected.** *Only the client fix:* correct for this dashboard in a modern browser, but the server would still fork sessions under a race and still punish a lost response or a browser without Web Locks with a global sign-out. *Only a server window that issues new tokens to the duplicate* (the common "reuse interval"): keeps a forked, long-lived session alive for whoever replays within the window. *Deriving the successor token deterministically so the duplicate can be given the same one:* preserves detection best, but makes refresh tokens a function of a server key and needs a new mandatory secret — too much machinery for the remaining edge cases. *A client-side delay or debounce:* hides the race rather than removing it.
+
+**Consequence.** A client that mishandles `409 REFRESH_TOKEN_SUPERSEDED` ends up signed out on that device only; nothing is revoked. The mobile app is unaffected (customers have no refresh tokens). Dashboards cached from before this change keep working: the server never punishes their duplicate, though that tab may still drop to the sign-in page until it loads the new build.
+
+**Verification.** Backend `auth.refreshRotation.test.ts` — simultaneous and near-simultaneous duplicates (one winner, no fork, nobody signed out, repeated with fan-out of 5), genuine reuse (aged rotation, different user agent, thief-rotates-first, revoked successor), normal rotation, logout and password-change revocation. Run against the previous `rotateSession`, the duplicate cases fail (`[200, 200]`, and `401` + global revocation). Dashboard `sessionRefresh.test.ts`, `AuthSessionRefresh.test.tsx` (real context and client against a fake backend with *no* leeway: StrictMode restore, six consecutive reloads, six concurrent requests at access-token expiry) and `client.test.ts`; with the single-flight removed, those sign the user out.
+
+## ADR-053: Explanations sit behind an info icon; anything needed to act stays on the page (2026-10-02)
+
+**Status:** Implemented on `feature/web-ui-ux-redesign`. Dashboard only; no backend or mobile change.
+
+**Decision.** A heading says what a thing is. The sentence explaining what it is *for* no longer sits under it: it goes behind a small "ⓘ" beside the heading (`InfoHelp`), reached by hover, keyboard focus or tap. `PageHeader` does this with its `description`; card and section titles use `SectionHeading`. One component, one behaviour, everywhere.
+
+**The rule for what may be hidden.** Only explanation. Text stays on the page when a person needs it to act correctly or safely: errors, warnings, destructive-action consequences, confirmations, current status, what a toggle does, hints required to fill in a field, empty-state and first-run guidance, permission notices, and anything in a confirmation dialog. When in doubt it stays visible — a hidden warning is a defect, a visible explanation is only clutter.
+
+**Behaviour, and why.**
+- *Not a native `title`.* A `title` never appears on touch, cannot be reached by keyboard, and is announced inconsistently.
+- *Always in the document.* The explanation is rendered but hidden, and the button references it with `aria-describedby`, so a screen reader reads "More information about X" followed by the explanation on focus whether or not it is showing. `aria-expanded` reflects whether it is.
+- *Hover follows the pointer; a click, tap or Enter pins it.* A pinned one stays until Escape, a second activation, a tap outside, or focus leaving. Nothing depends on hover, so it works on a phone.
+- *Positioned against the viewport (`position: fixed`), not in the flow.* Opening it cannot move the page, a scrolling or clipping container cannot cut it off, and it is clamped inside the left/right edges and flipped above the icon when there is no room below. It follows the icon on scroll and resize.
+- *Small icon, real target.* 16 px glyph in a 32 px button (40 px on coarse pointers), with negative margins so the larger target does not make the heading row taller.
+- *No dependency added.* The glyph is an inline SVG like every other icon in the dashboard.
+
+**Consequence.** New pages should pass their blurb as `description`/`help` and never render it under the title. The queue-settings tab bar lost its one-line blurb entirely — it restated what the sections beneath it already explain.
+
+## ADR-054: Only an answer from the backend ends a dashboard session (2026-10-02)
+
+**Status:** Implemented on `feature/web-ui-ux-redesign`. Dashboard only; no backend change.
+
+**Problem.** Session restore treated every failure alike: `catch { clearAuth() }`. A backend that was restarting, a laptop waking before its network, a timeout — each discarded the stored refresh token and redirected to sign-in, exactly as a revoked session would. The same happened mid-session when a token refresh could not be made.
+
+**Decision.** A failed request is one of two things, and they are handled differently:
+
+- *The backend refused the session* — a 4xx it actually sent about the request (other than 408 and 429): invalid, expired, revoked, reused or superseded token, suspended account or organization. The session is over: local credentials are cleared and the user goes to sign-in, immediately, as before. Nothing about this path changed, and real 401/403 responses are never swallowed.
+- *The backend gave no answer* — no network, connection refused, timeout, 5xx, a gateway's non-JSON error page, 429. Nothing has been learned about the session, so nothing is concluded:
+  - On page load the app enters `reconnecting`. The stored refresh token is kept. **No protected screen is rendered and no cached identity is used** — the person is not treated as signed in on the strength of a token nobody has checked. They see what is true ("the server isn't answering; you're still signed in on this device"), with *Retry now* and *Sign out*.
+  - Mid-session, the request that needed the refresh fails with the network error; the session is left for the next request to try again.
+
+**Retrying safely.** The refresh token is single-use, so a blind retry loop is not free: if a rotation reached the server and only its response was lost, presenting the old token again is — correctly — suspicious. Therefore:
+- every retry first makes a health check that carries no credentials and changes nothing, and the refresh token is sent again only once the server answers;
+- the refresh request itself is never abandoned on a timer: a backend that is slow to wake may still process a request the client gave up on, and re-sending the token would then be refused. It waits as long as the browser does, exactly as before;
+- the first retries come quickly (1s, 2s, 5s), so the retry that follows a lost response normally lands inside the server's 10-second duplicate leeway (ADR-052) and is answered "superseded", not "reused";
+- new tokens obtained before a failed identity request are kept, so a retry does not spend the refresh token a second time;
+- the schedule backs off (1s … 60s) and stays under the auth rate limit.
+
+**Why this does not accept stale authorization.** Authorization is never granted by the client. While reconnecting, the app holds a token and shows nothing; the first thing it does when the backend returns is have that token checked, and a refusal signs the user out. The token itself still expires and can still be revoked server-side during the outage — the wait cannot outlive either.
+
+**Residual.** A rotation whose response is lost, followed by more than 10 seconds before the server is reachable again, is still reported as reuse and revokes that user's sessions. Closing that fully needs an idempotency key on the refresh exchange (a schema and protocol change); not done here, recorded so it is not rediscovered.

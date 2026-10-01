@@ -172,6 +172,60 @@ before the old one is dropped; because every existing row receives the same
 `'QUEUE'` key, the old uniqueness implies the new one, so it cannot fail on
 existing data. No backfill, no new environment variable.
 
+#### Unique organization names (`20261001000131_add_organization_name_key`)
+
+ADR-051. Adds `organizations.name_key` (`NOT NULL`, unique) — the lower-case,
+whitespace-normalized form of each organization's name. **No displayed name is
+changed and no row is deleted.** Each row's key is computed from its own name;
+where existing organizations already share a name, the oldest keeps the plain
+key and each later one gets the key plus ` #<its own id>`, so the unique index
+cannot fail on existing data. To see which organizations that will be (read
+only, safe to run at any time; it uses the server's own `\s`, so treat it as a
+close preview of the migration's rule rather than the rule itself):
+
+```sql
+SELECT lower(btrim(regexp_replace(normalize(name, NFKC), '\s+', ' ', 'g'))) AS key,
+       count(*), array_agg(name ORDER BY created_at) AS names
+FROM organizations GROUP BY 1 HAVING count(*) > 1;
+```
+
+**Requires PostgreSQL 13 or newer with a UTF8 database** (for `normalize()`);
+check with `SHOW server_version;` and `SHOW server_encoding;`. On an older or
+non-UTF8 server the migration fails cleanly — see below — rather than
+producing wrong keys. Lower-casing uses the ICU root collation (`und-x-icu`)
+when the server has it, which matches the application exactly; a server built
+without ICU falls back to plain `lower()`, which can differ for a few
+non-ASCII letters (ADR-051).
+
+**Deploy the backend first, at a quiet moment.** The column has no default, so
+between the moment the migration is applied and the moment the new backend
+instance is live, the *previous* backend release cannot create an
+organization: **new registrations fail during that window** (about as long as
+the build and start take). Nothing else is affected — existing organizations,
+sign-in and every queue operation work on both releases. The dashboard's live
+"is this name available?" check needs the new backend, so deploy the backend
+before (or together with) the dashboard.
+
+**If the migration fails**, it fails as a whole: PostgreSQL rolls back every
+statement, so the table is left exactly as it was (rehearsed by forcing the
+last statement to fail). `prisma migrate deploy` then refuses to run again
+until the failure is acknowledged — fix the cause, then
+`npx prisma migrate resolve --rolled-back 20261001000131_add_organization_name_key`
+and deploy again. The previous release keeps serving throughout.
+
+**Rolling the code back after it succeeded** leaves a `NOT NULL` column the
+older code does not fill, so registration would fail on the older release.
+Either roll forward, or relax the column first — non-destructive, keeps every
+key:
+
+```sql
+ALTER TABLE organizations ALTER COLUMN name_key DROP NOT NULL;
+```
+
+Removing the feature entirely is `DROP INDEX organizations_name_key_key;`
+followed by `ALTER TABLE organizations DROP COLUMN name_key;` — the keys are
+derived data and can be rebuilt from `name` at any time.
+
 #### Skip reasons and completion feedback (`20260929205254_add_token_skip_reason_and_completion_feedback`)
 
 Adds ADR-042's terminal notes. **Purely additive**: one new enum type
@@ -317,6 +371,7 @@ deliberately rather than trusting `/health`.
 | `RESEND_API_KEY` | unset → emails not sent | **Registration is effectively broken**: the account is created `PENDING_EMAIL_VERIFICATION`, the verification email is never delivered, the user can never verify, and the pending organization is auto-deleted one hour later by the cleanup scheduler (§5). |
 | `APP_BASE_URL` | `http://localhost:5173` | Verification emails link to `localhost` — every verification link is unusable. Set to the real dashboard origin. |
 | `EMAIL_FROM` | `LiveQueue <onboarding@resend.dev>` | **Delivers only to the email address that owns the Resend account.** `onboarding@resend.dev` is Resend's shared sandbox sender: every send to any other recipient is rejected by the provider (typically a 403 "you can only send testing emails to your own email address"), so real signups silently never receive their link. Set this to a sender on a domain verified in Resend. |
+| `EMAIL_REPLY_TO` | unset → no Reply-To header | Optional. A monitored mailbox on the sending domain; a small positive deliverability signal and somewhere for recipients to reply. A blank value is treated as unset. |
 | `FIREBASE_CREDENTIALS` *or* `FIREBASE_SERVICE_ACCOUNT_PATH` | unset → push disabled | No push notifications (reminders, lifecycle). See §6 — **on Render, use `FIREBASE_CREDENTIALS`**. |
 | `MOBILE_ANDROID_STORE_URL` | `''` | Only matters once you raise the minimum app version — the Update Required screen then has no store to send users to. See §11. |
 
@@ -343,6 +398,39 @@ A failed send never fails the registration: the account exists as
 `PENDING_EMAIL_VERIFICATION` and the dashboard offers a resend. But it is
 deleted an hour later if never verified, so a misconfiguration here does
 break signup end to end.
+
+**Local development:** with no `RESEND_API_KEY` in `backend/.env`, nothing is
+sent — but under `NODE_ENV=development` the backend prints the verification
+link in its own console (`DEV ONLY: … open this link`), so a local signup can
+still be completed. To receive real email locally instead, copy a Resend API
+key into `backend/.env` together with the same `EMAIL_FROM` production uses.
+
+### 3b-ii. "The email arrives, but in spam"
+
+Delivery to the inbox is decided mostly by the sending domain's reputation
+and authentication, not by this code. In order of impact:
+
+1. **Authenticate the sending domain in DNS** (Resend → Domains shows the
+   exact records and whether each is verified):
+   - **SPF** — the TXT record Resend gives for the `send` subdomain;
+   - **DKIM** — the `resend._domainkey` TXT record;
+   - **DMARC** — add one yourself if Resend's page shows none, starting in
+     monitor mode: `_dmarc.<your-domain>` TXT `v=DMARC1; p=none;`. Gmail and
+     Yahoo expect DMARC from every bulk and transactional sender, and a
+     domain without it is far more likely to be filtered.
+2. **Send from your own domain**, never `onboarding@resend.dev`, with a real
+   display name and address, e.g. `LiveQueue <no-reply@your-domain>`.
+3. **`EMAIL_REPLY_TO`** (optional) — a monitored mailbox on the same domain.
+4. **A new domain has no reputation yet.** Early messages often land in spam
+   regardless; marking them "Not spam" and adding the sender to contacts
+   trains the recipient's filter, and reputation builds with normal volume.
+   Avoid bursts of test sends to many addresses from a brand-new domain.
+5. **Content** is already handled in code: every message is sent as
+   HTML + plain text, as a complete HTML document, with the link also shown
+   as visible text.
+
+Check a real message's headers ("Show original" in Gmail): `SPF: PASS`,
+`DKIM: PASS` and `DMARC: PASS` together are the goal.
 
 ### 3c. Safe defaults — set only to override
 
@@ -699,6 +787,33 @@ in that state says so by name instead of blaming the customer's connection.
 
 ---
 
+## 11b. Building the web dashboard (`VITE_API_BASE_URL` is mandatory)
+
+**Every dashboard build must be given `VITE_API_BASE_URL`** — the backend's
+public origin, with no trailing slash and no `/api`. Vite bakes it into the
+bundle at build time, so it is a *build* setting: on a static host it belongs
+in the host's build environment variables (for Cloudflare Pages: Settings →
+Environment variables, for the Production — and, if used, Preview —
+environment), not in a committed file.
+
+There is deliberately no default for a build. A dashboard that fell back to
+`localhost` would send every visitor's requests to their own computer and
+look, from the outside, like a backend outage. So:
+
+- `npm run build` **refuses to run** when the variable is missing, blank, or
+  not an `http(s)` URL — and, on Cloudflare Pages (`CF_PAGES` is set by its
+  build environment), when it points at a loopback address. A failed build
+  publishes nothing: the host keeps serving the previous deployment.
+- At runtime, a build that somehow has no value throws a named error
+  (`VITE_API_BASE_URL is not set…`) instead of guessing an address.
+- Only `npm run dev` may fall back to the local backend
+  (`http://localhost:4000`, the backend's default `PORT`), and only when nothing is
+  configured.
+
+Covered by `web-dashboard/src/api/apiBaseUrl.test.ts`.
+
+---
+
 ## 12. Instance count / horizontal scaling
 
 **Run a single backend instance unless Socket.io is reworked first.**
@@ -729,7 +844,8 @@ is the only component that constrains instance count.
 ## Deployment assumptions this document could not verify from the repository
 
 - No specific PostgreSQL version is pinned anywhere in this repository —
-  use a currently-supported release.
+  use a currently-supported release. The oldest version the migrations
+  accept is 13 (§3a, "Unique organization names").
 - No process manager, container runtime, or hosting platform is chosen by
   this repository — whichever is used just needs to run `npm start` from
   `backend/` with the environment variables in §3 set, and send `SIGTERM`

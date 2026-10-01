@@ -93,6 +93,38 @@ describe('AppLayout navigation', () => {
   );
 });
 
+// jsdom does no layout, so this pins the classes that produce the behaviour:
+// on desktop the sidebar stays in view while a long page scrolls; on mobile
+// it is still the off-canvas drawer it always was.
+describe('AppLayout sidebar positioning', () => {
+  it('is sticky to the viewport on desktop and a closed drawer on mobile', () => {
+    mockSession();
+    const { container } = renderLayout();
+
+    const sidebar = container.querySelector('aside');
+    expect(sidebar).not.toBeNull();
+    const classes = sidebar!.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['lg:sticky', 'lg:top-0', 'lg:h-screen', 'lg:translate-x-0']));
+    expect(classes).not.toContain('lg:static');
+    // Mobile drawer, untouched: fixed, and off-screen until opened.
+    expect(classes).toEqual(expect.arrayContaining(['fixed', 'inset-y-0', '-translate-x-full']));
+  });
+
+  it('opens as a drawer from the menu button on mobile', async () => {
+    mockSession();
+    const { container } = renderLayout();
+
+    screen.getByRole('button', { name: 'Open navigation menu' }).click();
+
+    await screen.findByRole('link', { name: 'Dashboard' });
+    await vi.waitFor(() => {
+      const classes = container.querySelector('aside')!.className.split(/\s+/);
+      expect(classes).toContain('translate-x-0');
+      expect(classes).not.toContain('-translate-x-full');
+    });
+  });
+});
+
 // V2 Product Completion checkpoint, Part C: the setup guide is the owner's
 // own onboarding, not a permission-gated feature — it never appears for
 // STAFF or ADMIN, no matter the organization's state, and never appears for

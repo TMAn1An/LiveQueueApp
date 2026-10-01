@@ -4,21 +4,13 @@ import { Card } from '../components/Card';
 import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { Pagination } from '../components/Pagination';
 import { SearchInput } from '../components/SearchInput';
+import { PageHeader } from '../components/PageHeader';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatActionLabel, formatDateTime } from '../utils/format';
 
-/**
- * Consumes the existing GET /api/audit-logs endpoint (Phase 7) — the
- * backend already scopes results to the authenticated organization,
- * enforces `view_reports`, sanitizes metadata against secrets, and returns
- * newest-first. Nothing here re-derives or re-checks any of that; the page
- * only renders what the backend already decided was safe to return.
- */
 export function AuditLogsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
-  // Server-side search: this table grows without bound, so filtering only
-  // the loaded page would hide most matches.
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: result, isLoading, isFetching } = useAuditLogs(page, 20, debouncedSearch);
 
@@ -28,13 +20,13 @@ export function AuditLogsPage() {
   }
 
   return (
-    <div>
-      <h1 className="mb-2 text-2xl font-semibold text-fg">Audit Logs</h1>
-      <p className="mb-4 max-w-2xl text-sm text-muted">
-        A record of staff actions in this organization — newest first.
-      </p>
+    <div className="space-y-6">
+      <PageHeader
+        title="Audit Logs"
+        description="Immutable record of sensitive actions, authentication events, and administrative changes."
+      />
 
-      <div className="mb-4 flex gap-2">
+      <div className="max-w-md">
         <SearchInput
           value={search}
           onChange={handleSearchChange}
@@ -43,54 +35,61 @@ export function AuditLogsPage() {
         />
       </div>
 
-      {/* Rows already on screen stay put while a new search loads —
-          blanking them on every keystroke would be worse than the wait. */}
       {isFetching && !isLoading && (
-        <div className="mb-2 flex justify-end">
+        <div className="flex justify-end">
           <RefreshIndicator />
         </div>
       )}
+
       <Card>
         {isLoading ? (
-          <Spinner />
+          <Spinner label="Loading audit logs…" />
         ) : !result?.data.length ? (
           <EmptyState
             message={debouncedSearch ? 'No audit events match your search.' : 'No audit events yet.'}
           />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                <th className="py-2 pr-4">Time</th>
-                <th className="py-2 pr-4">Staff</th>
-                <th className="py-2 pr-4">Action</th>
-                <th className="py-2 pr-4">Entity</th>
-                <th className="py-2 pr-4">Details</th>
-                <th className="py-2 pr-4">IP</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.data.map((entry) => (
-                <tr key={entry.id} className="border-b border-border align-top transition-colors duration-150 hover:bg-subtle">
-                  <td className="py-2 pr-4 whitespace-nowrap">{formatDateTime(entry.createdAt)}</td>
-                  <td className="py-2 pr-4">{entry.staffEmail}</td>
-                  <td className="py-2 pr-4 font-medium text-fg">{formatActionLabel(entry.action)}</td>
-                  <td className="py-2 pr-4">
-                    <span className="text-muted">{entry.entityType}</span>
-                    {entry.entityId && (
-                      <span className="ml-1 font-mono text-xs text-faint">
-                        {entry.entityId.slice(0, 8)}…
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-2 pr-4 font-mono text-xs text-muted">
-                    {entry.metadata ? JSON.stringify(entry.metadata) : '—'}
-                  </td>
-                  <td className="py-2 pr-4 font-mono text-xs text-faint">{entry.ipAddress ?? '—'}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                  <th className="py-3 pr-4">Time</th>
+                  <th className="py-3 pr-4">Staff</th>
+                  <th className="py-3 pr-4">Action</th>
+                  <th className="py-3 pr-4">Entity</th>
+                  <th className="py-3 pr-4">Details</th>
+                  <th className="py-3 pr-4">IP</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {result.data.map((entry) => (
+                  <tr key={entry.id} className="border-b border-border align-top transition-colors hover:bg-subtle/50">
+                    <td className="py-3 pr-4 whitespace-nowrap text-xs text-muted font-mono">
+                      {formatDateTime(entry.createdAt)}
+                    </td>
+                    <td className="py-3 pr-4 text-xs font-medium text-fg">{entry.staffEmail}</td>
+                    <td className="py-3 pr-4">
+                      <span className="inline-flex items-center rounded-md bg-subtle px-2 py-0.5 text-xs font-semibold text-fg-soft border border-border">
+                        {formatActionLabel(entry.action)}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-4 text-xs text-fg-soft">
+                      <span className="text-muted">{entry.entityType}</span>
+                      {entry.entityId && (
+                        <span className="ml-1 font-mono text-xs text-faint">
+                          {entry.entityId.slice(0, 8)}…
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3 pr-4 font-mono text-xs text-muted max-w-xs truncate">
+                      {entry.metadata ? JSON.stringify(entry.metadata) : '—'}
+                    </td>
+                    <td className="py-3 pr-4 font-mono text-xs text-faint">{entry.ipAddress ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         <Pagination pagination={result?.pagination} onPageChange={setPage} />
       </Card>

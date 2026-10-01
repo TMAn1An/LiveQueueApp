@@ -56,6 +56,14 @@ export const changePasswordSchema = {
 };
 
 // V2 Checkpoint 2: the raw token from the emailed verification link.
+/** Same length rules as registration's organizationName, so "available"
+ * always means "registrable". */
+export const organizationNameAvailabilitySchema = {
+  query: z.object({
+    name: z.string().trim().min(2, 'Organization name is required.').max(120),
+  }),
+};
+
 export const verifyEmailSchema = {
   query: z.object({
     token: z.string().min(1, 'token is required.'),

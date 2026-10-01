@@ -364,14 +364,17 @@ describe('a scheduled token is not callable before its session starts (ADR-048)'
   });
 
   it('does not block FCFS for callable customers behind it', async () => {
-    const { ctx, queue, service, counter, morning, future, moment } = await morningFullWithFutureToken();
-    // A new overlapping session opens now, so a later joiner is callable
-    // today while the earlier-numbered future token is still scheduled.
-    await api()
-      .post(`/api/queues/${queue.id}/sessions`)
+    const { ctx, queue, service, counter, morning, future, moment, sessions } = await morningFullWithFutureToken();
+    // The admin raises the morning session's capacity, so a later joiner is
+    // placed in the running session — callable today while the
+    // earlier-numbered future token is still scheduled.
+    const raised = await api()
+      .put(`/api/queues/${queue.id}/sessions/${sessions[0]!.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ weekday: moment.weekday, startMinute: 10 * 60, endMinute: 12 * 60, capacity: null });
+      .send({ weekday: moment.weekday, ...MORNING, capacity: 5 });
+    expect(raised.status).toBe(200);
     const later = await createToken({ queueId: queue.id, serviceId: service.id });
+    expect(later.assignedSession).toMatchObject(MORNING);
 
     await call(ctx.accessToken, morning.id, counter.id);
     await api().post(`/api/tokens/${morning.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });

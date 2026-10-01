@@ -21,65 +21,74 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(service.serviceName);
   const [duration, setDuration] = useState(service.durationMinutes);
-  // V2 Product Completion checkpoint, Part B: this Delete previously called
-  // the mutation directly on click, with no way to back out of a mis-click.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
   const showRowError = (err: unknown) => setRowError(actionErrorMessage(err));
 
   if (editing) {
     return (
-      <tr className="border-b border-border">
-        <td className="py-2 pr-4">
+      <tr className="border-b border-border bg-subtle/30">
+        <td className="py-3 pr-4">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
+            className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-fg focus:border-brand-500"
           />
         </td>
-        <td className="py-2 pr-4">
-          <input
-            type="number"
-            min={1}
-            value={duration}
-            onChange={(e) => setDuration(Number(e.target.value))}
-            className="w-20 rounded-md border border-border-strong px-2 py-1 text-sm"
-          />
+        <td className="py-3 pr-4">
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={1}
+              value={duration}
+              onChange={(e) => setDuration(Number(e.target.value))}
+              className="w-20 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-fg focus:border-brand-500"
+            />
+            <span className="text-xs text-muted">min</span>
+          </div>
         </td>
-        <td className="py-2 pr-4">
-          <StatusBadge status={service.isActive ? 'ACTIVE' : 'INACTIVE'} />
+        <td className="py-3 pr-4">
+          <StatusBadge status={service.isActive ? 'ACTIVE' : 'INACTIVE'} size="sm" />
         </td>
-        <td className="py-2 pr-4 flex gap-2">
-          <Button
-            loading={updateService.isPending}
-            onClick={() =>
-              updateService.mutate(
-                { serviceId: service.id, input: { serviceName: name, durationMinutes: duration } },
-                { onSuccess: () => setEditing(false), onError: showRowError },
-              )
-            }
-          >
-            {updateService.isPending ? 'Saving…' : 'Save'}
-          </Button>
-          <Button variant="ghost" onClick={() => setEditing(false)}>
-            Cancel
-          </Button>
-          {rowError && <ErrorBanner message={rowError} />}
+        <td className="py-3 pr-4">
+          <div className="flex items-center gap-2">
+            <Button
+              loading={updateService.isPending}
+              onClick={() =>
+                updateService.mutate(
+                  { serviceId: service.id, input: { serviceName: name, durationMinutes: duration } },
+                  { onSuccess: () => setEditing(false), onError: showRowError },
+                )
+              }
+            >
+              {updateService.isPending ? 'Saving…' : 'Save'}
+            </Button>
+            <Button variant="ghost" onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+          {rowError && <div className="mt-2"><ErrorBanner message={rowError} /></div>}
         </td>
       </tr>
     );
   }
 
   return (
-    <tr className="border-b border-border">
-      <td className="py-2 pr-4">{service.serviceName}</td>
-      <td className="py-2 pr-4">{service.durationMinutes} min</td>
-      <td className="py-2 pr-4">
-        <StatusBadge status={service.isActive ? 'ACTIVE' : 'INACTIVE'} />
+    <tr className="border-b border-border transition-colors hover:bg-subtle/50">
+      <td className="py-3 pr-4 font-semibold text-fg">
+        {service.serviceName}
       </td>
-      <td className="py-2 pr-4">
+      <td className="py-3 pr-4">
+        <span className="inline-flex items-center rounded-md bg-subtle px-2 py-0.5 text-xs font-medium text-fg-soft border border-border">
+          {service.durationMinutes} min
+        </span>
+      </td>
+      <td className="py-3 pr-4">
+        <StatusBadge status={service.isActive ? 'ACTIVE' : 'INACTIVE'} size="sm" />
+      </td>
+      <td className="py-3 pr-4">
         <PermissionGate permission="manage_services">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" onClick={() => setEditing(true)}>
               Edit
             </Button>
@@ -98,7 +107,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             </Button>
           </div>
         </PermissionGate>
-        {rowError && <ErrorBanner message={rowError} />}
+        {rowError && <div className="mt-2"><ErrorBanner message={rowError} /></div>}
         {confirmingDelete && (
           <ConfirmDialog
             title={`Delete service "${service.serviceName}"?`}
@@ -107,7 +116,6 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             onConfirm={() =>
               deleteService.mutate(service.id, {
                 onSuccess: () => setConfirmingDelete(false),
-                // e.g. SERVICE_IN_USE: history still references it.
                 onError: (err) => {
                   setConfirmingDelete(false);
                   showRowError(err);
@@ -134,61 +142,67 @@ export function ServicesManager({
   const [duration, setDuration] = useState(5);
 
   return (
-    <div>
+    <div className="space-y-4">
       {services.length === 0 ? (
         <EmptyState message="No services yet." />
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-xs uppercase text-faint">
-              <th className="py-2 pr-4">Name</th>
-              <th className="py-2 pr-4">Duration</th>
-              <th className="py-2 pr-4">Status</th>
-              <th className="py-2 pr-4">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {services.map((s) => (
-              <ServiceRow key={s.id} queueId={queueId} service={s} />
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                <th className="py-3 pr-4">Name</th>
+                <th className="py-3 pr-4">Duration</th>
+                <th className="py-3 pr-4">Status</th>
+                <th className="py-3 pr-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((s) => (
+                <ServiceRow key={s.id} queueId={queueId} service={s} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       <PermissionGate permission="manage_services">
-        <div className="mt-4 flex items-end gap-2 border-t border-border pt-4">
-          <div>
-            <label className="mb-1 block text-xs text-muted">Service name</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="rounded-md border border-border-strong px-2 py-1 text-sm"
-            />
+        <div className="mt-5 border-t border-border pt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">
+            Add Service
+          </h3>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-full sm:max-w-xs">
+              <label className="mb-1 block text-xs font-medium text-fg-soft">Service name</label>
+              <input
+                value={name}
+                placeholder="e.g. Consultation, Prescription Pickup"
+                onChange={(e) => setName(e.target.value)}
+                className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-fg-soft">Duration (min)</label>
+              <input
+                type="number"
+                min={1}
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                className="w-24 rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+              />
+            </div>
+            <Button
+              disabled={!name}
+              loading={createService.isPending}
+              onClick={() =>
+                createService.mutate(
+                  { serviceName: name, durationMinutes: duration },
+                  { onSuccess: () => setName('') },
+                )
+              }
+            >
+              {createService.isPending ? 'Adding…' : 'Add Service'}
+            </Button>
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-muted">Duration (min)</label>
-            <input
-              type="number"
-              min={1}
-              value={duration}
-              onChange={(e) => setDuration(Number(e.target.value))}
-              className="w-20 rounded-md border border-border-strong px-2 py-1 text-sm"
-            />
-          </div>
-          <Button
-            disabled={!name}
-            loading={createService.isPending}
-            onClick={() =>
-              createService.mutate(
-                { serviceName: name, durationMinutes: duration },
-                // Cleared only on success, so a rejected create keeps what
-                // was typed.
-                { onSuccess: () => setName('') },
-              )
-            }
-          >
-            {createService.isPending ? 'Adding…' : 'Add Service'}
-          </Button>
         </div>
       </PermissionGate>
     </div>

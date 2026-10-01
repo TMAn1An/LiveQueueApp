@@ -8,6 +8,7 @@ import { Spinner, EmptyState } from '../components/Spinner';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { PageHeader } from '../components/PageHeader';
 import { actionErrorMessage } from '../utils/actionError';
 import { PermissionGate } from '../components/PermissionGate';
 import { SearchInput } from '../components/SearchInput';
@@ -46,61 +47,64 @@ function CreateQueueModal({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Create Queue" onClose={onClose}>
       <ErrorBanner message={error} />
-      <div className="mb-3">
-        <label className="mb-1 block text-sm font-medium text-fg-soft">Queue name</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
-        />
-      </div>
-      <div className="mb-4">
-        <label className="mb-1 block text-sm font-medium text-fg-soft">Token prefix</label>
-        <input
-          value={tokenPrefix}
-          onChange={(e) => setTokenPrefix(e.target.value)}
-          maxLength={10}
-          className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
-        />
-      </div>
-      <div className="mb-4 space-y-2">
-        <label className="flex items-start gap-2 text-sm">
+      <div className="space-y-4">
+        <div>
+          <label className="mb-1 block text-sm font-medium text-fg-soft">Queue name</label>
           <input
-            type="checkbox"
-            checked={allowMultipleServices}
-            onChange={(e) => setAllowMultipleServices(e.target.checked)}
-            className="mt-0.5"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Front Desk, Pharmacy, Billing"
+            className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-500"
           />
-          <span>
-            <span className="block font-medium text-fg-soft">Allow multiple services</span>
-            <span className="block text-xs text-muted">
-              Customers can select more than one service when joining.
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-fg-soft">Token prefix</label>
+          <input
+            value={tokenPrefix}
+            onChange={(e) => setTokenPrefix(e.target.value)}
+            maxLength={10}
+            placeholder="e.g. A, PH, VIP"
+            className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-500"
+          />
+          <p className="mt-1 text-xs text-muted">Tokens will be numbered like A001, A002, etc.</p>
+        </div>
+        <div className="space-y-3 rounded-lg border border-border bg-subtle/50 p-3.5">
+          <label className="flex items-start gap-2.5 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={allowMultipleServices}
+              onChange={(e) => setAllowMultipleServices(e.target.checked)}
+              className="mt-0.5 rounded border-border-strong text-brand-600 focus:ring-brand-500"
+            />
+            <span>
+              <span className="block font-medium text-fg-soft">Allow multiple services</span>
+              <span className="block text-xs text-muted">
+                Customers can select more than one service when joining.
+              </span>
             </span>
-          </span>
-        </label>
-        <Switch
-          id="create-queue-service-start-verification"
-          checked={requireServiceStartOtp}
-          onChange={setRequireServiceStartOtp}
-          label={SERVICE_START_VERIFICATION_LABEL}
-          description={SERVICE_START_VERIFICATION_HELP}
-        />
-      </div>
-      {/* ADR-034: limiting repeat visits now requires choosing what
-          identifies a customer — usually one of this queue's form questions,
-          which do not exist yet at creation time. So the new queue starts
-          unrestricted and the limit is set up on the queue's own page. */}
-      <p className="mb-4 text-xs text-muted">
-        Customers may join as often as they like. To limit repeat visits, open the queue after
-        creating it and set up how customers are identified.
-      </p>
-      <div className="flex justify-end gap-2">
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button disabled={!name || !tokenPrefix || createQueue.isPending} onClick={() => void handleSubmit()}>
-          {createQueue.isPending ? 'Creating…' : 'Create'}
-        </Button>
+          </label>
+          <div className="border-t border-border pt-3">
+            <Switch
+              id="create-queue-service-start-verification"
+              checked={requireServiceStartOtp}
+              onChange={setRequireServiceStartOtp}
+              label={SERVICE_START_VERIFICATION_LABEL}
+              description={SERVICE_START_VERIFICATION_HELP}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted">
+          Customers may join as often as they like. To limit repeat visits, open the queue after
+          creating it and set up how customers are identified.
+        </p>
+        <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button disabled={!name || !tokenPrefix || createQueue.isPending} onClick={() => void handleSubmit()}>
+            {createQueue.isPending ? 'Creating…' : 'Create'}
+          </Button>
+        </div>
       </div>
     </Modal>
   );
@@ -115,39 +119,48 @@ function QueueRow({ queue }: { queue: Queue }) {
   const nextStatus: QueueStatus = queue.status === 'ACTIVE' ? 'PAUSED' : 'ACTIVE';
 
   return (
-    <tr className="border-b border-border transition-colors duration-150 hover:bg-subtle">
-      <td className="py-2 pr-4">
-        {/* ADR-036: the name opens this queue's own line, which is where
-            staff actually work — kept clickable as a convenience, but the
-            Actions column's own "Open Queue" button is the one place this
-            is never ambiguous (V2 UX + Token Lifecycle checkpoint, Part D:
-            a tiny inline "Settings" link next to the name is what customers
-            reported as confusing — Settings is now its own explicit
-            button, same tier as Open Queue, not a stray text link). */}
-        <Link to={`/queues/${queue.id}/live`} className="font-medium text-brand-600 hover:underline">
-          {queue.name}
+    <tr className="border-b border-border transition-colors duration-150 hover:bg-subtle/60">
+      <td className="py-3 pr-4">
+        <div>
+          <Link
+            to={`/queues/${queue.id}/live`}
+            className="font-semibold text-fg hover:text-brand-fg transition-colors"
+          >
+            {queue.name}
+          </Link>
+          {queue.deletedAt && <span className="ml-2 text-xs text-faint font-medium">(archived)</span>}
+          {queue.description && (
+            <p className="text-xs text-muted line-clamp-1 mt-0.5">{queue.description}</p>
+          )}
+        </div>
+      </td>
+      <td className="py-3 pr-4">
+        <span className="inline-flex items-center rounded-md bg-subtle px-2 py-1 text-xs font-mono font-semibold text-fg-soft border border-border">
+          {queue.tokenPrefix}
+        </span>
+      </td>
+      <td className="py-3 pr-4">
+        <StatusBadge status={queue.status} size="sm" />
+      </td>
+      <td className="py-3 pr-4 text-fg-soft">
+        <span>{queue.services.length}</span>
+      </td>
+      <td className="py-3 pr-4">
+        <Link
+          to={`/queues/${queue.id}/counters`}
+          className="inline-flex items-center gap-1 font-semibold text-brand-fg hover:underline"
+          title="Manage counters"
+        >
+          <span>{queue.counterCount ?? 0}</span>
+          <span className="text-xs text-muted font-normal">desks</span>
         </Link>
-        {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived)</span>}
       </td>
-      <td className="py-2 pr-4">{queue.tokenPrefix}</td>
-      <td className="py-2 pr-4">
-        <StatusBadge status={queue.status} />
-      </td>
-      <td className="py-2 pr-4">{queue.services.length}</td>
-      <td className="py-2 pr-4">
-        <Link to={`/queues/${queue.id}/counters`} className="font-medium text-brand-600 hover:underline">
-          {queue.counterCount ?? 0}
-        </Link>
-      </td>
-      <td className="py-2 pr-4">
-        <div className="flex flex-wrap gap-2">
-          {/* Primary: always available, to every role that can see this
-              table at all — opening a queue's live line is not a
-              manage_queues action. */}
+      <td className="py-3 pr-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Primary: always available, to every role that can see this table */}
+          {/* Same size as its neighbours; the primary colour marks it. */}
           <Link to={`/queues/${queue.id}/live`}>
-            <Button variant="primary" size="lg">
-              Open Queue
-            </Button>
+            <Button variant="primary">Open Queue</Button>
           </Link>
           <Link to={`/queues/${queue.id}`}>
             <Button variant="outline">Settings</Button>
@@ -234,38 +247,50 @@ export function QueuesPage() {
   }, [queues, normalizedSearch, statusFilter]);
 
   return (
-    <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-fg">Queues</h1>
-        <PermissionGate permission="manage_queues">
-          <Button size="lg" onClick={() => setShowCreate(true)}>
-            Create Queue
-          </Button>
-        </PermissionGate>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Queues"
+        description="Create and operate digital queues, monitor real-time lines, and configure service counters."
+        actions={
+          <PermissionGate permission="manage_queues">
+            <Button size="lg" variant="primary" onClick={() => setShowCreate(true)}>
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+              </svg>
+              Create Queue
+            </Button>
+          </PermissionGate>
+        }
+      />
 
-      <div className="mb-4 flex gap-2">
-        <SearchInput
-          value={search}
-          onChange={setSearch}
-          label="Search queues"
-          placeholder="Search by name, prefix, or service…"
-        />
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as QueueStatus | 'ALL')}
-          className="rounded-md border border-border-strong px-3 py-2 text-sm"
-        >
-          <option value="ALL">All statuses</option>
-          <option value="ACTIVE">Active</option>
-          <option value="PAUSED">Paused</option>
-          <option value="INACTIVE">Inactive</option>
-        </select>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="w-full sm:max-w-md">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            label="Search queues"
+            placeholder="Search by name, prefix, or service…"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="queue-status-filter" className="sr-only">Filter by status</label>
+          <select
+            id="queue-status-filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as QueueStatus | 'ALL')}
+            className="rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg focus:border-brand-500"
+          >
+            <option value="ALL">All statuses</option>
+            <option value="ACTIVE">Active</option>
+            <option value="PAUSED">Paused</option>
+            <option value="INACTIVE">Inactive</option>
+          </select>
+        </div>
       </div>
 
       <Card>
         {isLoading ? (
-          <Spinner />
+          <Spinner label="Loading queues…" />
         ) : filtered.length === 0 ? (
           <EmptyState
             message={
@@ -275,23 +300,25 @@ export function QueuesPage() {
             }
           />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                <th className="py-2 pr-4">Name</th>
-                <th className="py-2 pr-4">Prefix</th>
-                <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Services</th>
-                <th className="py-2 pr-4">Counters</th>
-                <th className="py-2 pr-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((q) => (
-                <QueueRow key={q.id} queue={q} />
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                  <th className="py-3 pr-4">Name</th>
+                  <th className="py-3 pr-4">Prefix</th>
+                  <th className="py-3 pr-4">Status</th>
+                  <th className="py-3 pr-4">Services</th>
+                  <th className="py-3 pr-4">Counters</th>
+                  <th className="py-3 pr-4">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((q) => (
+                  <QueueRow key={q.id} queue={q} />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 

@@ -1,14 +1,10 @@
-import { actionErrorMessage } from '../utils/actionError';
-import { ErrorBanner } from '../components/ErrorBanner';
-import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useQueue, useUpdateQueue } from '../hooks/useQueues';
+import { useQueue } from '../hooks/useQueues';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
-import { PermissionGate } from '../components/PermissionGate';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { ServicesManager } from '../components/ServicesManager';
@@ -17,210 +13,185 @@ import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
 import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
 import { ServiceStartVerificationSetting } from '../components/ServiceStartVerificationSetting';
 import { QueueSchedule } from '../components/QueueSchedule';
+import { QueueDetailsCard } from '../components/QueueDetailsCard';
+import { SectionHeading } from '../components/SectionHeading';
+
+type SettingsTab = 'general' | 'services' | 'form' | 'schedule' | 'repeat' | 'qr' | 'all';
+
+interface TabDef {
+  id: SettingsTab;
+  label: string;
+}
+
+// No per-tab blurb: each section explains itself behind its own "ⓘ", and a
+// sentence under the tab bar only repeated what those say.
+const SETTINGS_TABS: TabDef[] = [
+  { id: 'general', label: 'General & Timezone' },
+  { id: 'services', label: 'Services & Verification' },
+  { id: 'form', label: 'Customer Form' },
+  { id: 'schedule', label: 'Schedule & Capacity' },
+  { id: 'repeat', label: 'Repeat Visits' },
+  { id: 'qr', label: 'QR Code & Entry' },
+  { id: 'all', label: 'View All' },
+];
 
 export function QueueDetailsPage() {
   const { queueId } = useParams<{ queueId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = (searchParams.get('tab') as SettingsTab) || 'general';
+
   const { organization } = useAuth();
   const { data: queue, isLoading } = useQueue(queueId);
-  const updateQueue = useUpdateQueue(queueId ?? '');
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [allowMultipleServices, setAllowMultipleServices] = useState(true);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
 
-  function startEditing() {
-    setName(queue!.name);
-    setDescription(queue!.description ?? '');
-    setAllowMultipleServices(queue!.allowMultipleServices);
-    setDetailsError(null);
-    setEditing(true);
+  function setTab(tab: SettingsTab) {
+    setSearchParams(tab === 'general' ? {} : { tab });
   }
+
+  const showGeneral = currentTab === 'general' || currentTab === 'all';
+  const showServices = currentTab === 'services' || currentTab === 'all';
+  const showForm = currentTab === 'form' || currentTab === 'all';
+  const showSchedule = currentTab === 'schedule' || currentTab === 'all';
+  const showRepeat = currentTab === 'repeat' || currentTab === 'all';
+  const showQr = currentTab === 'qr' || currentTab === 'all';
 
   return (
     <div className="space-y-6">
+      {/* Universal Queue Breadcrumb */}
       <QueueBreadcrumb
         queueId={queue.id}
         queueName={queue.name}
         backTo="/queues"
         backLabel="Back to Queues"
       />
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-fg">{queue.name}</h1>
-          <StatusBadge status={queue.status} />
-          {queue.deletedAt && <span className="ml-2 text-xs text-faint">(archived — read only)</span>}
+
+      {/* Queue Workspace Header */}
+      <div className="rounded-xl border border-border bg-surface p-5 shadow-xs">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-subtle text-xs font-bold text-fg-soft border border-border">
+                {queue.tokenPrefix}
+              </span>
+              <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">{queue.name}</h1>
+              <StatusBadge status={queue.status} />
+              {queue.deletedAt && (
+                <span className="rounded-md bg-subtle px-2 py-0.5 text-xs font-medium text-faint">
+                  archived — read only
+                </span>
+              )}
+            </div>
+            {queue.description && (
+              <p className="mt-1 text-sm text-muted">{queue.description}</p>
+            )}
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Link to={`/queues/${queue.id}/live`}>
+              <Button variant="primary" size="lg">
+                <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                </svg>
+                Open Queue
+              </Button>
+            </Link>
+            <Link to={`/queues/${queue.id}/counters`}>
+              <Button variant="secondary" size="lg">
+                Manage Counters
+              </Button>
+            </Link>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Link to={`/queues/${queue.id}/live`}>
-            <Button variant="primary" size="lg">
-              Open Queue
-            </Button>
-          </Link>
-          <Link to={`/queues/${queue.id}/counters`}>
-            <Button variant="secondary" size="lg">
-              Manage Counters
-            </Button>
-          </Link>
+
+        {/* Settings Navigation Tabs */}
+        <div className="mt-5 border-t border-border pt-3">
+          <nav className="flex flex-wrap gap-1" aria-label="Queue configuration tabs">
+            {SETTINGS_TABS.map((tab) => {
+              const active = currentTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setTab(tab.id)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                    active
+                      ? 'bg-brand-600 text-white shadow-xs dark:bg-brand-500'
+                      : 'text-fg-soft hover:bg-subtle hover:text-fg'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
         </div>
       </div>
 
-      <Card>
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-fg-soft">Details</h2>
-          {!queue.deletedAt && !editing && (
-            <PermissionGate permission="manage_queues">
-              <Button variant="secondary" onClick={startEditing}>
-                Edit
-              </Button>
-            </PermissionGate>
-          )}
+      {/* SECTION: General & Timezone */}
+      {showGeneral && (
+        <div className="space-y-6">
+          <QueueDetailsCard queue={queue} />
+
+          <Card>
+            <SectionHeading title="Queue Timezone" help="The local clock this queue runs on. Schedule hours and repeat-visit limits are measured against it." />
+            <QueueTimezoneSetting queue={queue} organizationTimezone={organization?.timezone ?? null} />
+          </Card>
         </div>
-        {editing ? (
-          <div className="space-y-3">
-            <ErrorBanner message={detailsError} />
-            <div>
-              <label className="mb-1 block text-xs text-muted">Name</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-muted">Description</label>
-              <textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full rounded-md border border-border-strong px-2 py-1 text-sm"
-              />
-            </div>
-            <div className="space-y-2">
-              {/* Repeat visits moved out to its own section (ADR-034): the
-                  limit now depends on which form question identifies the
-                  customer, which a lone checkbox cannot express. */}
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={allowMultipleServices}
-                  onChange={(e) => setAllowMultipleServices(e.target.checked)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="block font-medium text-fg-soft">Allow multiple services</span>
-                  <span className="block text-xs text-muted">
-                    Customers can select more than one service when joining.
-                  </span>
-                </span>
-              </label>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                size="lg"
-                loading={updateQueue.isPending}
-                onClick={() =>
-                  updateQueue.mutate(
-                    { name, description, allowMultipleServices },
-                    // Closed only once the change lands, so a rejected save
-                    // never looks like it succeeded — and says why it failed.
-                    {
-                      onSuccess: () => setEditing(false),
-                      onError: (err) => setDetailsError(actionErrorMessage(err)),
-                    },
-                  )
-                }
-              >
-                {updateQueue.isPending ? 'Saving…' : 'Save'}
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={updateQueue.isPending}
-                onClick={() => setEditing(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <div>
-              <dt className="text-xs text-faint">Token Prefix</dt>
-              <dd>{queue.tokenPrefix}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-faint">Base Time</dt>
-              <dd>{queue.baseTimeMinutes} min</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-faint">Reminder</dt>
-              <dd>{queue.defaultNotificationMinutes} min before</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-faint">Form Version</dt>
-              <dd>{queue.formVersion}</dd>
-            </div>
-            {queue.description && (
-              <div className="col-span-full">
-                <dt className="text-xs text-faint">Description</dt>
-                <dd>{queue.description}</dd>
-              </div>
-            )}
-          </dl>
-        )}
-      </Card>
+      )}
 
-      {/* ADR-041: directly under Details — it changes what staff do at the
-          counter, so it is kept where an operator will actually find it. */}
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-fg-soft">Service Start</h2>
-        <ServiceStartVerificationSetting queue={queue} />
-      </Card>
+      {/* SECTION: Services & Verification */}
+      {showServices && (
+        <div className="space-y-6">
+          <Card>
+            <SectionHeading title="Service Start Verification" help="Whether staff must enter the code shown in the customer’s app before service can start." />
+            <ServiceStartVerificationSetting queue={queue} />
+          </Card>
 
-      {/* ADR-035: the queue's clock lives with the queue's own settings, not
-          inside the repeat-visit form — it is a fact about where the queue
-          runs, and the customer app uses it to show queue-local times. */}
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-fg-soft">Queue Timezone</h2>
-        <QueueTimezoneSetting queue={queue} organizationTimezone={organization?.timezone ?? null} />
-      </Card>
+          <Card>
+            <SectionHeading title="Services" help="The services offered in this queue, and how long each one usually takes per customer." />
+            <ServicesManager queueId={queue.id} services={queue.services} />
+          </Card>
+        </div>
+      )}
 
-      {/* Directly under Details so a queue that has stopped accepting
-          customers says so where an operator will actually see it. */}
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-fg-soft">Repeat Visits</h2>
-        <RepeatVisitPolicy
-          queue={queue}
-          effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
-        />
-      </Card>
+      {/* SECTION: Customer Form */}
+      {showForm && (
+        <Card>
+          <SectionHeading title="Dynamic Form Fields" help="Custom questions customers answer when they scan the QR code, before joining the line. Their answers appear on the token row for counter staff." />
+          <FormBuilder queueId={queue.id} />
+        </Card>
+      )}
 
-      {/* Phase 4: a queue's operating hours are a fact about when it accepts
-          customers at all, same rank as Repeat Visits above. */}
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-fg-soft">Schedule &amp; Availability</h2>
-        <QueueSchedule queue={queue} />
-      </Card>
+      {/* SECTION: Schedule & Capacity */}
+      {showSchedule && (
+        <Card>
+          <SectionHeading title="Schedule & Availability" help="Limit when customers can join: weekly opening hours, session windows, and how many people each session takes." />
+          <QueueSchedule queue={queue} />
+        </Card>
+      )}
 
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-fg-soft">Services</h2>
-        <ServicesManager queueId={queue.id} services={queue.services} />
-      </Card>
+      {/* SECTION: Repeat Visits */}
+      {showRepeat && (
+        <Card>
+          <SectionHeading title="Repeat Visits" help="Limit how often the same customer may rejoin, by having them verify who they are." />
+          <RepeatVisitPolicy
+            queue={queue}
+            effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
+          />
+        </Card>
+      )}
 
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-fg-soft">Dynamic Form Fields</h2>
-        <FormBuilder queueId={queue.id} />
-      </Card>
-
-      <Card>
-        <h2 className="mb-3 text-base font-semibold text-fg-soft">QR Code</h2>
-        <QrCodeDisplay
-          qrCodeUri={queue.qrCodeUri}
-          organizationName={organization?.name ?? ''}
-          queueName={queue.name}
-        />
-      </Card>
+      {/* SECTION: QR Code & Customer Entry */}
+      {showQr && (
+        <Card>
+          <SectionHeading title="QR Code" help="Display or print this QR code at your location. Customers scan it to join the queue themselves." />
+          <QrCodeDisplay
+            qrCodeUri={queue.qrCodeUri}
+            organizationName={organization?.name ?? ''}
+            queueName={queue.name}
+          />
+        </Card>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, getApiBaseUrl } from './client';
 import type { AuthResult } from '../types/auth';
 
 export function register(input: {
@@ -12,6 +12,14 @@ export function register(input: {
   return apiFetch<AuthResult>('/api/auth/register', { method: 'POST', body: input });
 }
 
+/** Live "is this organization name free?" check — case-insensitive. */
+export function checkOrganizationNameAvailability(name: string) {
+  return apiFetch<{ available: boolean }>('/api/auth/organization-name-availability', {
+    method: 'GET',
+    query: { name },
+  });
+}
+
 export function login(input: { email: string; password: string }) {
   return apiFetch<AuthResult>('/api/auth/login', { method: 'POST', body: input });
 }
@@ -20,11 +28,39 @@ export function me() {
   return apiFetch<Omit<AuthResult, 'accessToken' | 'refreshToken'>>('/api/auth/me');
 }
 
+const HEALTH_TIMEOUT_MS = 5_000;
+
+/**
+ * Deliberately has no timeout of its own. The refresh token is single-use:
+ * abandoning a request that the server may still go on to process (a backend
+ * that is slow to wake, say) and then sending the token again is how a
+ * legitimate client gets itself refused. The browser's own limits apply.
+ */
 export function refresh(refreshToken: string) {
   return apiFetch<{ accessToken: string; refreshToken: string }>('/api/auth/refresh', {
     method: 'POST',
     body: { refreshToken },
   });
+}
+
+/**
+ * Whether the backend answers at all. Carries no credentials and changes
+ * nothing, so it is safe to repeat as often as needed — unlike the refresh
+ * exchange, which spends a single-use token. Used to wait for the server to
+ * come back before a session restore is retried.
+ */
+export async function checkBackendReachable(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${getApiBaseUrl()}/health`, { cache: 'no-store', signal: controller.signal });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function logout(refreshToken: string) {

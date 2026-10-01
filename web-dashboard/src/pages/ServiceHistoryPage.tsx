@@ -6,21 +6,11 @@ import { Spinner, EmptyState, RefreshIndicator } from '../components/Spinner';
 import { StatusBadge } from '../components/StatusBadge';
 import { Pagination } from '../components/Pagination';
 import { SearchInput } from '../components/SearchInput';
+import { PageHeader } from '../components/PageHeader';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime, formatMinutes } from '../utils/format';
-import type { ServiceHistoryEntry, ServiceHistoryStatus } from '../types/serviceHistory';
+import type { ServiceHistoryStatus } from '../types/serviceHistory';
 
-/**
- * A record of visits that have finished — defaulting to COMPLETED, i.e. the
- * service actually given. SKIPPED and CANCELLED are reachable through the
- * status filter but are never mixed into the default view: a cancelled
- * visit is not a service rendered.
- *
- * Every field shown here is already exposed to these same roles elsewhere
- * in the dashboard (Live Queue, Device Blocking); the backend resolves the
- * customer's form answers against the form version that was live when they
- * submitted, and nothing new is surfaced just because it exists in the row.
- */
 export function ServiceHistoryPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -29,8 +19,6 @@ export function ServiceHistoryPage() {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
-  // Server-side search: this list grows with every visit the organization
-  // ever serves, so filtering only the loaded page would hide most matches.
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: queues } = useQueues();
   const { data: result, isLoading, isFetching } = useServiceHistory({
@@ -39,14 +27,10 @@ export function ServiceHistoryPage() {
     search: debouncedSearch,
     status,
     queueId,
-    // A date input gives a calendar day; the range has to cover the whole
-    // of it, so the end bound is pushed to the last moment of that day.
     from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
     to: to ? new Date(`${to}T23:59:59.999`).toISOString() : undefined,
   });
 
-  /** Any filter change re-queries from the start — staying on page 5 of the
-   * previous result set would usually land past the end of the new one. */
   function withPageReset<T>(setter: (value: T) => void) {
     return (value: T) => {
       setter(value);
@@ -57,23 +41,26 @@ export function ServiceHistoryPage() {
   const hasFilters = Boolean(debouncedSearch || queueId || from || to);
 
   return (
-    <div>
-      <h1 className="mb-2 text-2xl font-semibold text-fg">Service History</h1>
-      <p className="mb-4 max-w-2xl text-sm text-muted">
-        Visits that have finished in your organization — completed service by default. Newest first.
-      </p>
+    <div className="space-y-6">
+      <PageHeader
+        title="Service History"
+        description="Search and audit past visits across all queues in your organization — newest first."
+      />
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <SearchInput
-          value={search}
-          onChange={withPageReset(setSearch)}
-          label="Search service history"
-          placeholder="Search by token, device, queue, or service…"
-        />
+      {/* Filter toolbar */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-3.5 shadow-xs">
+        <div className="w-full sm:w-72">
+          <SearchInput
+            value={search}
+            onChange={withPageReset(setSearch)}
+            label="Search service history"
+            placeholder="Search by token, device, queue, or service…"
+          />
+        </div>
         <select
           value={status}
           onChange={(e) => withPageReset(setStatus)(e.target.value as ServiceHistoryStatus)}
-          className="rounded-md border border-border-strong px-3 py-2 text-sm"
+          className="rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg focus:border-brand-500"
           aria-label="Status"
         >
           <option value="COMPLETED">Completed</option>
@@ -83,7 +70,7 @@ export function ServiceHistoryPage() {
         <select
           value={queueId}
           onChange={(e) => withPageReset(setQueueId)(e.target.value)}
-          className="rounded-md border border-border-strong px-3 py-2 text-sm"
+          className="rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg focus:border-brand-500"
           aria-label="Queue"
         >
           <option value="">All queues</option>
@@ -93,32 +80,34 @@ export function ServiceHistoryPage() {
             </option>
           ))}
         </select>
-        <input
-          type="date"
-          value={from}
-          onChange={(e) => withPageReset(setFrom)(e.target.value)}
-          className="rounded-md border border-border-strong px-3 py-2 text-sm"
-          aria-label="From date"
-        />
-        <input
-          type="date"
-          value={to}
-          onChange={(e) => withPageReset(setTo)(e.target.value)}
-          className="rounded-md border border-border-strong px-3 py-2 text-sm"
-          aria-label="To date"
-        />
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => withPageReset(setFrom)(e.target.value)}
+            className="rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg focus:border-brand-500"
+            aria-label="From date"
+          />
+          <span className="text-xs text-muted">to</span>
+          <input
+            type="date"
+            value={to}
+            onChange={(e) => withPageReset(setTo)(e.target.value)}
+            className="rounded-lg border border-border-strong bg-surface px-2.5 py-1.5 text-xs text-fg focus:border-brand-500"
+            aria-label="To date"
+          />
+        </div>
       </div>
 
-      {/* Rows already on screen stay put while a new search loads —
-          blanking them on every keystroke would be worse than the wait. */}
       {isFetching && !isLoading && (
-        <div className="mb-2 flex justify-end">
+        <div className="flex justify-end">
           <RefreshIndicator />
         </div>
       )}
+
       <Card>
         {isLoading ? (
-          <Spinner />
+          <Spinner label="Loading service history…" />
         ) : !result?.data.length ? (
           <EmptyState
             message={
@@ -129,23 +118,76 @@ export function ServiceHistoryPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left text-xs uppercase text-faint">
-                  <th className="py-2 pr-4">Token</th>
-                  <th className="py-2 pr-4">Queue</th>
-                  <th className="py-2 pr-4">Service(s)</th>
-                  <th className="py-2 pr-4">Customer</th>
-                  <th className="py-2 pr-4">Counter</th>
-                  <th className="py-2 pr-4">Joined</th>
-                  <th className="py-2 pr-4">Started</th>
-                  <th className="py-2 pr-4">Finished</th>
-                  <th className="py-2 pr-4">Duration</th>
-                  <th className="py-2 pr-4">Status</th>
+                <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                  <th className="py-3 pr-4">Token</th>
+                  <th className="py-3 pr-4">Queue</th>
+                  <th className="py-3 pr-4">Service(s)</th>
+                  <th className="py-3 pr-4">Customer Details</th>
+                  <th className="py-3 pr-4">Counter</th>
+                  <th className="py-3 pr-4">Status</th>
+                  <th className="py-3 pr-4">Wait / Duration</th>
+                  <th className="py-3 pr-4">Finished</th>
                 </tr>
               </thead>
               <tbody>
-                {result.data.map((entry) => (
-                  <ServiceHistoryRow key={entry.tokenId} entry={entry} />
-                ))}
+                {result.data.map((entry) => {
+                  const finishedAt = entry.completedAt ?? entry.skippedAt ?? entry.cancelledAt;
+                  return (
+                    <tr key={entry.tokenId} className="border-b border-border align-top transition-colors hover:bg-subtle/50">
+                      <td className="py-3 pr-4">
+                        <span className="inline-flex items-center rounded-md bg-subtle px-2 py-0.5 font-mono text-sm font-bold text-fg border border-border">
+                          {entry.serialNumber}
+                        </span>
+                        {entry.deviceIdentifier && (
+                          <div className="font-mono text-xs text-faint mt-0.5">{entry.deviceIdentifier}</div>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 font-medium text-fg">{entry.queue.name}</td>
+                      <td className="py-3 pr-4 text-fg-soft">{entry.services.map((s) => s.name).join(', ') || '—'}</td>
+                      <td className="py-3 pr-4">
+                        {entry.formFields.length === 0 ? (
+                          <span className="text-faint">—</span>
+                        ) : (
+                          <dl className="space-y-0.5 text-xs">
+                            {entry.formFields.map((field) => (
+                              <div key={field.key}>
+                                <dt className="inline text-faint">{field.label}: </dt>
+                                <dd className="inline text-fg-soft">{field.value}</dd>
+                              </div>
+                            ))}
+                          </dl>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-xs text-muted">
+                        {entry.counter?.name ?? '—'}
+                      </td>
+                      <td className="py-3 pr-4">
+                        <StatusBadge status={entry.status} size="sm" />
+                        {entry.skipReason?.text && (
+                          <p className="mt-1 max-w-xs text-xs text-fg-soft">
+                            <span className="text-faint">Reason: </span>
+                            {entry.skipReason.text}
+                          </p>
+                        )}
+                        {entry.completionFeedback && (
+                          <p className="mt-1 max-w-xs whitespace-pre-line text-xs text-fg-soft">
+                            <span className="text-faint">Feedback: </span>
+                            {entry.completionFeedback}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4 text-xs font-mono text-fg-soft whitespace-nowrap">
+                        {formatMinutes(entry.actualDurationMinutes)}
+                        <span className="ml-1 text-xs text-faint">
+                          (est. {formatMinutes(entry.expectedDurationMinutes)})
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 text-xs text-muted whitespace-nowrap">
+                        {formatDateTime(finishedAt ?? entry.createdAt)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -153,61 +195,5 @@ export function ServiceHistoryPage() {
         <Pagination pagination={result?.pagination} onPageChange={setPage} />
       </Card>
     </div>
-  );
-}
-
-function ServiceHistoryRow({ entry }: { entry: ServiceHistoryEntry }) {
-  const finishedAt = entry.completedAt ?? entry.skippedAt ?? entry.cancelledAt;
-
-  return (
-    <tr className="border-b border-border align-top transition-colors duration-150 hover:bg-subtle">
-      <td className="py-2 pr-4">
-        <div className="font-medium text-fg">{entry.serialNumber}</div>
-        <div className="font-mono text-xs text-faint">{entry.deviceIdentifier}</div>
-      </td>
-      <td className="py-2 pr-4">{entry.queue.name}</td>
-      <td className="py-2 pr-4">{entry.services.map((s) => s.name).join(', ') || '—'}</td>
-      <td className="py-2 pr-4">
-        {entry.formFields.length === 0 ? (
-          <span className="text-faint">—</span>
-        ) : (
-          <dl className="space-y-0.5 text-xs">
-            {entry.formFields.map((field) => (
-              <div key={field.key}>
-                <dt className="inline text-faint">{field.label}: </dt>
-                <dd className="inline text-fg-soft">{field.value}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
-      </td>
-      <td className="py-2 pr-4">{entry.counter?.name ?? '—'}</td>
-      <td className="py-2 pr-4 whitespace-nowrap">{formatDateTime(entry.createdAt)}</td>
-      <td className="py-2 pr-4 whitespace-nowrap">{formatDateTime(entry.startedAt)}</td>
-      <td className="py-2 pr-4 whitespace-nowrap">{formatDateTime(finishedAt)}</td>
-      <td className="py-2 pr-4 whitespace-nowrap">
-        {formatMinutes(entry.actualDurationMinutes)}
-        <span className="ml-1 text-xs text-faint">
-          (est. {formatMinutes(entry.expectedDurationMinutes)})
-        </span>
-      </td>
-      <td className="py-2 pr-4">
-        <StatusBadge status={entry.status} />
-        {/* ADR-042: what the customer was told — only when there is
-            something to say. */}
-        {entry.skipReason?.text && (
-          <p className="mt-1 max-w-xs text-xs text-fg-soft">
-            <span className="text-faint">Reason: </span>
-            {entry.skipReason.text}
-          </p>
-        )}
-        {entry.completionFeedback && (
-          <p className="mt-1 max-w-xs whitespace-pre-line text-xs text-fg-soft">
-            <span className="text-faint">Feedback: </span>
-            {entry.completionFeedback}
-          </p>
-        )}
-      </td>
-    </tr>
   );
 }
