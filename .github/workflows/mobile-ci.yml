@@ -41,11 +41,10 @@ jobs:
 
       - name: Release build refuses debug signing
         run: |
-          set -uo pipefail
+          set -euo pipefail
           [ ! -f android/key.properties ] || { echo "::error::unexpected key.properties"; exit 1; }
-          flutter build apk --release --dart-define=API_BASE_URL=https://livequeueapp.onrender.com 2>&1 | tee "$RUNNER_TEMP/build.log"
-          status=${PIPESTATUS[0]}
-          if [ "$status" -eq 0 ]; then
+          # The build is expected to fail; `if` keeps bash -e from exiting on it.
+          if flutter build apk --release --dart-define=API_BASE_URL=https://livequeueapp.onrender.com 2>&1 | tee "$RUNNER_TEMP/build.log"; then
             echo "::error::release build succeeded without release signing"; exit 1
           fi
           grep -q "Release signing is not configured" "$RUNNER_TEMP/build.log" \
