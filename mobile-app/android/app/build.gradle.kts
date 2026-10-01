@@ -25,6 +25,11 @@ val missingReleaseSigningKeys = releaseSigningKeys.filter {
 }
 val hasReleaseSigning = missingReleaseSigningKeys.isEmpty() &&
     rootProject.file(keystoreProperties.getProperty("storeFile")!!).exists()
+// Explicit opt-in for installable test APKs before the release key exists:
+// LIVEQUEUE_TEST_SIGNING=debug signs a release-mode build with the debug key.
+// Only used when no release key is configured; never set by the release workflow.
+val useDebugTestSigning = !hasReleaseSigning &&
+    System.getenv("LIVEQUEUE_TEST_SIGNING") == "debug"
 
 android {
     namespace = "com.livequeue.mobile_app"
@@ -65,6 +70,8 @@ android {
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
+            } else if (useDebugTestSigning) {
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }
@@ -76,7 +83,13 @@ gradle.taskGraph.whenReady {
             (it.name.startsWith("assemble") || it.name.startsWith("bundle") ||
                 it.name.startsWith("package"))
     }
-    if (buildsRelease && !hasReleaseSigning) {
+    if (buildsRelease && useDebugTestSigning) {
+        logger.warn(
+            "WARNING: LIVEQUEUE_TEST_SIGNING=debug — this release build is signed " +
+                "with the DEBUG key. It is a test APK, not a production release.",
+        )
+    }
+    if (buildsRelease && !hasReleaseSigning && !useDebugTestSigning) {
         val reason = if (!keystorePropertiesFile.exists()) {
             "android/key.properties is missing"
         } else if (missingReleaseSigningKeys.isNotEmpty()) {
