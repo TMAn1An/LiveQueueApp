@@ -100,6 +100,16 @@ const envSchema = z.object({
   // reasonable zero-config default for local dev, expected to be overridden
   // with a real verified sender in production.
   EMAIL_FROM: z.string().default('LiveQueue <onboarding@resend.dev>'),
+  // Optional monitored mailbox for replies. A real Reply-To on the sending
+  // domain is a small positive signal to mailbox providers and gives a
+  // recipient somewhere to answer; unset means no Reply-To header at all.
+  // Never startup-fatal: a blank value means unset, and Resend itself rejects
+  // a malformed address (reported like any other send failure).
+  EMAIL_REPLY_TO: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => value || undefined),
   // The dashboard's own origin — verification links point here
   // (`${APP_BASE_URL}/verify-email?token=...`), not at this API server,
   // since the dashboard (a client-rendered SPA) is what actually completes

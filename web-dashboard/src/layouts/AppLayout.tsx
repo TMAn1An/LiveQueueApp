@@ -167,8 +167,8 @@ export function AppLayout() {
           <span className="text-xs text-muted">Theme</span>
           <ThemeToggle />
         </div>
-        <div className="flex items-center justify-between rounded-lg border border-border bg-subtle p-2">
-          <div className="flex items-center gap-2 min-w-0 pr-1">
+        <div className="space-y-2 rounded-lg border border-border bg-subtle p-2">
+          <div className="flex items-center gap-2 min-w-0 px-1">
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-600 text-xs font-semibold text-white">
               {userInitial}
             </div>
@@ -177,15 +177,16 @@ export function AppLayout() {
               <p className="truncate text-[10px] text-muted">{staff?.email}</p>
             </div>
           </div>
-          <button
-            type="button"
-            title="Log out"
-            aria-label="Log out"
+          {/* A full-width, labelled target: the old icon-only button was a
+              tiny hit area that only reacted right on top of the icon. */}
+          <Button
+            variant="ghost"
+            className="w-full justify-start bg-surface hover:bg-surface"
             onClick={() => void logout()}
-            className="rounded p-1 text-muted hover:bg-surface hover:text-fg transition-colors"
           >
             <LogoutIcon className="h-4 w-4" />
-          </button>
+            Log out
+          </Button>
         </div>
       </div>
     </div>
@@ -201,9 +202,16 @@ export function AppLayout() {
         />
       )}
 
-      {/* Responsive Sidebar: fixed drawer on mobile, persistent column on desktop */}
+      {/* Responsive Sidebar: fixed drawer on mobile, persistent column on desktop.
+          On desktop it is sticky, not static: a static column the height of
+          the viewport scrolls away with a long page and leaves the navigation
+          (and Log out) out of reach. Sticky keeps it in the flex row — so the
+          content column still sizes itself against it — while pinning it to
+          the viewport. Only the middle link list scrolls, and only when the
+          window is too short to show it all, so the page keeps its one
+          scrollbar. */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-surface transition-transform duration-200 ease-in-out lg:static lg:h-screen lg:shrink-0 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-border bg-surface transition-transform duration-200 ease-in-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:shrink-0 lg:translate-x-0 ${
           mobileMenuOpen ? 'translate-x-0 shadow-xl' : '-translate-x-full'
         }`}
       >

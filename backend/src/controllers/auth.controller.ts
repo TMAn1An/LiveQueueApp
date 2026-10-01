@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
 import * as auditService from '../services/audit.service';
 import * as emailVerificationService from '../services/emailVerification.service';
+import * as organizationService from '../services/organization.service';
 import * as staffInvitationService from '../services/staffInvitation.service';
 import type { SessionMeta } from '../services/session.service';
 
@@ -83,6 +84,13 @@ export async function changePassword(req: Request, res: Response) {
  * (V2 Checkpoint 2, ADR-024). No req.auth is required or used, so this
  * works whether or not the browser that clicks the link is signed in.
  */
+/** Live "is this name free?" check for the registration form. Answers only
+ * yes or no — never anything about the organization holding a taken name. */
+export async function organizationNameAvailability(req: Request, res: Response) {
+  const available = await organizationService.isOrganizationNameAvailable(req.query.name as string);
+  res.status(200).json({ success: true, data: { available } });
+}
+
 export async function verifyEmail(req: Request, res: Response) {
   const result = await emailVerificationService.verifyEmailToken(req.query.token as string);
   res.status(200).json({ success: true, data: { verified: true } });

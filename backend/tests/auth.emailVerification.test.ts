@@ -170,6 +170,73 @@ describe('V2 Checkpoint 2 — email verification', () => {
     expect(logout.status).toBe(204);
   });
 
+  it('a pending owner can sign back in to see the banner and resend — but still cannot use queue features', async () => {
+    const res = await rawRegister({ email: 'pending-login@example.com', password: 'Password123' });
+    expect(res.body.data.staff.status).toBe('PENDING_EMAIL_VERIFICATION');
+
+    const login = await api()
+      .post('/api/auth/login')
+      .send({ email: 'pending-login@example.com', password: 'Password123' });
+    expect(login.status).toBe(200);
+    expect(login.body.data.staff.status).toBe('PENDING_EMAIL_VERIFICATION');
+
+    const accessToken = login.body.data.accessToken as string;
+    const resend = await api()
+      .post('/api/auth/email-verification/resend')
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(resend.status).toBe(204);
+
+    const queues = await api().get('/api/queues').set('Authorization', `Bearer ${accessToken}`);
+    expect(queues.status).toBe(403);
+  });
+
+  it('a pending owner keeps their session across a page reload (refresh)', async () => {
+    const res = await rawRegister();
+
+    const refreshed = await api()
+      .post('/api/auth/refresh')
+      .send({ refreshToken: res.body.data.refreshToken });
+
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.data.accessToken).toBeTruthy();
+  });
+
+  it('once the registration window has lapsed, sign-in explains it and re-registering replaces the stale sign-up', async () => {
+    const first = await rawRegister({ email: 'lapsed@example.com', password: 'Password123' });
+    const oldOrganizationId = first.body.data.organization.id as string;
+    await prisma.staff.update({
+      where: { id: first.body.data.staff.id as string },
+      data: { registrationExpiresAt: new Date(Date.now() - 1000) },
+    });
+
+    const login = await api()
+      .post('/api/auth/login')
+      .send({ email: 'lapsed@example.com', password: 'Password123' });
+    expect(login.status).toBe(403);
+    expect(login.body.error.code).toBe('REGISTRATION_EXPIRED');
+
+    const refreshed = await api().post('/api/auth/refresh').send({ refreshToken: first.body.data.refreshToken });
+    expect(refreshed.status).toBe(401);
+
+    const again = await rawRegister({ email: 'lapsed@example.com', password: 'Password123' });
+    expect(again.body.data.organization.id).not.toBe(oldOrganizationId);
+    expect(await prisma.organization.findUnique({ where: { id: oldOrganizationId } })).toBeNull();
+  });
+
+  it('never replaces a verified account, or a pending one still inside its window', async () => {
+    await registerOwner({ email: 'verified-taken@example.com' });
+    await rawRegister({ email: 'fresh-taken@example.com' });
+
+    for (const email of ['verified-taken@example.com', 'fresh-taken@example.com']) {
+      const res = await api()
+        .post('/api/auth/register')
+        .send({ organizationName: 'Intruder', email, password: 'Password123' });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('EMAIL_ALREADY_REGISTERED');
+    }
+    expect(await prisma.organization.count({ where: { name: 'Intruder' } })).toBe(0);
+  });
+
   it('cleanup deletes a pending organization + owner once the 1-hour window has lapsed', async () => {
     const res = await rawRegister();
     const staffId = res.body.data.staff.id as string;

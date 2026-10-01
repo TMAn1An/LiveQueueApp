@@ -1,12 +1,18 @@
 import { Router } from 'express';
 import * as authController from '../controllers/auth.controller';
 import { authenticate } from '../middleware/authenticate';
-import { authRateLimiter, emailRateLimiter, sensitiveRateLimiter } from '../middleware/rateLimit';
+import {
+  authRateLimiter,
+  emailRateLimiter,
+  publicRateLimiter,
+  sensitiveRateLimiter,
+} from '../middleware/rateLimit';
 import { validate } from '../middleware/validate';
 import {
   changePasswordSchema,
   loginSchema,
   logoutSchema,
+  organizationNameAvailabilitySchema,
   refreshSchema,
   registerSchema,
   verifyEmailSchema,
@@ -17,6 +23,14 @@ const router = Router();
 
 router.post('/register', authRateLimiter, validate(registerSchema), authController.register);
 router.post('/login', authRateLimiter, validate(loginSchema), authController.login);
+// Public: asked while someone types an organization name on the sign-up
+// form, before any account exists. Rate-limited like other public reads.
+router.get(
+  '/organization-name-availability',
+  publicRateLimiter,
+  validate(organizationNameAvailabilitySchema),
+  authController.organizationNameAvailability,
+);
 router.get('/me', authenticate, authController.me);
 router.post('/logout', authenticate, validate(logoutSchema), authController.logout);
 router.post('/refresh', authRateLimiter, validate(refreshSchema), authController.refresh);

@@ -83,19 +83,25 @@ function QueueSummaryCard({ queue }: { queue: Queue }) {
       </div>
 
       {/* Action buttons */}
-      <div className="mt-5 flex items-center justify-between border-t border-border pt-4 gap-2">
-        <Link to={`/queues/${queue.id}/counters`} className="text-xs font-medium text-muted hover:text-brand-fg transition-colors">
-          Manage Counters ({totalCounters})
+      {/* Three buttons do not fit one row at this card's width, so the layout
+          is deliberate rather than left to wrap: the main action on top, the
+          two secondary ones sharing the row beneath. One size throughout, and
+          Manage Counters is a real button, not a faint text link. */}
+      <div className="mt-5 space-y-2 border-t border-border pt-4">
+        <Link to={`/queues/${queue.id}/live`} className="block">
+          <Button variant="primary" size="md" className="w-full">
+            Open Queue
+          </Button>
         </Link>
-        <div className="flex items-center gap-2">
+        <div className="flex gap-2">
+          <Link to={`/queues/${queue.id}/counters`} className="min-w-0 flex-1">
+            <Button variant="secondary" size="md" className="w-full">
+              Manage Counters ({totalCounters})
+            </Button>
+          </Link>
           <Link to={`/queues/${queue.id}`}>
             <Button variant="outline" size="md">
               Settings
-            </Button>
-          </Link>
-          <Link to={`/queues/${queue.id}/live`}>
-            <Button variant="primary" size="md">
-              Open Queue
             </Button>
           </Link>
         </div>

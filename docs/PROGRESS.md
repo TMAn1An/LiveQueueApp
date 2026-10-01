@@ -230,6 +230,32 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Security/regression** — reviewed: tenant scoping of every new query path (session CRUD via queue→org, scope change via org-scoped queue lookup, cross-org test); no internal field leaks (`identityScopeKey`, fingerprint, OTP cipher stripped; tested); scheduled-token gates race-free (monotonic set); future-slot and daily-cap races tested; cross-week occurrence keys tested; typed custom text never in FCM; notification dedupe unchanged.
 - **Verification:** mobile 360/360, dashboard 254/254.
 
+### V2 Dashboard Review Fixes (2026-10-01, on `feature/web-ui-ux-redesign`)
+
+**Status: implemented and tested; not deployed. See ADR-051.**
+
+- **Product rules:** sessions on the same day may not overlap (back-to-back allowed; `SESSION_OVERLAP`); organization names are unique case-insensitively, with a live availability check on registration and rename (migration `20261001000131_add_organization_name_key`, safe for existing duplicates).
+- **Fixed:** unverified owners could not sign back in or survive a reload ("suspended"); the signed-in organization lacked its timezone, so inheriting queues showed "No timezone set"; several dashboard actions mixed button sizes and an outline button was taller than its neighbours.
+- **UX:** Queue Details shows/edits the same fields; device-timezone one-click; schedule days in columns with an overlap warning and next-free-slot suggestion; Repeat Visits opens with the form filled in; Manage Counters is a real button; full-width sidebar logout.
+- **Email (same session):** every email now has a plain-text part, a full HTML document, a visible link and optional `EMAIL_REPLY_TO`; local development prints the verification link when no Resend key is set; the verification page and banner update by themselves and never send a single-use token twice.
+- **Verification:** backend 855/855; dashboard 283/283; both builds clean.
+
+#### Final visual verification pass and pre-commit cleanup (2026-10-01)
+
+**Status: implemented and re-verified; not committed at the time of writing, not deployed.** Found by running the real dashboard against the local backend and using every changed screen, rather than by the unit tests, which were already green.
+
+- **Dashboard queue card:** three buttons wrapped into two uneven rows. Now "Open Queue" full width, with "Manage Counters (n)" and "Settings" on one row beneath it.
+- **Outline buttons:** the equal-height change had put a transparent border on the shared base class, which overrode the outline variant's colour and made its border vanish. Only the outline variant draws a border now; a test guards it.
+- **Organization rename:** the sidebar kept the old name until a reload, because it reads the organization from the session identity. Saving now refreshes the identity.
+- **Organization-name migration:** the SQL backfill only approximated the application's key (`btrim` ignores tabs; no NFKC). It now matches it — 28 awkward legacy names rehearsed through `prisma migrate deploy`, all identical — and duplicate keys are suffixed with the whole id. Requirements, the registration window during deploy, failure and rollback are in DEPLOYMENT.md §3a; what cannot be identical is in ADR-051.
+- **Seed script:** `seedDevOwner.ts` no longer contains a password. It reads `DEV_SEED_OWNER_PASSWORD`, never prints it, and refuses to run outside `NODE_ENV=development` or against a database that is not local.
+- **Dashboard API address:** a build can no longer fall back to `localhost`. `npm run build` fails without `VITE_API_BASE_URL`; the dev server keeps its local fallback (DEPLOYMENT.md §11b). The live production bundle was checked and already has the real backend origin baked in, so the existing Cloudflare Pages setting satisfies the new rule.
+- **Timezone pickers:** `UTC` is a selectable option (browsers leave it out of their zone list, so an organization on UTC read "Not set" in the editor), and the zone currently in use is always listed.
+- **Sidebar:** sticky on desktop, so it no longer scrolls away on a long page; the mobile drawer is unchanged.
+- **Intermittent sign-out on reload (ADR-052):** found because it signed this verification pass out twice. The dashboard sent the same refresh token more than once (StrictMode's doubled restore effect in development; every in-flight request at access-token expiry in production), and the backend's rotation was not atomic — simultaneous requests forked the session, slightly later ones tripped reuse protection and revoked every session. The dashboard now shares one exchange (and a cross-tab lock); the backend rotates a token exactly once and answers the same client's immediate duplicate with `409 REFRESH_TOKEN_SUPERSEDED` instead of revoking everything. Genuine reuse still revokes every session.
+- **Local API port:** the dashboard's development fallback is `http://localhost:4000` again — the backend's own default `PORT` — matching `backend/.env.example`, the mobile app and the specification. (A machine whose backend runs elsewhere sets `VITE_API_BASE_URL` in `web-dashboard/.env`.)
+- **Verification:** backend 868/868; dashboard 318/318; typecheck, lint and both builds clean (backend lint now has no warnings).
+
 ### V2 Home-PC Final Verification (2026-10-01)
 
 **Status: PASS, from the final committed source (`81e6171`).** Local databases only (`livequeue_dev`; a dedicated local `livequeue_test` was created on this PC so the suite's `resetDb()` never touches the dev database).

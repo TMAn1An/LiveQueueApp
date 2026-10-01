@@ -4,7 +4,7 @@ import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { ApiError } from '../api/client';
-import { browserTimezone, supportedTimezones } from '../utils/timezone';
+import { browserTimezone, supportedTimezones, timezoneOptions } from '../utils/timezone';
 import type { Queue } from '../types/queue';
 
 /**
@@ -36,6 +36,11 @@ export function QueueTimezoneSetting({
 
   const effective = queue.timezone ?? organizationTimezone;
   const inherited = !queue.timezone && Boolean(organizationTimezone);
+  // The zone of the device being used right now — i.e. where it is. Offered
+  // as a one-click choice, never applied silently: a queue's clock must stay
+  // the same whoever happens to open settings from wherever they are.
+  const deviceZone = browserTimezone();
+  const canUseDeviceZone = Boolean(deviceZone) && deviceZone !== effective;
 
   async function save(next: string | null) {
     setError(null);
@@ -71,18 +76,29 @@ export function QueueTimezoneSetting({
         )}
         {!queue.deletedAt && (
           <PermissionGate permission="manage_queues">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                // Pre-fill with something sensible: this queue's own value,
-                // then what it inherits, then this computer's — which is only
-                // ever a suggestion, and is labelled as one.
-                setValue(queue.timezone ?? organizationTimezone ?? browserTimezone() ?? '');
-                setEditing(true);
-              }}
-            >
-              {effective ? 'Change' : 'Set timezone'}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              {canUseDeviceZone && (
+                <Button
+                  variant="primary"
+                  loading={updateQueue.isPending}
+                  onClick={() => void save(deviceZone ?? null)}
+                >
+                  Use this device’s timezone ({deviceZone})
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  // Pre-fill with something sensible: this queue's own value,
+                  // then what it inherits, then this computer's — which is only
+                  // ever a suggestion, and is labelled as one.
+                  setValue(queue.timezone ?? organizationTimezone ?? browserTimezone() ?? '');
+                  setEditing(true);
+                }}
+              >
+                {effective ? 'Change' : 'Choose manually'}
+              </Button>
+            </div>
           </PermissionGate>
         )}
       </div>
@@ -104,7 +120,7 @@ export function QueueTimezoneSetting({
             className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
           >
             <option value="">Use my organization’s timezone</option>
-            {zones.map((zone) => (
+            {timezoneOptions(zones, queue.timezone, organizationTimezone, deviceZone).map((zone) => (
               <option key={zone} value={zone}>
                 {zone}
               </option>
@@ -121,12 +137,19 @@ export function QueueTimezoneSetting({
         )}
         <p className="mt-1 text-xs text-muted">
           Leave this on your organization’s timezone unless this queue is somewhere else.
-          {browserTimezone() ? ` This computer is set to ${browserTimezone()}.` : ''}
         </p>
+        {deviceZone && value !== deviceZone && (
+          <button
+            type="button"
+            onClick={() => setValue(deviceZone)}
+            className="mt-1 text-xs font-medium text-brand-fg hover:underline"
+          >
+            Detect from this device ({deviceZone})
+          </button>
+        )}
       </div>
       <div className="flex gap-2">
         <Button
-          size="lg"
           loading={updateQueue.isPending}
           disabled={updateQueue.isPending}
           onClick={() => void save(value.trim() || null)}

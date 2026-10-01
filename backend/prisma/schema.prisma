@@ -93,6 +93,10 @@ enum DeviceStatus {
 model Organization {
   id                    String             @id @default(uuid())
   name                  String
+  /// Organization names are unique case-insensitively, like usernames
+  /// (organizationName.ts). `name` keeps exactly what was typed for display;
+  /// this lower-case key is what the unique index enforces.
+  nameKey               String             @unique @map("name_key")
   status                OrganizationStatus @default(ACTIVE)
   /// ADR-035: the IANA zone this organization operates in, and the default
   /// every one of its queues inherits. Initialized from the browser of the

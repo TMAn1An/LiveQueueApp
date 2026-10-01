@@ -12,6 +12,14 @@ export function register(input: {
   return apiFetch<AuthResult>('/api/auth/register', { method: 'POST', body: input });
 }
 
+/** Live "is this organization name free?" check — case-insensitive. */
+export function checkOrganizationNameAvailability(name: string) {
+  return apiFetch<{ available: boolean }>('/api/auth/organization-name-availability', {
+    method: 'GET',
+    query: { name },
+  });
+}
+
 export function login(input: { email: string; password: string }) {
   return apiFetch<AuthResult>('/api/auth/login', { method: 'POST', body: input });
 }

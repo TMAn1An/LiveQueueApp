@@ -19,8 +19,8 @@ import { assertQueueMutable, requireOwnedQueue } from '../utils/tenantScope';
  * queue that predates this feature keeps accepting joins at any time,
  * exactly as before (spec 4K).
  *
- * Sessions on the same weekday are allowed to overlap by design — that
- * models two concurrent capacity pools, not a mistake.
+ * Sessions on the same weekday may not overlap (a product decision that
+ * reversed ADR-046's original "overlap allowed"; see assertNoOverlap).
  *
  * ADR-048 changed assignment from "only a session open right now" to "the
  * first eligible session that has not ended yet *today*": a customer who
@@ -345,8 +345,8 @@ export interface QueueSessionInput {
   capacity: number | null;
 }
 
-/** Shape rules only — a human can always mean to overlap two sessions on
- * purpose (see the module doc comment), so overlap is never rejected here. */
+/** Shape rules only; overlap with other sessions is checked separately
+ * (assertNoOverlap), because it needs the queue's other sessions. */
 export function validateSessionInput(input: QueueSessionInput): void {
   if (!Number.isInteger(input.weekday) || input.weekday < 0 || input.weekday > 6) {
     throw new AppError(422, 'SESSION_WEEKDAY_INVALID', 'weekday must be an integer from 0 (Sunday) to 6 (Saturday).');
@@ -383,6 +383,50 @@ export function requireScheduleTimezone(effectiveTimezone: string | null): void 
   if (!isValidTimezone(effectiveTimezone)) {
     throw new AppError(422, 'INVALID_TIMEZONE', 'That is not a recognized timezone.');
   }
+}
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/** Half-open windows [start, end): 09:00-12:00 and 12:00-15:00 touch but do
+ * not overlap, so back-to-back sessions stay allowed. */
+export function sessionsOverlap(
+  a: { startMinute: number; endMinute: number },
+  b: { startMinute: number; endMinute: number },
+): boolean {
+  return a.startMinute < b.endMinute && b.startMinute < a.endMinute;
+}
+
+/**
+ * Product rule (reverses ADR-046's "overlap allowed"): sessions on the same
+ * weekday may not overlap — a customer is assigned to exactly one window, and
+ * two windows covering the same minutes made "which session am I in" and
+ * each session's capacity ambiguous to the people configuring them.
+ *
+ * Runs inside the caller's transaction after the queue row is locked, so two
+ * administrators adding sessions at the same moment cannot both pass.
+ */
+async function assertNoOverlap(
+  tx: Prisma.TransactionClient,
+  queueId: string,
+  input: QueueSessionInput,
+  excludeSessionId?: string,
+): Promise<void> {
+  const sameDay = await tx.queueSession.findMany({
+    where: { queueId, weekday: input.weekday, ...(excludeSessionId ? { id: { not: excludeSessionId } } : {}) },
+    orderBy: { startMinute: 'asc' },
+  });
+  const clash = sameDay.find((existing) => sessionsOverlap(existing, input));
+  if (clash) {
+    throw new AppError(
+      409,
+      'SESSION_OVERLAP',
+      `This overlaps the ${formatMinute(clash.startMinute)}–${formatMinute(clash.endMinute)} session on ${WEEKDAY_NAMES[input.weekday]}. Sessions on the same day cannot overlap.`,
+    );
+  }
+}
+
+async function lockQueueRow(tx: Prisma.TransactionClient, queueId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM queues WHERE id = ${queueId} FOR UPDATE`;
 }
 
 export function serializeSession(session: QueueSession) {
@@ -433,14 +477,18 @@ export async function createQueueSession(
   assertQueueMutable(queue);
   validateSessionInput(input);
 
-  const session = await prisma.queueSession.create({
-    data: {
-      queueId,
-      weekday: input.weekday,
-      startMinute: input.startMinute,
-      endMinute: input.endMinute,
-      capacity: input.capacity,
-    },
+  const session = await prisma.$transaction(async (tx) => {
+    await lockQueueRow(tx, queueId);
+    await assertNoOverlap(tx, queueId, input);
+    return tx.queueSession.create({
+      data: {
+        queueId,
+        weekday: input.weekday,
+        startMinute: input.startMinute,
+        endMinute: input.endMinute,
+        capacity: input.capacity,
+      },
+    });
   });
   return serializeSession(session);
 }
@@ -454,14 +502,18 @@ export async function updateQueueSession(
   assertQueueMutable(session.queue);
   validateSessionInput(input);
 
-  const updated = await prisma.queueSession.update({
-    where: { id: sessionId },
-    data: {
-      weekday: input.weekday,
-      startMinute: input.startMinute,
-      endMinute: input.endMinute,
-      capacity: input.capacity,
-    },
+  const updated = await prisma.$transaction(async (tx) => {
+    await lockQueueRow(tx, session.queueId);
+    await assertNoOverlap(tx, session.queueId, input, sessionId);
+    return tx.queueSession.update({
+      where: { id: sessionId },
+      data: {
+        weekday: input.weekday,
+        startMinute: input.startMinute,
+        endMinute: input.endMinute,
+        capacity: input.capacity,
+      },
+    });
   });
   return serializeSession(updated);
 }

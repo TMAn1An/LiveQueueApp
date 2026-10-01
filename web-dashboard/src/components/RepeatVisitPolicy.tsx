@@ -4,6 +4,7 @@ import { useUpdateQueue } from '../hooks/useQueues';
 import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
+import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../api/client';
 import { IDENTITY_FIELD_TYPES, SELECTABLE_IDENTITY_MODES } from '../types/queue';
 import type {
@@ -118,7 +119,13 @@ export function RepeatVisitPolicy({
   const { data: formFields } = useFormFields(queue.id);
   const updateQueue = useUpdateQueue(queue.id);
 
-  const [editing, setEditing] = useState(false);
+  // The settings are shown — already filled in with what is stored — the
+  // moment the tab opens, for anyone who may change them; there is no
+  // separate "Change" step to reveal them. Read-only staff see the summary.
+  const { hasPermission } = useAuth();
+  const canEdit = hasPermission('manage_queues') && !queue.deletedAt;
+  const [editing, setEditing] = useState(canEdit);
+  const [saved, setSaved] = useState(false);
   const [restricted, setRestricted] = useState(!queue.allowRepeatVisits);
   const [type, setType] = useState<RepeatRestrictionType>(
     queue.repeatRestrictionType ?? 'DURATION',
@@ -134,7 +141,7 @@ export function RepeatVisitPolicy({
   const initialMode: RepeatIdentityMode =
     storedMode && SELECTABLE_IDENTITY_MODES.includes(storedMode) ? storedMode : 'VERIFIED_EMAIL';
   const [mode, setMode] = useState<RepeatIdentityMode>(initialMode);
-  const [fieldKey, setFieldKey] = useState(queue.repeatIdentityFieldKey ?? '');
+  const [chosenFieldKey, setFieldKey] = useState(queue.repeatIdentityFieldKey ?? '');
   const storedScope: RepeatRestrictionScope = queue.repeatRestrictionScope ?? 'QUEUE';
   const [scope, setScope] = useState<RepeatRestrictionScope>(storedScope);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +153,9 @@ export function RepeatVisitPolicy({
   const eligibleFields = (formFields?.fields ?? []).filter(
     (field) => IDENTITY_FIELD_TYPES.includes(field.type) && field.required,
   );
+  // The form questions load after the editor is already on screen, so an
+  // unchosen question falls back to the first one that can identify someone.
+  const fieldKey = chosenFieldKey || eligibleFields[0]?.key || '';
   const identityField = (formFields?.fields ?? []).find(
     (field) => field.key === queue.repeatIdentityFieldKey,
   );
@@ -171,6 +181,7 @@ export function RepeatVisitPolicy({
     setFieldKey(queue.repeatIdentityFieldKey ?? eligibleFields[0]?.key ?? '');
     setScope(storedScope);
     setError(null);
+    setSaved(false);
     setEditing(true);
   }
 
@@ -195,6 +206,7 @@ export function RepeatVisitPolicy({
 
   async function save() {
     setError(null);
+    setSaved(false);
     try {
       await updateQueue.mutateAsync(
         restricted
@@ -212,7 +224,8 @@ export function RepeatVisitPolicy({
             }
           : { allowRepeatVisits: true },
       );
-      setEditing(false);
+      // Stays open, showing what is now stored — it is the settings page.
+      setSaved(true);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not save the repeat-visit settings.');
     }
@@ -271,6 +284,45 @@ export function RepeatVisitPolicy({
   return (
     <div className="space-y-4">
       <ErrorBanner message={error} />
+      <div className="space-y-3 rounded-lg border border-border bg-subtle/50 p-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-faint">Currently</p>
+        {configurationRequired && (
+          <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+            <p className="font-medium">This queue is not accepting customers.</p>
+            <p className="mt-1">
+              {storedMode
+                ? 'It identifies customers by a verified phone number, which is no longer available — SMS is not integrated. Choose verified email or a custom unique field below, and joins will work again.'
+                : "It limits repeat visits but does not yet say how customers are identified. Until you choose an identity method below, joins are refused — the previous rule recognised the customer's phone app, which meant reinstalling the app got around the limit."}
+            </p>
+          </div>
+        )}
+        <div className="text-sm">
+          {queue.allowRepeatVisits ? (
+            <p className="text-fg-soft">
+              Customers may join this queue as often as they like.
+            </p>
+          ) : queue.repeatRestrictionType && queue.repeatIdentityMode ? (
+            <div className="space-y-1 text-fg-soft">
+              <p>
+                <span className="font-medium">{describeRestriction(queue, effectiveTimezone)}</span>
+              </p>
+              <p className="text-xs text-muted">
+                {storedScope === 'SESSION'
+                  ? 'Per session: a completed visit uses up the allowance only for the session it was in.'
+                  : 'Entire queue: the limit applies across all sessions.'}
+              </p>
+              <p className="text-xs text-muted">
+                Customers are recognised by{' '}
+                {needsEmail(queue.repeatIdentityMode) && 'an email address they verify'}
+                {queue.repeatIdentityMode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD' && ' and '}
+                {needsField(queue.repeatIdentityMode) &&
+                  `their answer to “${identityField?.label ?? queue.repeatIdentityFieldKey}”`}
+                .
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </div>
 
       <fieldset className="space-y-2">
         <label className="flex items-start gap-2 text-sm">
@@ -523,13 +575,13 @@ export function RepeatVisitPolicy({
             invalidScope
           }
           onClick={() => void save()}
-          size="lg"
         >
           {updateQueue.isPending ? 'Saving…' : 'Save'}
         </Button>
-        <Button variant="ghost" disabled={updateQueue.isPending} onClick={() => setEditing(false)}>
-          Cancel
+        <Button variant="ghost" disabled={updateQueue.isPending} onClick={startEditing}>
+          Discard changes
         </Button>
+        {saved && <span className="self-center text-sm text-green-700 dark:text-green-400">Saved.</span>}
       </div>
     </div>
   );

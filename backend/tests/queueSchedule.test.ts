@@ -281,6 +281,60 @@ describe('admin session configuration', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
+  it('rejects a session that overlaps another on the same day, naming the clash', async () => {
+    const { ctx, queue } = await orgWithQueue();
+    expect((await addSession(ctx.accessToken, queue.id, { weekday: 0, startMinute: 540, endMinute: 1020 })).status).toBe(201);
+
+    for (const window of [
+      { startMinute: 540, endMinute: 1020 }, // identical
+      { startMinute: 600, endMinute: 660 }, // inside
+      { startMinute: 480, endMinute: 600 }, // straddles the start
+      { startMinute: 960, endMinute: 1080 }, // straddles the end
+    ]) {
+      const res = await addSession(ctx.accessToken, queue.id, { weekday: 0, ...window });
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('SESSION_OVERLAP');
+      expect(res.body.error.message).toContain('09:00–17:00');
+    }
+    expect(await prisma.queueSession.count({ where: { queueId: queue.id } })).toBe(1);
+  });
+
+  it('allows back-to-back sessions, and the same hours on a different day', async () => {
+    const { ctx, queue } = await orgWithQueue();
+    await addSession(ctx.accessToken, queue.id, { weekday: 1, startMinute: 540, endMinute: 720 });
+
+    expect((await addSession(ctx.accessToken, queue.id, { weekday: 1, startMinute: 720, endMinute: 900 })).status).toBe(201);
+    expect((await addSession(ctx.accessToken, queue.id, { weekday: 2, startMinute: 540, endMinute: 720 })).status).toBe(201);
+  });
+
+  it('editing a session into another one is rejected; editing it in place is not', async () => {
+    const { ctx, queue } = await orgWithQueue();
+    const morning = (await addSession(ctx.accessToken, queue.id, { weekday: 3, startMinute: 540, endMinute: 720 })).body.data;
+    await addSession(ctx.accessToken, queue.id, { weekday: 3, startMinute: 840, endMinute: 1020 });
+
+    const edit = (body: Record<string, number>) =>
+      api()
+        .put(`/api/queues/${queue.id}/sessions/${morning.id}`)
+        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .send({ weekday: 3, ...body });
+
+    const clash = await edit({ startMinute: 540, endMinute: 900 });
+    expect(clash.status).toBe(409);
+    expect(clash.body.error.code).toBe('SESSION_OVERLAP');
+
+    // Its own old window never counts against it.
+    expect((await edit({ startMinute: 600, endMinute: 780 })).status).toBe(200);
+  });
+
+  it('two simultaneous overlapping adds cannot both succeed', async () => {
+    const { ctx, queue } = await orgWithQueue();
+    const results = await Promise.all(
+      [0, 1, 2, 3].map(() => addSession(ctx.accessToken, queue.id, { weekday: 4, startMinute: 540, endMinute: 600 })),
+    );
+    expect(results.filter((r) => r.status === 201)).toHaveLength(1);
+    expect(await prisma.queueSession.count({ where: { queueId: queue.id } })).toBe(1);
+  });
+
   it('does not let another organization edit or delete this queue’s sessions', async () => {
     const { ctx, queue } = await orgWithQueue();
     const created = await addSession(ctx.accessToken, queue.id, { weekday: 1, startMinute: 500, endMinute: 600 });

@@ -1,8 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
-import { getCurrentAccessToken } from '../api/client';
+import { getCurrentAccessToken, getApiBaseUrl } from '../api/client';
 import type { ClientEvents, ServerEvents } from './socketEvents';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000';
 
 let socket: Socket<ServerEvents, ClientEvents> | null = null;
 
@@ -15,7 +13,7 @@ let socket: Socket<ServerEvents, ClientEvents> | null = null;
  */
 export function getSocket(): Socket<ServerEvents, ClientEvents> {
   if (!socket) {
-    socket = io(API_BASE_URL, {
+    socket = io(getApiBaseUrl(), {
       autoConnect: false,
       auth: (cb) => cb({ token: getCurrentAccessToken() }),
     });

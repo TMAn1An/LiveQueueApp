@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueueSchedule } from './QueueSchedule';
 import { useUpdateQueue } from '../hooks/useQueues';
@@ -182,5 +182,51 @@ describe('QueueSchedule', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(updateQueueMutateAsync).toHaveBeenCalledWith({ scheduleDailyCapacity: 50 });
+  });
+});
+
+describe('QueueSchedule — sessions may not overlap', () => {
+  function withMondaySession() {
+    vi.mocked(useQueueSessions).mockReturnValue({
+      data: [session({ id: 'mon', weekday: 1, startMinute: 540, endMinute: 720 })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueueSessions>);
+    render(<QueueSchedule queue={queue({ scheduleEnabled: true })} />);
+  }
+
+  it('suggests the next free slot after the day’s last session', () => {
+    withMondaySession();
+
+    expect(screen.getByLabelText('New Monday session start time')).toHaveValue('12:00');
+    expect(screen.getByLabelText('New Monday session end time')).toHaveValue('15:00');
+    expect(screen.getByLabelText('New Sunday session start time')).toHaveValue('09:00');
+  });
+
+  it('flags an overlapping new session and will not add it', () => {
+    withMondaySession();
+
+    fireEvent.change(screen.getByLabelText('New Monday session start time'), { target: { value: '10:00' } });
+
+    expect(screen.getByText('Overlaps the 09:00–12:00 session.')).toBeInTheDocument();
+    const addButtons = screen.getAllByRole('button', { name: 'Add session' });
+    expect(addButtons[1]).toBeDisabled();
+  });
+
+  it('allows a back-to-back session', () => {
+    withMondaySession();
+
+    fireEvent.change(screen.getByLabelText('New Monday session start time'), { target: { value: '12:00' } });
+    fireEvent.change(screen.getByLabelText('New Monday session end time'), { target: { value: '13:00' } });
+
+    expect(screen.queryByText(/Overlaps/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Add session' })[1]).toBeEnabled();
+  });
+
+  it('lays the days out in columns and shows capacity beside the hours', () => {
+    withMondaySession();
+
+    expect(screen.getByText('09:00–12:00')).toBeInTheDocument();
+    expect(screen.getByText('Unlimited capacity')).toBeInTheDocument();
+    expect(screen.getAllByText('Closed')).toHaveLength(6);
   });
 });

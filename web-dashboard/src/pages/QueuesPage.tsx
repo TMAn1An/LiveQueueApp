@@ -158,10 +158,9 @@ function QueueRow({ queue }: { queue: Queue }) {
       <td className="py-3 pr-4">
         <div className="flex flex-wrap items-center gap-2">
           {/* Primary: always available, to every role that can see this table */}
+          {/* Same size as its neighbours; the primary colour marks it. */}
           <Link to={`/queues/${queue.id}/live`}>
-            <Button variant="primary" size="lg">
-              Open Queue
-            </Button>
+            <Button variant="primary">Open Queue</Button>
           </Link>
           <Link to={`/queues/${queue.id}`}>
             <Button variant="outline">Settings</Button>

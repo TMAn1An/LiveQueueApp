@@ -139,3 +139,59 @@ describe('AuthProvider — login/logout', () => {
     expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBeNull();
   });
 });
+
+describe('AuthProvider — email verification and other tabs', () => {
+  function IdentityProbe() {
+    const { staff, login, logout, refreshIdentity } = useAuth();
+    return (
+      <div>
+        <span data-testid="staff-status">{staff?.status ?? ''}</span>
+        <button onClick={() => void login('jane@example.com', 'Password123')}>login</button>
+        <button onClick={() => void logout()}>logout</button>
+        <button onClick={() => void refreshIdentity()}>refresh identity</button>
+      </div>
+    );
+  }
+
+  it('refreshIdentity() re-reads the account, so a newly verified owner is seen as ACTIVE', async () => {
+    const pending = { ...authResult, staff: { ...authResult.staff, status: 'PENDING_EMAIL_VERIFICATION' as const } };
+    vi.mocked(authApi.login).mockResolvedValue({ data: pending });
+    vi.mocked(authApi.me).mockResolvedValue({
+      data: { staff: authResult.staff, organization: authResult.organization, permissions: authResult.permissions },
+    });
+    const user = userEvent.setup();
+    render(
+      <AuthProvider>
+        <IdentityProbe />
+      </AuthProvider>,
+    );
+
+    await user.click(screen.getByText('login'));
+    await waitFor(() =>
+      expect(screen.getByTestId('staff-status').textContent).toBe('PENDING_EMAIL_VERIFICATION'),
+    );
+
+    await user.click(screen.getByText('refresh identity'));
+    await waitFor(() => expect(screen.getByTestId('staff-status').textContent).toBe('ACTIVE'));
+  });
+
+  it('uses the refresh token another tab rotated, never a stale in-memory one (reuse revokes every session)', async () => {
+    vi.mocked(authApi.login).mockResolvedValue({ data: authResult });
+    vi.mocked(authApi.logout).mockResolvedValue(undefined as never);
+    const user = userEvent.setup();
+    render(
+      <AuthProvider>
+        <IdentityProbe />
+      </AuthProvider>,
+    );
+    await user.click(screen.getByText('login'));
+    await waitFor(() => expect(localStorage.getItem(REFRESH_TOKEN_KEY)).toBe('refresh-1'));
+
+    // The verification link opened in another tab, which restored the
+    // session and rotated the shared token.
+    localStorage.setItem(REFRESH_TOKEN_KEY, 'rotated-by-other-tab');
+    await user.click(screen.getByText('logout'));
+
+    expect(authApi.logout).toHaveBeenCalledWith('rotated-by-other-tab');
+  });
+});

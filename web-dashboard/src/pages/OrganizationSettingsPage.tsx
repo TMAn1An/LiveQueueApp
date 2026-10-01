@@ -12,11 +12,13 @@ import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PageHeader } from '../components/PageHeader';
+import { OrganizationNameStatus } from '../components/OrganizationNameStatus';
+import { useOrganizationNameAvailability } from '../hooks/useOrganizationNameAvailability';
 import { ApiError } from '../api/client';
-import { browserTimezone, supportedTimezones } from '../utils/timezone';
+import { browserTimezone, supportedTimezones, timezoneOptions } from '../utils/timezone';
 
 export function OrganizationSettingsPage() {
-  const { staff, logout } = useAuth();
+  const { staff, logout, refreshIdentity } = useAuth();
   const navigate = useNavigate();
   const { data: organization, isLoading } = useOrganization();
   const zones = useMemo(() => supportedTimezones(), []);
@@ -27,6 +29,7 @@ export function OrganizationSettingsPage() {
   const [restarted, setRestarted] = useState(false);
   const [name, setName] = useState('');
   const [editing, setEditing] = useState(false);
+  const nameStatus = useOrganizationNameAvailability(name, organization?.name);
   const [confirmName, setConfirmName] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +43,9 @@ export function OrganizationSettingsPage() {
     try {
       await updateOrganization.mutateAsync({ name, timezone: timezone.trim() || null });
       setEditing(false);
+      // The sidebar and page headers read the organization from the session
+      // identity, so re-read it or they keep showing the old name.
+      await refreshIdentity().catch(() => undefined);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to update organization.');
     }
@@ -88,12 +94,18 @@ export function OrganizationSettingsPage() {
         {editing ? (
           <div className="space-y-4">
             <div>
-              <label className="mb-1 block text-xs font-medium text-fg-soft">Organization Name</label>
+              <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="org-name">
+                Organization Name
+              </label>
               <input
+                id="org-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                aria-describedby="org-name-status"
+                aria-invalid={nameStatus === 'taken' || undefined}
                 className="w-full max-w-md rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
               />
+              <OrganizationNameStatus status={nameStatus} id="org-name-status" />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="org-timezone">
@@ -107,7 +119,7 @@ export function OrganizationSettingsPage() {
                   className="w-full max-w-md rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
                 >
                   <option value="">Not set</option>
-                  {zones.map((zone) => (
+                  {timezoneOptions(zones, organization.timezone, browserTimezone()).map((zone) => (
                     <option key={zone} value={zone}>
                       {zone}
                     </option>
@@ -128,7 +140,11 @@ export function OrganizationSettingsPage() {
               </p>
             </div>
             <div className="flex gap-2 pt-2 border-t border-border">
-              <Button size="lg" onClick={() => void handleSave()}>
+              <Button
+                loading={updateOrganization.isPending}
+                disabled={nameStatus === 'taken'}
+                onClick={() => void handleSave()}
+              >
                 Save
               </Button>
               <Button variant="ghost" onClick={() => setEditing(false)}>

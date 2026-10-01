@@ -1,12 +1,10 @@
-import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useQueue, useUpdateQueue } from '../hooks/useQueues';
+import { useQueue } from '../hooks/useQueues';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
-import { PermissionGate } from '../components/PermissionGate';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { ServicesManager } from '../components/ServicesManager';
@@ -15,8 +13,7 @@ import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
 import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
 import { ServiceStartVerificationSetting } from '../components/ServiceStartVerificationSetting';
 import { QueueSchedule } from '../components/QueueSchedule';
-import { actionErrorMessage } from '../utils/actionError';
-import { ErrorBanner } from '../components/ErrorBanner';
+import { QueueDetailsCard } from '../components/QueueDetailsCard';
 
 type SettingsTab = 'general' | 'services' | 'form' | 'schedule' | 'repeat' | 'qr' | 'all';
 
@@ -43,25 +40,11 @@ export function QueueDetailsPage() {
 
   const { organization } = useAuth();
   const { data: queue, isLoading } = useQueue(queueId);
-  const updateQueue = useUpdateQueue(queueId ?? '');
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [allowMultipleServices, setAllowMultipleServices] = useState(true);
-  const [detailsError, setDetailsError] = useState<string | null>(null);
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
 
   function setTab(tab: SettingsTab) {
     setSearchParams(tab === 'general' ? {} : { tab });
-  }
-
-  function startEditing() {
-    setName(queue!.name);
-    setDescription(queue!.description ?? '');
-    setAllowMultipleServices(queue!.allowMultipleServices);
-    setDetailsError(null);
-    setEditing(true);
   }
 
   const showGeneral = currentTab === 'general' || currentTab === 'all';
@@ -152,108 +135,7 @@ export function QueueDetailsPage() {
       {/* SECTION: General & Timezone */}
       {showGeneral && (
         <div className="space-y-6">
-          <Card>
-            <div className="mb-3 flex items-center justify-between border-b border-border pb-3">
-              <div>
-                <h2 className="text-base font-bold text-fg">Queue Details</h2>
-                <p className="text-xs text-muted">Core identification and service rules</p>
-              </div>
-              {!queue.deletedAt && !editing && (
-                <PermissionGate permission="manage_queues">
-                  <Button variant="secondary" onClick={startEditing}>
-                    Edit Details
-                  </Button>
-                </PermissionGate>
-              )}
-            </div>
-            {editing ? (
-              <div className="space-y-4">
-                <ErrorBanner message={detailsError} />
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-fg-soft">Name</label>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full max-w-md rounded-md border border-border-strong px-3 py-2 text-sm bg-surface text-fg focus:border-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-fg-soft">Description</label>
-                  <textarea
-                    rows={2}
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full max-w-md rounded-md border border-border-strong px-3 py-2 text-sm bg-surface text-fg focus:border-brand-500"
-                  />
-                </div>
-                <div className="rounded-lg border border-border bg-subtle/50 p-3 max-w-md">
-                  <label className="flex items-start gap-2.5 text-sm cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={allowMultipleServices}
-                      onChange={(e) => setAllowMultipleServices(e.target.checked)}
-                      className="mt-0.5 rounded border-border-strong text-brand-600 focus:ring-brand-500"
-                    />
-                    <span>
-                      <span className="block font-medium text-fg-soft">Allow multiple services</span>
-                      <span className="block text-xs text-muted">
-                        Customers can select more than one service when joining.
-                      </span>
-                    </span>
-                  </label>
-                </div>
-                <div className="flex gap-2 pt-2 border-t border-border">
-                  <Button
-                    size="lg"
-                    loading={updateQueue.isPending}
-                    onClick={() =>
-                      updateQueue.mutate(
-                        { name, description, allowMultipleServices },
-                        {
-                          onSuccess: () => setEditing(false),
-                          onError: (err) => setDetailsError(actionErrorMessage(err)),
-                        },
-                      )
-                    }
-                  >
-                    {updateQueue.isPending ? 'Saving…' : 'Save'}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={updateQueue.isPending}
-                    onClick={() => setEditing(false)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : (
-              <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
-                <div className="rounded-lg bg-subtle/50 p-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Token Prefix</dt>
-                  <dd className="mt-1 text-base font-bold text-fg">{queue.tokenPrefix}</dd>
-                </div>
-                <div className="rounded-lg bg-subtle/50 p-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Base Time</dt>
-                  <dd className="mt-1 text-base font-bold text-fg">{queue.baseTimeMinutes} min</dd>
-                </div>
-                <div className="rounded-lg bg-subtle/50 p-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Reminder</dt>
-                  <dd className="mt-1 text-base font-bold text-fg">{queue.defaultNotificationMinutes} min before</dd>
-                </div>
-                <div className="rounded-lg bg-subtle/50 p-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Form Version</dt>
-                  <dd className="mt-1 text-base font-bold text-fg">v{queue.formVersion}</dd>
-                </div>
-                {queue.description && (
-                  <div className="col-span-full rounded-lg bg-subtle/50 p-3">
-                    <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Description</dt>
-                    <dd className="mt-1 text-sm text-fg-soft">{queue.description}</dd>
-                  </div>
-                )}
-              </dl>
-            )}
-          </Card>
+          <QueueDetailsCard queue={queue} />
 
           <Card>
             <div className="mb-3 border-b border-border pb-3">

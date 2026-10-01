@@ -13,6 +13,11 @@ import {
 } from './session.service';
 import { getEffectivePermissions } from '../constants/permissions';
 import {
+  claimOrganizationName,
+  isOrganizationNameConflict,
+  organizationNameTakenError,
+} from './organization.service';
+import {
   dispatchVerificationEmail,
   generateVerificationToken,
   newRegistrationDeadline,
@@ -57,6 +62,11 @@ function toSafeOrganization(organization: Organization) {
     id: organization.id,
     name: organization.name,
     status: organization.status,
+    // The dashboard reads both from the signed-in session: the zone every
+    // queue inherits (ADR-035) — without it an inheriting queue showed "No
+    // timezone set" — and whether the owner's first-run guide is finished.
+    timezone: organization.timezone,
+    onboardingCompletedAt: organization.onboardingCompletedAt,
   };
 }
 
@@ -81,11 +91,56 @@ async function issueTokens(staff: Staff, meta: SessionMeta) {
  * succeeds" pattern in this codebase (CLAUDE.md §5) — a Resend outage must
  * never fail an otherwise-successful registration.
  */
+/**
+ * A self-registered owner who has not verified their email yet — as opposed
+ * to an invited staff member, who is also PENDING_EMAIL_VERIFICATION but
+ * carries no registration deadline and has no usable password until they
+ * accept. Only the former has an open window to finish signing up.
+ */
+function isPendingSelfRegistration(staff: { status: string; registrationExpiresAt: Date | null }): boolean {
+  return staff.status === 'PENDING_EMAIL_VERIFICATION' && staff.registrationExpiresAt != null;
+}
+
+function registrationWindowOpen(staff: { registrationExpiresAt: Date | null }): boolean {
+  return staff.registrationExpiresAt != null && staff.registrationExpiresAt.getTime() > Date.now();
+}
+
+/**
+ * Who may hold a dashboard session: an ACTIVE staff member, or an owner still
+ * inside their registration window. The latter must be able to sign back in
+ * — after closing the tab, reloading, or switching browser — to see the
+ * verification banner and resend the email; the backend's requireVerified
+ * middleware, not the session, is what keeps queue features closed to them.
+ */
+function mayHoldSession(staff: { status: string; registrationExpiresAt: Date | null }): boolean {
+  return staff.status === 'ACTIVE' || (isPendingSelfRegistration(staff) && registrationWindowOpen(staff));
+}
+
+const REGISTRATION_EXPIRED_MESSAGE =
+  'This registration expired before the email address was verified. Please register again.';
+
 export async function register(input: RegisterInput, meta: SessionMeta) {
   const existing = await prisma.staff.findUnique({ where: { email: input.email } });
   if (existing) {
-    throw new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'This email is already registered.');
+    // A lapsed, never-verified sign-up is exactly what the cleanup job
+    // deletes; doing it here instead lets the person register again at once
+    // rather than being told the address is taken by an account they can no
+    // longer use. Only the owner's own pending organization is removed —
+    // a live account, or one still inside its window, is never replaced.
+    if (existing.role === 'OWNER' && isPendingSelfRegistration(existing) && !registrationWindowOpen(existing)) {
+      await prisma.organization.deleteMany({
+        where: {
+          id: existing.organizationId,
+          staff: { some: { id: existing.id, status: 'PENDING_EMAIL_VERIFICATION' } },
+        },
+      });
+    } else {
+      throw new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'This email is already registered.');
+    }
   }
+
+  // Organization names are unique like usernames (case-insensitive).
+  const nameKey = await claimOrganizationName(input.organizationName);
 
   const passwordHash = await hashPassword(input.password);
   // Registration only collects an organization name, email, and password (spec 4.1);
@@ -98,6 +153,7 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
     const organization = await tx.organization.create({
       data: {
         name: input.organizationName,
+        nameKey,
         // Only kept when the runtime actually recognizes the zone; anything
         // else is dropped rather than left to break date arithmetic later.
         timezone: input.timezone && isValidTimezone(input.timezone) ? input.timezone : null,
@@ -120,6 +176,11 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
     });
 
     return { staff, organization };
+  }).catch((err: unknown) => {
+    // Two people registering the same name at the same instant: the unique
+    // index lets exactly one through; the other gets the friendly answer.
+    if (isOrganizationNameConflict(err)) throw organizationNameTakenError();
+    throw err;
   });
 
   const tokens = await issueTokens(staff, meta);
@@ -153,7 +214,10 @@ export async function login(input: LoginInput, meta: SessionMeta) {
     throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password.');
   }
 
-  if (staff.status !== 'ACTIVE') {
+  if (!mayHoldSession(staff)) {
+    if (isPendingSelfRegistration(staff)) {
+      throw new AppError(403, 'REGISTRATION_EXPIRED', REGISTRATION_EXPIRED_MESSAGE);
+    }
     throw new AppError(403, 'ACCOUNT_SUSPENDED', 'This account has been suspended.');
   }
 
@@ -197,7 +261,7 @@ export async function refresh(rawRefreshToken: string, meta: SessionMeta) {
   const rotated = await rotateSession(rawRefreshToken, meta);
 
   const staff = await prisma.staff.findUnique({ where: { id: rotated.staffId } });
-  if (!staff || staff.status !== 'ACTIVE') {
+  if (!staff || !mayHoldSession(staff)) {
     throw new AppError(401, 'UNAUTHENTICATED', 'Account is not active.');
   }
 

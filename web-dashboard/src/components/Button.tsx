@@ -28,8 +28,11 @@ const VARIANT_CLASSES: Record<Variant, string> = {
 /* Pressed feedback is a color/shadow change rather than a transform: a row
    of table actions that jumps on click reads as noise in operational
    software. 150ms is fast enough to feel immediate. */
+/* Every size has a fixed height (see SIZE_CLASSES), so two buttons of the
+   same size always line up exactly — an outline button beside a filled one
+   used to be 2px taller, because its border was added on top of padding. */
 const BASE_CLASSES =
-  'inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:shadow-none';
+  'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:shadow-none';
 
 type Size = 'md' | 'lg';
 
@@ -43,8 +46,8 @@ type Size = 'md' | 'lg';
  * just by omitting the prop.
  */
 const SIZE_CLASSES: Record<Size, string> = {
-  md: 'px-3 py-2 text-sm',
-  lg: 'px-4 py-2.5 text-base',
+  md: 'h-9 px-3 text-sm',
+  lg: 'h-11 px-4 text-base',
 };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

@@ -64,6 +64,29 @@ export function isEmailAvailable(): boolean {
  * other recipient is rejected by the provider. */
 const RESEND_SANDBOX_SENDER = 'onboarding@resend.dev';
 
+/**
+ * Body fields shared by every message. Deliverability, not decoration:
+ *  - a plain-text alternative beside the HTML — HTML-only mail is a classic
+ *    spam-filter signal, and some clients only show text;
+ *  - a complete HTML document rather than a bare fragment;
+ *  - an optional Reply-To on a monitored mailbox (EMAIL_REPLY_TO).
+ * Sender-domain authentication (SPF/DKIM/DMARC) matters more than any of
+ * this and lives in DNS — see docs/DEPLOYMENT.md §3b.
+ */
+function messageBody(title: string, htmlBody: string, text: string) {
+  return {
+    html: `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head>
+<body style="margin: 0; padding: 24px; background: #ffffff;">
+${htmlBody}
+</body>
+</html>`,
+    text,
+    ...(env.EMAIL_REPLY_TO ? { replyTo: env.EMAIL_REPLY_TO } : {}),
+  };
+}
+
 export interface CustomerVerificationEmail {
   to: string;
   code: string;
@@ -119,6 +142,15 @@ export function reportEmailConfiguration(): void {
 export async function sendVerificationEmail(to: string, verificationUrl: string): Promise<boolean> {
   const resend = getClient();
   if (!resend) {
+    // Local development without a Resend account could otherwise never
+    // complete a registration. Development only: the link is a one-time
+    // credential, so it must never reach production or test logs.
+    if (env.NODE_ENV === 'development') {
+      logger.warn(
+        { verificationUrl },
+        'DEV ONLY: email delivery is not configured — open this link to verify the account',
+      );
+    }
     return false;
   }
 
@@ -127,7 +159,11 @@ export async function sendVerificationEmail(to: string, verificationUrl: string)
       from: env.EMAIL_FROM,
       to,
       subject: 'Verify your LiveQueue account',
-      html: buildVerificationEmailHtml(verificationUrl),
+      ...messageBody(
+        'Verify your LiveQueue account',
+        buildVerificationEmailHtml(verificationUrl),
+        buildVerificationEmailText(verificationUrl),
+      ),
     });
     if (error) {
       // name/statusCode are what distinguish an operator-fixable rejection
@@ -170,9 +206,27 @@ function buildVerificationEmailHtml(verificationUrl: string): string {
       Verify email address
     </a>
   </p>
+  <p style="color: #64748b; font-size: 13px;">
+    Or paste this link into your browser:<br>
+    <a href="${verificationUrl}" style="color: #2563eb; word-break: break-all;">${verificationUrl}</a>
+  </p>
   <p style="color: #64748b; font-size: 13px;">This link expires in 15 minutes.</p>
   <p style="color: #94a3b8; font-size: 12px;">If you didn't create a LiveQueue account, you can safely ignore this email.</p>
 </div>`.trim();
+}
+
+function buildVerificationEmailText(verificationUrl: string): string {
+  return [
+    'Verify your LiveQueue account',
+    '',
+    'Thanks for registering with LiveQueue. Open the link below to verify your email address and activate your organization:',
+    '',
+    verificationUrl,
+    '',
+    'This link expires in 15 minutes.',
+    '',
+    "If you didn't create a LiveQueue account, you can safely ignore this email.",
+  ].join('\n');
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -205,7 +259,11 @@ export async function sendStaffInvitationEmail(input: {
       from: env.EMAIL_FROM,
       to: input.to,
       subject: `You've been invited to LiveQueue`,
-      html: buildStaffInvitationHtml(input),
+      ...messageBody(
+        "You've been invited to LiveQueue",
+        buildStaffInvitationHtml(input),
+        buildStaffInvitationText(input),
+      ),
     });
     if (error) {
       logger.error(
@@ -256,6 +314,10 @@ function buildStaffInvitationHtml(input: {
     </a>
   </p>
   <p style="color: #64748b; font-size: 13px;">
+    Or paste this link into your browser:<br>
+    <a href="${input.setupUrl}" style="color: #2563eb; word-break: break-all;">${input.setupUrl}</a>
+  </p>
+  <p style="color: #64748b; font-size: 13px;">
     This link works once and expires in 7 days. After that, ask an administrator to send a new one.
   </p>
   <p style="color: #64748b; font-size: 13px;">
@@ -266,6 +328,31 @@ function buildStaffInvitationHtml(input: {
     until someone sets a password with the link above.
   </p>
 </div>`.trim();
+}
+
+/** Plain-text twin of buildStaffInvitationHtml. Free text is not escaped
+ * here — it is not HTML — and carries nothing the HTML version does not. */
+function buildStaffInvitationText(input: {
+  name: string;
+  organizationName: string;
+  role: string;
+  setupUrl: string;
+}): string {
+  const role = ROLE_LABELS[input.role] ?? 'Staff';
+  return [
+    "You've been invited to LiveQueue",
+    '',
+    `Hi ${input.name}, ${input.organizationName} has given you access to LiveQueue as ${role}.`,
+    '',
+    'Choose a password to finish setting up your account. Nobody else knows it — not even the administrator who invited you.',
+    '',
+    input.setupUrl,
+    '',
+    'This link works once and expires in 7 days. After that, ask an administrator to send a new one.',
+    `You'll sign in afterwards at ${env.APP_BASE_URL}/login`,
+    '',
+    "If you weren't expecting this invitation, you can ignore this email — the account cannot be used until someone sets a password with the link above.",
+  ].join('\n');
 }
 
 /**
@@ -297,7 +384,11 @@ export async function sendCustomerVerificationCodeEmail(
       from: env.EMAIL_FROM,
       to: input.to,
       subject: 'LiveQueue verification code',
-      html: buildCustomerVerificationHtml(input),
+      ...messageBody(
+        'Your LiveQueue verification code',
+        buildCustomerVerificationHtml(input),
+        buildCustomerVerificationText(input),
+      ),
     });
     if (error) {
       // name/statusCode distinguish an operator-fixable rejection from a
@@ -343,4 +434,22 @@ function buildCustomerVerificationHtml(input: {
     the code above.
   </p>
 </div>`.trim();
+}
+
+function buildCustomerVerificationText(input: {
+  code: string;
+  queueName: string;
+  expiresInMinutes: number;
+}): string {
+  return [
+    'Your LiveQueue verification code',
+    '',
+    `Enter this code in the LiveQueue app to join ${input.queueName}:`,
+    '',
+    input.code,
+    '',
+    `This code expires in ${input.expiresInMinutes} minutes. Do not share it with anyone.`,
+    '',
+    "If you didn't request this, you can ignore this email — nobody can join a queue as you without the code above.",
+  ].join('\n');
 }

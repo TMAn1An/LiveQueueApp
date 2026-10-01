@@ -86,6 +86,30 @@ describe('apiFetch', () => {
     expect(onAuthExpired).not.toHaveBeenCalled();
   });
 
+  it('on 401 TOKEN_EXPIRED, when another request has already refreshed, retries with that token without rotating again', async () => {
+    // This request went out with the old access token; by the time its 401
+    // comes back, a sibling request has already completed the refresh.
+    let callCount = 0;
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      callCount += 1;
+      if (callCount === 1) {
+        getAccessToken.mockReturnValue('access-token-from-sibling-refresh');
+        return jsonResponse(401, { success: false, error: { code: 'TOKEN_EXPIRED', message: 'Expired.' } });
+      }
+      return jsonResponse(200, { success: true, data: { ok: true } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiFetch<{ ok: boolean }>('/api/staff');
+
+    expect(result.data).toEqual({ ok: true });
+    expect(refreshAccessToken).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retryHeaders = fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>;
+    expect(retryHeaders.Authorization).toBe('Bearer access-token-from-sibling-refresh');
+    expect(onAuthExpired).not.toHaveBeenCalled();
+  });
+
   it('on 401 TOKEN_EXPIRED, if refresh fails, throws without retrying again and calls onAuthExpired', async () => {
     const fetchMock = vi.fn(async () =>
       jsonResponse(401, { success: false, error: { code: 'TOKEN_EXPIRED', message: 'Expired.' } }),

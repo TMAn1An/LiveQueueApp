@@ -108,7 +108,9 @@ export function QueueWorkspaceHeader({
             )}
             {!isSettings && (
               <Link to={`/queues/${queue.id}`}>
-                <Button variant="secondary">Queue Settings</Button>
+                <Button variant="secondary" size="lg">
+                  Queue Settings
+                </Button>
               </Link>
             )}
           </div>

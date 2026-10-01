@@ -1,7 +1,8 @@
-import type { Organization } from '@prisma/client';
+import { Prisma, type Organization } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { isValidTimezone } from '../utils/customerIdentity';
+import { organizationNameKey } from '../utils/organizationName';
 import { recordAuditEvent } from './audit.service';
 
 function requireOwner(role: string): void {
@@ -23,6 +24,70 @@ function serializeOrganization(organization: Organization) {
     createdAt: organization.createdAt,
     updatedAt: organization.updatedAt,
   };
+}
+
+const NAME_TAKEN_MESSAGE = 'That organization name is already taken. Please choose another.';
+
+export function organizationNameTakenError(): AppError {
+  return new AppError(409, 'ORGANIZATION_NAME_TAKEN', NAME_TAKEN_MESSAGE);
+}
+
+/** A name held only by a sign-up that was never verified and whose hour has
+ * run out — exactly what the pending-registration cleanup deletes. */
+async function isLapsedPendingRegistration(organizationId: string): Promise<boolean> {
+  const staff = await prisma.staff.findMany({
+    where: { organizationId },
+    select: { role: true, status: true, registrationExpiresAt: true },
+  });
+  return (
+    staff.length > 0 &&
+    staff.every(
+      (s) =>
+        s.role === 'OWNER' &&
+        s.status === 'PENDING_EMAIL_VERIFICATION' &&
+        s.registrationExpiresAt != null &&
+        s.registrationExpiresAt.getTime() <= Date.now(),
+    )
+  );
+}
+
+/**
+ * Whether a name can be used (case-insensitively, like a username). A lapsed,
+ * never-verified sign-up does not hold its name: it reads as available here,
+ * and `claimOrganizationName` frees it for whoever registers next. Never
+ * reports anything about the organization holding a taken name.
+ */
+export async function isOrganizationNameAvailable(name: string, exceptOrganizationId?: string): Promise<boolean> {
+  const holder = await prisma.organization.findUnique({
+    where: { nameKey: organizationNameKey(name) },
+    select: { id: true },
+  });
+  if (!holder || holder.id === exceptOrganizationId) return true;
+  return isLapsedPendingRegistration(holder.id);
+}
+
+/**
+ * Called before creating or renaming an organization: frees a name held only
+ * by a lapsed sign-up, otherwise refuses a taken one. The unique index on
+ * name_key remains the final guard against two simultaneous claims.
+ */
+export async function claimOrganizationName(name: string, exceptOrganizationId?: string): Promise<string> {
+  const nameKey = organizationNameKey(name);
+  const holder = await prisma.organization.findUnique({ where: { nameKey }, select: { id: true } });
+  if (holder && holder.id !== exceptOrganizationId) {
+    if (!(await isLapsedPendingRegistration(holder.id))) {
+      throw organizationNameTakenError();
+    }
+    await prisma.organization.deleteMany({ where: { id: holder.id } });
+  }
+  return nameKey;
+}
+
+/** Turns the unique-index violation on name_key into the friendly 409. */
+export function isOrganizationNameConflict(err: unknown): boolean {
+  if (!(err instanceof Prisma.PrismaClientKnownRequestError) || err.code !== 'P2002') return false;
+  const target = (err.meta as { target?: unknown } | undefined)?.target;
+  return Array.isArray(target) ? target.includes('name_key') || target.includes('nameKey') : String(target).includes('name_key');
 }
 
 /** Any authenticated staff member may view their own organization's info. */
@@ -53,14 +118,23 @@ export async function updateOrganization(
   if (input.timezone && !isValidTimezone(input.timezone)) {
     throw new AppError(422, 'INVALID_TIMEZONE', 'That is not a recognized timezone.');
   }
-  const organization = await prisma.organization.update({
-    where: { id: organizationId },
-    data: {
-      ...(input.name !== undefined ? { name: input.name } : {}),
-      ...(input.timezone !== undefined ? { timezone: input.timezone || null } : {}),
-    },
-  });
-  return serializeOrganization(organization);
+  // A rename must not take a name another organization already holds;
+  // renaming to a different capitalisation of its own name is always fine.
+  const nameKey =
+    input.name !== undefined ? await claimOrganizationName(input.name, organizationId) : undefined;
+  try {
+    const organization = await prisma.organization.update({
+      where: { id: organizationId },
+      data: {
+        ...(input.name !== undefined ? { name: input.name, nameKey } : {}),
+        ...(input.timezone !== undefined ? { timezone: input.timezone || null } : {}),
+      },
+    });
+    return serializeOrganization(organization);
+  } catch (err) {
+    if (isOrganizationNameConflict(err)) throw organizationNameTakenError();
+    throw err;
+  }
 }
 
 /**

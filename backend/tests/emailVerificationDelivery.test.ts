@@ -16,6 +16,7 @@ const sendMock = vi.hoisted(() => vi.fn());
 // config/env is first imported. The SDK is mocked, so nothing is ever sent.
 vi.hoisted(() => {
   process.env.RESEND_API_KEY = 'test_resend_key_not_a_real_credential';
+  process.env.EMAIL_REPLY_TO = 'support@example.com';
 });
 
 vi.mock('resend', () => ({
@@ -130,5 +131,59 @@ describe('email configuration reporting', () => {
     // is exactly the condition reportEmailConfiguration() exists to announce
     // at boot rather than leave to the first failed signup.
     expect(emailService.isEmailAvailable()).toBe(true);
+  });
+});
+
+/** Deliverability: every message is multipart (HTML + plain text), a complete
+ * HTML document, shows its link as visible text too, and carries Reply-To. */
+describe('deliverability of every message', () => {
+  type Payload = { html: string; text?: string; replyTo?: string };
+  const payload = (index = 0) => sendMock.mock.calls[index]![0] as Payload;
+
+  function expectMultipart(sent: Payload, mustContain: string) {
+    expect(sent.text, 'a plain-text alternative is always sent').toBeTruthy();
+    expect(sent.text).toContain(mustContain);
+    expect(sent.text).not.toMatch(/<(p|a|div|br|strong|h2)\b/i);
+    expect(sent.html.startsWith('<!doctype html>')).toBe(true);
+    expect(sent.replyTo).toBe('support@example.com');
+  }
+
+  it('registration verification email', async () => {
+    await api()
+      .post('/api/auth/register')
+      .send({ organizationName: 'Text Org', email: 'text@example.com', password: 'Password123' });
+
+    const sent = payload();
+    const url = /href="([^"]+verify-email\?token=[^"]+)"/.exec(sent.html)![1]!;
+    expectMultipart(sent, url);
+    // The link is also readable as text, not only behind the button.
+    expect(sent.html.split(url).length - 1).toBeGreaterThanOrEqual(3);
+  });
+
+  it('staff invitation email', async () => {
+    await emailService.sendStaffInvitationEmail({
+      to: 'new@example.com',
+      name: 'Nadia',
+      organizationName: 'Acme <Clinic>',
+      role: 'STAFF',
+      setupUrl: 'https://dash.example.com/accept-invitation?token=abc',
+    });
+
+    const sent = payload();
+    expectMultipart(sent, 'https://dash.example.com/accept-invitation?token=abc');
+    // Free text stays escaped in HTML, and readable (unescaped) in text.
+    expect(sent.html).toContain('Acme &lt;Clinic&gt;');
+    expect(sent.text).toContain('Acme <Clinic>');
+  });
+
+  it('customer verification code email', async () => {
+    await emailService.sendCustomerVerificationCodeEmail({
+      to: 'customer@example.com',
+      code: '482913',
+      queueName: 'Pharmacy',
+      expiresInMinutes: 5,
+    });
+
+    expectMultipart(payload(), '482913');
   });
 });

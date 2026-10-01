@@ -5,6 +5,8 @@ import { ApiError } from '../api/client';
 import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PasswordInput } from '../components/PasswordInput';
+import { OrganizationNameStatus } from '../components/OrganizationNameStatus';
+import { useOrganizationNameAvailability } from '../hooks/useOrganizationNameAvailability';
 
 export function RegisterPage() {
   const { register } = useAuth();
@@ -14,6 +16,8 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Organization names are unique like usernames; checked as you type.
+  const nameStatus = useOrganizationNameAvailability(organizationName);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -41,8 +45,11 @@ export function RegisterPage() {
           required
           value={organizationName}
           onChange={(e) => setOrganizationName(e.target.value)}
+          aria-describedby="organizationName-status"
+          aria-invalid={nameStatus === 'taken' || undefined}
           className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
         />
+        <OrganizationNameStatus status={nameStatus} id="organizationName-status" />
       </div>
       <div className="mb-3">
         <label htmlFor="email" className="mb-1 block text-sm font-medium text-fg-soft">
@@ -72,7 +79,7 @@ export function RegisterPage() {
         />
         <p className="mt-1 text-xs text-faint">At least 8 characters, with a letter and a number.</p>
       </div>
-      <Button type="submit" loading={submitting} className="w-full">
+      <Button type="submit" loading={submitting} disabled={nameStatus === 'taken'} className="w-full">
         {submitting ? 'Creating organization…' : 'Create organization'}
       </Button>
       <p className="mt-4 text-center text-sm text-muted">
