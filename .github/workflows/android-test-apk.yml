@@ -142,16 +142,21 @@ jobs:
             || { echo "::error::production API_BASE_URL not compiled into the APK"; exit 1; }
 
           "$bt/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/certs.txt"
-          schemes=$(grep -E '^Verified using v[0-9.]+ scheme.*: true' "$RUNNER_TEMP/certs.txt" | sed 's/^Verified using \(v[0-9.]*\).*/\1/' | paste -sd, -)
-          dn=$(sed -n 's/^Signer #1 certificate DN: //p' "$RUNNER_TEMP/certs.txt")
-          cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt")
-          if grep -qi 'CN=Android Debug' <<<"$dn"; then
-            label="DEBUG/TEST-SIGNED"
-          else
+          echo "--- apksigner ($bt)"; grep -vi 'public key' "$RUNNER_TEMP/certs.txt"; echo "---"
+          schemes=$(sed -n 's/^Verified using \(v[0-9.]*\) scheme.*: true$/\1/p' "$RUNNER_TEMP/certs.txt" | paste -sd, -)
+          dn=$(grep -m1 'certificate DN: ' "$RUNNER_TEMP/certs.txt" | sed 's/.*certificate DN: //' || true)
+          cert=$(grep -m1 'certificate SHA-256 digest: ' "$RUNNER_TEMP/certs.txt" | sed 's/.*SHA-256 digest: //' || true)
+          [ -n "$dn" ] && [ -n "$cert" ] || { echo "::error::could not read the signing certificate"; exit 1; }
+          is_debug_cert=no
+          grep -qi 'CN=Android Debug' <<<"$dn" && is_debug_cert=yes
+          # The label follows the signing path that actually ran, cross-checked
+          # against the certificate.
+          if [ "$SIGNING" = release ]; then
+            [ "$is_debug_cert" = no ] || { echo "::error::release key configured but APK carries the debug certificate"; exit 1; }
             label="PRODUCTION RELEASE-SIGNED"
-          fi
-          if [ "$SIGNING" = release ] && [ "$label" != "PRODUCTION RELEASE-SIGNED" ]; then
-            echo "::error::release key configured but APK is debug-signed"; exit 1
+          else
+            [ "$is_debug_cert" = yes ] || { echo "::error::test build expected the debug certificate, got: $dn"; exit 1; }
+            label="DEBUG/TEST-SIGNED"
           fi
 
           mkdir -p "$RUNNER_TEMP/out"

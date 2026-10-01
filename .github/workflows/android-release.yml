@@ -155,12 +155,13 @@ jobs:
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
 
           "$bt/apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/certs.txt"
-          grep -E 'Verified using|Signer #1 certificate (DN|SHA-256)' "$RUNNER_TEMP/certs.txt"
+          grep -vi 'public key' "$RUNNER_TEMP/certs.txt"
           if grep -qi 'CN=Android Debug' "$RUNNER_TEMP/certs.txt"; then
             echo "::error::APK is signed with the Android debug certificate"; exit 1
           fi
-          cert=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/certs.txt")
-          [ -n "$cert" ] || { echo "::error::could not read signing certificate"; exit 1; }
+          dn=$(grep -m1 'certificate DN: ' "$RUNNER_TEMP/certs.txt" | sed 's/.*certificate DN: //' || true)
+          cert=$(grep -m1 'certificate SHA-256 digest: ' "$RUNNER_TEMP/certs.txt" | sed 's/.*SHA-256 digest: //' || true)
+          [ -n "$dn" ] && [ -n "$cert" ] || { echo "::error::could not read signing certificate"; exit 1; }
           if [ -n "$EXPECTED_CERT" ]; then
             want=$(echo "$EXPECTED_CERT" | tr -d ': ' | tr 'A-F' 'a-f')
             [ "$cert" = "$want" ] || { echo "::error::signing certificate $cert does not match ANDROID_RELEASE_CERT_SHA256"; exit 1; }
