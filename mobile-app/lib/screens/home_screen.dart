@@ -15,15 +15,40 @@ import 'token_history_screen.dart';
 
 /// Spec section 33 (mobile UX): "simple joining flow... avoid complex
 /// onboarding." One primary action, two secondary links.
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool _drawerOpen = false;
 
   @override
   Widget build(BuildContext context) {
     final activeTokens = context.watch<ActiveTokenProvider>().activeTokens;
 
+    // Home is the bottom of the navigation stack, so Android decides for
+    // itself that Back has nothing to pop and sends the app to the
+    // background — even with the menu open on top of it. Declaring that this
+    // route will not pop while the drawer is open is what hands that Back
+    // press to the app, which then closes the drawer.
+    return PopScope(
+      canPop: !_drawerOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _scaffoldKey.currentState?.closeDrawer();
+      },
+      child: _buildScaffold(context, activeTokens),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context, List<ActiveTokenSummary> activeTokens) {
     return Scaffold(
+      key: _scaffoldKey,
       drawer: const AppDrawer(),
+      onDrawerChanged: (open) => setState(() => _drawerOpen = open),
       appBar: AppBar(
         // Symbol + name rather than the full lockup: an app bar is far too
         // short for the wordmark artwork to stay legible.

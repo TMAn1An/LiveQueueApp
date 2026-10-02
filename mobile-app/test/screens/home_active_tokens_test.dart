@@ -7,6 +7,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -26,6 +27,7 @@ import 'package:mobile_app/repositories/queue_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
 import 'package:mobile_app/screens/home_screen.dart';
 import 'package:mobile_app/screens/live_tracking_screen.dart';
+import 'package:mobile_app/screens/token_confirmation_screen.dart';
 import 'package:mobile_app/services/active_token_storage_service.dart';
 import 'package:mobile_app/services/api_client.dart';
 import 'package:mobile_app/services/device_api_service.dart';
@@ -245,5 +247,109 @@ void main() {
 
     expect(find.text('Active Token · A002'), findsOneWidget);
     expect(find.textContaining('Active Tokens ('), findsNothing);
+  });
+
+  testWidgets('after joining, Back from Live Tracking goes Home — not back into the join screens',
+      (tester) async {
+    final apiClient = ApiClient(
+      httpClient: MockClient(
+        (_) async => _ok(_tokenJson(id: 'token-a', queueId: 'queue-a', serial: 'A002')),
+      ),
+      baseUrl: 'http://localhost:4000',
+    );
+    final active = ActiveTokenProvider(
+      tokenRepository: TokenRepository(
+        apiService: TokenApiService(apiClient),
+        socketService: SocketService(),
+      ),
+      storage: ActiveTokenStorageService(),
+    );
+    await tester.pumpWidget(_appUnder(apiClient, active));
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    final context = tester.element(find.byType(HomeScreen));
+
+    // The join flow as it stands when the token has just been created: its
+    // own screens are still on the stack beneath the confirmation.
+    navigator.push(MaterialPageRoute<void>(builder: (_) => const Scaffold(body: Text('join step'))));
+    Provider.of<QueueJoinProvider>(context, listen: false).createdToken =
+        LiveQueueToken.fromJson(_tokenJson(id: 'token-a', queueId: 'queue-a', serial: 'A002'));
+    navigator.push(MaterialPageRoute<void>(builder: (_) => const TokenConfirmationScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Track My Token'));
+    await tester.pumpAndSettle();
+    expect(find.byType(LiveTrackingScreen), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(find.text('join step'), findsNothing);
+    expect(find.byType(HomeScreen), findsOneWidget);
+    expect(find.text('Active Token · A002'), findsOneWidget);
+  });
+
+  // Home is the bottom of the stack, so Android only hands a Back press to
+  // the app if the app has said it will handle one. With the menu open it
+  // has to say so — otherwise Back sends the whole app to the background
+  // and leaves the drawer open behind it.
+  group('Back with the navigation menu open', () {
+    Future<List<bool>> frameworkHandlesBackCalls(WidgetTester tester, Future<void> Function() body) async {
+      final calls = <bool>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'SystemNavigator.setFrameworkHandlesBack') {
+          calls.add(call.arguments as bool);
+        }
+        return null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null),
+      );
+      await body();
+      return calls;
+    }
+
+    ApiClient client() => ApiClient(
+          httpClient: MockClient((_) async => _ok(_tokenJson(id: 'x', queueId: 'x', serial: 'x'))),
+          baseUrl: 'http://localhost:4000',
+        );
+
+    testWidgets('the app claims the Back press while the menu is open, and releases it after', (tester) async {
+      final apiClient = client();
+      final active = await _twoTokenProvider(apiClient);
+
+      final calls = await frameworkHandlesBackCalls(tester, () async {
+        await tester.pumpWidget(_appUnder(apiClient, active));
+        // The framework only reports to the platform once the app is
+        // running in the foreground, as it is on a phone.
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Open navigation menu'));
+        await tester.pumpAndSettle();
+      });
+      expect(calls.last, isTrue, reason: 'Back must reach the app while the menu is open');
+
+      final afterClose = await frameworkHandlesBackCalls(tester, () async {
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+      });
+      expect(afterClose.last, isFalse, reason: 'with the menu closed, Back leaves the app as usual');
+    });
+
+    testWidgets('Back closes the menu and stays on Home', (tester) async {
+      final apiClient = client();
+      final active = await _twoTokenProvider(apiClient);
+      await tester.pumpWidget(_appUnder(apiClient, active));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Open navigation menu'));
+      await tester.pumpAndSettle();
+      expect(find.text('Scan / Join Queue'), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Scan / Join Queue'), findsNothing);
+      expect(find.byType(HomeScreen), findsOneWidget);
+    });
   });
 }
