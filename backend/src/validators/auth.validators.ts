@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE } from './latinText';
 
 const PASSWORD_MIN_LENGTH = 8;
 export const passwordSchema = z
@@ -11,7 +12,12 @@ export const emailSchema = z.string().trim().toLowerCase().email('A valid email 
 
 export const registerSchema = {
   body: z.object({
-    organizationName: z.string().trim().min(2, 'Organization name is required.').max(120),
+    organizationName: z
+      .string()
+      .trim()
+      .min(2, 'Organization name is required.')
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE),
     email: emailSchema,
     password: passwordSchema,
     // ADR-035: the browser's own IANA zone, so an organization starts on a
@@ -60,7 +66,12 @@ export const changePasswordSchema = {
  * always means "registrable". */
 export const organizationNameAvailabilitySchema = {
   query: z.object({
-    name: z.string().trim().min(2, 'Organization name is required.').max(120),
+    name: z
+      .string()
+      .trim()
+      .min(2, 'Organization name is required.')
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE),
   }),
 };
 

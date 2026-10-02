@@ -14,6 +14,8 @@ import { Spinner } from '../components/Spinner';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PageHeader } from '../components/PageHeader';
 import { OrganizationNameStatus } from '../components/OrganizationNameStatus';
+import { FieldError } from '../components/FieldError';
+import { latinNameError } from '../utils/latinText';
 import { useOrganizationNameAvailability } from '../hooks/useOrganizationNameAvailability';
 import { ApiError } from '../api/client';
 import { browserTimezone, supportedTimezones, timezoneOptions } from '../utils/timezone';
@@ -31,6 +33,7 @@ export function OrganizationSettingsPage() {
   const [name, setName] = useState('');
   const [editing, setEditing] = useState(false);
   const nameStatus = useOrganizationNameAvailability(name, organization?.name);
+  const nameScriptError = latinNameError(name);
   const [confirmName, setConfirmName] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -104,10 +107,11 @@ export function OrganizationSettingsPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 aria-describedby="org-name-status"
-                aria-invalid={nameStatus === 'taken' || undefined}
-                className="w-full max-w-md rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+                aria-invalid={nameStatus === 'taken' || Boolean(nameScriptError) || undefined}
+                className="w-full max-w-md h-9 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
               />
               <OrganizationNameStatus status={nameStatus} id="org-name-status" />
+              <FieldError message={nameScriptError} />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="org-timezone">
@@ -118,7 +122,7 @@ export function OrganizationSettingsPage() {
                   id="org-timezone"
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
-                  className="w-full max-w-md rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+                  className="w-full max-w-md h-9 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
                 >
                   <option value="">Not set</option>
                   {timezoneOptions(zones, organization.timezone, browserTimezone()).map((zone) => (
@@ -133,7 +137,7 @@ export function OrganizationSettingsPage() {
                   value={timezone}
                   onChange={(e) => setTimezone(e.target.value)}
                   placeholder="Asia/Dhaka"
-                  className="w-full max-w-md rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+                  className="w-full max-w-md h-9 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
                 />
               )}
               <p className="mt-1 text-xs text-muted">
@@ -144,7 +148,7 @@ export function OrganizationSettingsPage() {
             <div className="flex gap-2 pt-2 border-t border-border">
               <Button
                 loading={updateOrganization.isPending}
-                disabled={nameStatus === 'taken'}
+                disabled={nameStatus === 'taken' || Boolean(nameScriptError)}
                 onClick={() => void handleSave()}
               >
                 Save
@@ -222,7 +226,7 @@ export function OrganizationSettingsPage() {
                 value={confirmName}
                 onChange={(e) => setConfirmName(e.target.value)}
                 placeholder="Enter organization name"
-                className="w-full max-w-sm rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-rose-500"
+                className="w-full max-w-sm h-9 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-rose-500"
               />
               <div className="flex gap-2 pt-2">
                 <Button

@@ -6,6 +6,8 @@ import {
   useUpdateService,
 } from '../hooks/useServices';
 import { Button } from './Button';
+import { FieldError } from './FieldError';
+import { latinNameError } from '../utils/latinText';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StatusBadge } from './StatusBadge';
 import { PermissionGate } from './PermissionGate';
@@ -23,6 +25,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
   const [duration, setDuration] = useState(service.durationMinutes);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
+  const nameError = latinNameError(name);
   const showRowError = (err: unknown) => setRowError(actionErrorMessage(err));
 
   if (editing) {
@@ -31,9 +34,12 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
         <td className="py-3 pr-4">
           <input
             value={name}
+            aria-label="Service name"
+            aria-invalid={nameError ? true : undefined}
             onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-fg focus:border-brand-500"
+            className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
           />
+          <FieldError message={nameError} />
         </td>
         <td className="py-3 pr-4">
           <div className="flex items-center gap-1.5">
@@ -41,8 +47,9 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
               type="number"
               min={1}
               value={duration}
+              aria-label="Duration in minutes"
               onChange={(e) => setDuration(Number(e.target.value))}
-              className="w-20 rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-sm text-fg focus:border-brand-500"
+              className="h-9 w-20 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
             />
             <span className="text-xs text-muted">min</span>
           </div>
@@ -54,6 +61,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
           <div className="flex items-center gap-2">
             <Button
               loading={updateService.isPending}
+              disabled={!name.trim() || Boolean(nameError)}
               onClick={() =>
                 updateService.mutate(
                   { serviceId: service.id, input: { serviceName: name, durationMinutes: duration } },
@@ -140,6 +148,8 @@ export function ServicesManager({
   const createService = useCreateService(queueId);
   const [name, setName] = useState('');
   const [duration, setDuration] = useState(5);
+  const [error, setError] = useState<string | null>(null);
+  const nameError = latinNameError(name);
 
   return (
     <div className="space-y-4">
@@ -172,37 +182,47 @@ export function ServicesManager({
           </h3>
           <div className="flex flex-wrap items-end gap-3">
             <div className="w-full sm:max-w-xs">
-              <label className="mb-1 block text-xs font-medium text-fg-soft">Service name</label>
+              <label htmlFor={`new-service-name-${queueId}`} className="mb-1 block text-xs font-medium text-fg-soft">Service name</label>
               <input
+                id={`new-service-name-${queueId}`}
                 value={name}
                 placeholder="e.g. Consultation, Prescription Pickup"
+                aria-invalid={nameError ? true : undefined}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+                className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs font-medium text-fg-soft">Duration (min)</label>
+              <label htmlFor={`new-service-duration-${queueId}`} className="mb-1 block text-xs font-medium text-fg-soft">Duration (min)</label>
               <input
+                id={`new-service-duration-${queueId}`}
                 type="number"
                 min={1}
                 value={duration}
                 onChange={(e) => setDuration(Number(e.target.value))}
-                className="w-24 rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+                className="h-9 w-24 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
               />
             </div>
             <Button
-              disabled={!name}
+              disabled={!name.trim() || Boolean(nameError)}
               loading={createService.isPending}
-              onClick={() =>
+              onClick={() => {
+                setError(null);
                 createService.mutate(
-                  { serviceName: name, durationMinutes: duration },
-                  { onSuccess: () => setName('') },
-                )
-              }
+                  { serviceName: name.trim(), durationMinutes: duration },
+                  {
+                    onSuccess: () => setName(''),
+                    // Used to fail silently; a refusal now says why.
+                    onError: (err) => setError(actionErrorMessage(err)),
+                  },
+                );
+              }}
             >
               {createService.isPending ? 'Adding…' : 'Add Service'}
             </Button>
           </div>
+          <FieldError message={nameError} />
+          {error && <div className="mt-2"><ErrorBanner message={error} /></div>}
         </div>
       </PermissionGate>
     </div>

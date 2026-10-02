@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  LATIN_NAME_PATTERN,
+  LATIN_NAME_MESSAGE,
+  LATIN_TEXT_PATTERN,
+  LATIN_TEXT_MESSAGE,
+} from './latinText';
 
 /**
  * The repeat-visit identity policy (ADR-034). Every field is optional here
@@ -64,9 +70,24 @@ const scheduleFields = {
 
 export const createQueueSchema = {
   body: z.object({
-    name: z.string().trim().min(1, 'Queue name is required.').max(120),
-    description: z.string().trim().max(1000).optional(),
-    clientTerminology: z.string().trim().max(60).optional(),
+    name: z
+      .string()
+      .trim()
+      .min(1, 'Queue name is required.')
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE),
+    description: z
+      .string()
+      .trim()
+      .max(1000)
+      .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE)
+      .optional(),
+    clientTerminology: z
+      .string()
+      .trim()
+      .max(60)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
     tokenPrefix: z.string().trim().min(1, 'Token prefix is required.').max(10),
     startingNumber: z.number().int().positive().default(1),
     baseTimeMinutes: z.number().int().positive().default(5),
@@ -84,9 +105,25 @@ export const createQueueSchema = {
 export const updateQueueSchema = {
   params: queueIdParams,
   body: z.object({
-    name: z.string().trim().min(1).max(120).optional(),
-    description: z.string().trim().max(1000).optional(),
-    clientTerminology: z.string().trim().max(60).optional(),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
+    description: z
+      .string()
+      .trim()
+      .max(1000)
+      .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE)
+      .optional(),
+    clientTerminology: z
+      .string()
+      .trim()
+      .max(60)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
     tokenPrefix: z.string().trim().min(1).max(10).optional(),
     startingNumber: z.number().int().positive().optional(),
     baseTimeMinutes: z.number().int().positive().optional(),

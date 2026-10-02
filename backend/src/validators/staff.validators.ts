@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE } from './latinText';
 import { emailSchema, passwordSchema } from './auth.validators';
 
 // OWNER is deliberately excluded — an organization has exactly one owner,
@@ -27,7 +28,12 @@ export const listStaffSchema = {
 // resetting an account somebody has lost access to.
 export const createStaffSchema = {
   body: z.object({
-    name: z.string().trim().min(1, 'Name is required.').max(120),
+    name: z
+      .string()
+      .trim()
+      .min(1, 'Name is required.')
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE),
     email: emailSchema,
     role: manageableRole,
   }),
@@ -36,7 +42,13 @@ export const createStaffSchema = {
 export const updateStaffSchema = {
   params: staffIdParams,
   body: z.object({
-    name: z.string().trim().min(1).max(120).optional(),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
     email: emailSchema.optional(),
     password: passwordSchema.optional(),
     role: manageableRole.optional(),

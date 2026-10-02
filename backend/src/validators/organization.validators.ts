@@ -1,8 +1,15 @@
 import { z } from 'zod';
+import { LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE } from './latinText';
 
 export const updateOrganizationSchema = {
   body: z.object({
-    name: z.string().trim().min(2, 'Organization name is required.').max(120).optional(),
+    name: z
+      .string()
+      .trim()
+      .min(2, 'Organization name is required.')
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
     // ADR-035: the organization's clock. Null clears it back to unset.
     timezone: z.string().trim().min(1).max(64).nullable().optional(),
   }),

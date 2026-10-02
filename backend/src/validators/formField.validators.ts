@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE } from './latinText';
 import { queueIdParams } from './queue.validators';
 
 const formFieldType = z.enum([
@@ -19,11 +20,19 @@ const formFieldSchema = z.object({
     .min(1, 'Field key is required.')
     .max(60)
     .regex(/^[a-zA-Z0-9_]+$/, 'Field key may only contain letters, numbers, and underscores.'),
-  label: z.string().trim().min(1, 'Field label is required.').max(200),
+  label: z
+    .string()
+    .trim()
+    .min(1, 'Field label is required.')
+    .max(200)
+    .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE),
   type: formFieldType,
   required: z.boolean().default(false),
-  placeholder: z.string().trim().max(200).optional(),
-  options: z.array(z.string().trim().min(1)).max(100).default([]),
+  placeholder: z.string().trim().max(200).regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE).optional(),
+  options: z
+    .array(z.string().trim().min(1).regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE))
+    .max(100)
+    .default([]),
   sortOrder: z.number().int().min(0).optional(),
 });
 

@@ -14,6 +14,8 @@ import { useStaffList } from '../hooks/useStaff';
 import { Card } from '../components/Card';
 import { InfoHelp } from '../components/InfoHelp';
 import { Button } from '../components/Button';
+import { FieldError } from '../components/FieldError';
+import { latinNameError } from '../utils/latinText';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { StatusBadge } from '../components/StatusBadge';
@@ -53,6 +55,7 @@ function CounterRow({
   const { data: staffResult } = useStaffList(1, 100);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(counter.name);
+  const nameError = latinNameError(name);
 
   const staffName = staffResult?.data.find((s) => s.id === counter.staffId)?.name ?? '—';
 
@@ -60,11 +63,16 @@ function CounterRow({
     <tr className="border-b border-border transition-colors hover:bg-subtle/50">
       <td className="py-3 pr-4 font-semibold text-fg">
         {editing ? (
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="rounded-md border border-border-strong px-2 py-1 text-sm bg-surface text-fg focus:border-brand-500"
-          />
+          <div>
+            <input
+              value={name}
+              aria-label="Counter name"
+              aria-invalid={nameError ? true : undefined}
+              onChange={(e) => setName(e.target.value)}
+              className="h-9 rounded-md border border-border-strong px-3 text-sm bg-surface text-fg focus:border-brand-500"
+            />
+            <FieldError message={nameError} />
+          </div>
         ) : (
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-brand-500" />
@@ -92,6 +100,7 @@ function CounterRow({
               <>
                 <Button
                   loading={updateCounter.isPending}
+                  disabled={!name.trim() || Boolean(nameError)}
                   onClick={() => {
                     onError('');
                     updateCounter.mutate(
@@ -208,6 +217,7 @@ export function QueueCountersPage() {
   const createCounter = useCreateCounter(queueId ?? '');
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const newNameError = latinNameError(name);
 
   if (!queueId) return null;
 
@@ -263,16 +273,18 @@ export function QueueCountersPage() {
             </h3>
             <div className="flex flex-wrap items-end gap-3">
               <div className="w-full sm:max-w-xs">
-                <label className="mb-1 block text-xs text-muted">New counter name</label>
+                <label htmlFor="new-counter-name" className="mb-1 block text-xs text-muted">New counter name</label>
                 <input
+                  id="new-counter-name"
                   value={name}
+                  aria-invalid={newNameError ? true : undefined}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g. Counter 1, Window A"
-                  className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+                  className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
                 />
               </div>
               <Button
-                disabled={!name}
+                disabled={!name.trim() || Boolean(newNameError)}
                 loading={createCounter.isPending}
                 onClick={() => {
                   setError(null);
@@ -285,6 +297,7 @@ export function QueueCountersPage() {
                 {createCounter.isPending ? 'Adding…' : 'Add Counter'}
               </Button>
             </div>
+            <FieldError message={newNameError} />
           </div>
         </PermissionGate>
       </Card>
