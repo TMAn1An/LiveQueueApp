@@ -54,19 +54,14 @@ export async function listQueues(organizationId: string) {
   // queue — the numbers a supervisor actually scans for are "is anyone
   // waiting" and "is anyone serving them".
   const queueIds = queues.map((queue) => queue.id);
-  const [waitingGroups, activeCounterGroups] = await Promise.all([
-    prisma.token.groupBy({
-      by: ['queueId'],
-      where: { organizationId, queueId: { in: queueIds }, status: 'WAITING' },
-      _count: { _all: true },
-    }),
+  const [waitingByQueue, activeCounterGroups] = await Promise.all([
+    countWaitingByQueue(organizationId, queueIds),
     prisma.counter.groupBy({
       by: ['queueId'],
       where: { queueId: { in: queueIds }, status: 'ACTIVE' },
       _count: { _all: true },
     }),
   ]);
-  const waitingByQueue = new Map(waitingGroups.map((row) => [row.queueId, row._count._all]));
   const activeCountersByQueue = new Map(
     activeCounterGroups.map((row) => [row.queueId, row._count._all]),
   );
@@ -79,9 +74,40 @@ export async function listQueues(organizationId: string) {
   }));
 }
 
+/**
+ * The people waiting in each queue right now, in one grouped query for any
+ * number of queues (no per-queue round trip).
+ *
+ * "Waiting" means WAITING and in the line now: a token booked into a session
+ * that has not started yet is not in the callable line (ADR-048) and is not
+ * counted, matching how positions are numbered. CALLED, IN_PROGRESS and
+ * every terminal status are excluded by the status filter. Scoped to the
+ * organization and grouped per queue, so queues never mix.
+ */
+export async function countWaitingByQueue(
+  organizationId: string,
+  queueIds: string[],
+  now: Date = new Date(),
+): Promise<Map<string, number>> {
+  if (queueIds.length === 0) return new Map();
+  const groups = await prisma.token.groupBy({
+    by: ['queueId'],
+    where: {
+      organizationId,
+      queueId: { in: queueIds },
+      status: 'WAITING',
+      OR: [{ assignedSessionStartsAt: null }, { assignedSessionStartsAt: { lte: now } }],
+    },
+    _count: { _all: true },
+  });
+  return new Map(groups.map((row) => [row.queueId, row._count._all]));
+}
+
 export async function getQueue(organizationId: string, queueId: string) {
   const queue = await findQueueOrThrow(organizationId, queueId);
-  return serializeQueue(queue);
+  const waiting = await countWaitingByQueue(organizationId, [queue.id]);
+  // The Live Queue header reads this; it was previously only on the list.
+  return { ...serializeQueue(queue), waitingCount: waiting.get(queue.id) ?? 0 };
 }
 
 export async function createQueue(organizationId: string, input: CreateQueueInput) {

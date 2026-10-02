@@ -80,8 +80,13 @@ export function useOrganizationSocket(organizationId: string | null): void {
           void queryClient.invalidateQueries({ queryKey: ['dashboard', 'stats'] });
           break;
         default:
-          // All token.* events affect the live dashboard table and stats.
+          // All token.* events affect the live dashboard table and stats,
+          // and the waiting counts shown on queue headers and the list.
           void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+          void queryClient.invalidateQueries({ queryKey: ['queues'] });
+          if (envelope.queueId) {
+            void queryClient.invalidateQueries({ queryKey: ['queue', envelope.queueId] });
+          }
           break;
       }
     }

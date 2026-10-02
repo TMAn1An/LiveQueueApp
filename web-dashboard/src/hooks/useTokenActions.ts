@@ -12,6 +12,9 @@ import type { SkipReasonCode } from '../types/terminalNotes';
  */
 function invalidateLiveData(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  // Waiting counts on the queue header and list.
+  void queryClient.invalidateQueries({ queryKey: ['queue'] });
+  void queryClient.invalidateQueries({ queryKey: ['queues'] });
 }
 
 export function useStartToken() {

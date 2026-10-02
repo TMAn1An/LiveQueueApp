@@ -126,6 +126,20 @@ beforeEach(() => {
 });
 
 describe('QueueLivePage', () => {
+  it.each([
+    [0, '0 people waiting'],
+    [1, '1 person waiting'],
+    [2, '2 people waiting'],
+    [17, '17 people waiting'],
+  ])('shows the queue’s own waiting count: %i → "%s"', (waitingCount, text) => {
+    vi.mocked(useQueue).mockReturnValue({
+      data: queue({ waitingCount }),
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueue>);
+    renderPage();
+    expect(screen.getByText(text)).toBeInTheDocument();
+  });
+
   it('asks the API for this queue’s line only', () => {
     renderPage();
 
