@@ -12,6 +12,7 @@ import '../widgets/reminder_caution.dart';
 import '../widgets/dual_time_row.dart';
 import '../widgets/status_badge.dart';
 import 'home_screen.dart';
+import 'queue_details_screen.dart';
 
 /// Spec section 7.17 "Mobile Live Tracking" — shows token number, status,
 /// position, estimated wait, selected service, counter when called, plus
@@ -199,6 +200,22 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   ],
                   if (token.status == TokenStatus.called && token.counter != null)
                     _InfoRow(label: 'Counter', value: token.counter!.name),
+                  // ADR-063: the queue's own details — hours, repeat-visit
+                  // rule, services — are one tap away here, now that they are
+                  // no longer a screen the customer passes through to join.
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.info_outline),
+                      label: const Text('Queue details'),
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => QueueDetailsScreen(queueId: token.queueId),
+                        ),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 24),
                   if (token.status == TokenStatus.called)
                     Container(
