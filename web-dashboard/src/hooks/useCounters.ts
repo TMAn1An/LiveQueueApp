@@ -76,10 +76,12 @@ export function useAssignableStaff(counterId: string, enabled = true) {
 export function useAssignCounter(queueId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ counterId, staffId }: { counterId: string; staffId: string | null }) =>
-      counterApi.assignCounter(counterId, staffId),
+    mutationFn: ({ counterId, staffId, move }: { counterId: string; staffId: string | null; move?: boolean }) =>
+      counterApi.assignCounter(counterId, staffId, move),
     onSuccess: () => {
       invalidateCounters(queryClient, queueId);
+      // A move releases a counter that may belong to another queue.
+      void queryClient.invalidateQueries({ queryKey: ['counters'] });
       void queryClient.invalidateQueries({ queryKey: ['assignableStaff'] });
       void queryClient.invalidateQueries({ queryKey: ['staff'] });
     },

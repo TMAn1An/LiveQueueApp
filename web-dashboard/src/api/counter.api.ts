@@ -17,11 +17,15 @@ export function setCounterStatus(counterId: string, status: CounterStatus) {
   return apiFetch<Counter>(`/api/counters/${counterId}/status`, { method: 'PATCH', body: { status } });
 }
 
-/** `staffId: null` clears the assignment, freeing that person for any counter. */
-export function assignCounter(counterId: string, staffId: string | null) {
+/**
+ * `staffId: null` clears the assignment, freeing that person for any counter.
+ * `move: true` moves someone who holds another counter here, releasing that
+ * one in the same step (ADR-064); without it such a request is refused.
+ */
+export function assignCounter(counterId: string, staffId: string | null, move = false) {
   return apiFetch<Counter>(`/api/counters/${counterId}/assign`, {
     method: 'PATCH',
-    body: { staffId },
+    body: move ? { staffId, move: true } : { staffId },
   });
 }
 

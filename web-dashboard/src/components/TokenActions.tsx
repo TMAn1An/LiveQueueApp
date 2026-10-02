@@ -42,10 +42,10 @@ import type { WaitingActionEligibility } from '../types/dashboard';
  * ADR-064: there is no per-row Call and no counter or staff picker. People
  * are claimed only through "Serve next" (ServeNextPanel), which takes the
  * next eligible person for the signed-in person at their own counter. A
- * person already at a counter is acted on only by the staff member assigned
- * to that counter; everyone else sees "At another counter". OWNER and ADMIN
- * do not serve (no operate_tokens), so they see no actions at all. The
- * backend enforces all of this regardless.
+ * person already at a counter is acted on only by the operator assigned to
+ * that counter — owner, admin or staff alike; everyone else sees "At another
+ * counter", and someone with no counter sees no actions. The backend
+ * enforces all of this regardless.
  *
  * ADR-041: `requiresVerificationCode` is the queue's service-start setting.
  * When false, Start starts service in one click and no code input exists.
@@ -96,9 +96,8 @@ export function TokenActions({
   const [verificationCodeInput, setVerificationCodeInput] = useState('');
   const [startError, setStartError] = useState<string | null>(null);
   const { data: myCounter } = useMyCounter();
-  // ADR-064: only STAFF serve (operate_tokens, gated below), and only the
-  // person at their own counter — or the front of their own counter's queue.
-  // There is no owner/admin override.
+  // ADR-064: any operator acts only on the person at their own counter — or
+  // the front of their own counter's queue. There is no override for any role.
   const mayActHere = counterId ? myCounter?.id === counterId : myCounter?.queueId === queueId;
   const startToken = useStartToken();
   const completeToken = useCompleteToken();

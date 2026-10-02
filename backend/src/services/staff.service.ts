@@ -294,11 +294,11 @@ export async function updateStaff(
 
   const staff = await prisma.$transaction(async (tx) => {
     // ADR-064: someone called or being served at this person's counter can
-    // only be finished by them, so they keep their counter — and stay STAFF
-    // and active — until that visit is resolved.
+    // only be finished by them, so they stay active until that visit is
+    // resolved. A role change does not touch their counter: every role may
+    // hold one and serve from it.
     const leavesServing =
-      (effectiveRole !== 'STAFF' && existing.role === 'STAFF') ||
-      (input.status !== undefined && input.status !== 'ACTIVE' && existing.status === 'ACTIVE');
+      input.status !== undefined && input.status !== 'ACTIVE' && existing.status === 'ACTIVE';
     if (leavesServing) {
       await assertNoActiveServiceForStaff(tx, staffId);
     }
@@ -314,12 +314,6 @@ export async function updateStaff(
         ...(activatesInvitee ? { invitationTokenHash: null, invitationExpiresAt: null } : {}),
       },
     });
-    // ADR-064: only STAFF stand at counters. Someone promoted out of STAFF
-    // leaves their counter in the same write; a person they were serving
-    // stays at that counter for whoever is assigned to it next.
-    if (effectiveRole !== 'STAFF') {
-      await tx.counter.updateMany({ where: { staffId }, data: { staffId: null } });
-    }
     return updated;
   });
 

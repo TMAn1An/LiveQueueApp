@@ -156,7 +156,7 @@ describe('Counter staff assignment', () => {
       .send({ staffId: worker.staffId });
 
     expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('STAFF_ALREADY_ASSIGNED');
+    expect(res.body.error.code).toBe('OPERATOR_ALREADY_ASSIGNED');
 
     // Counter B must remain unassigned — the rejected call had no side effect.
     const check = await api()

@@ -5,7 +5,6 @@ import { authenticate } from '../middleware/authenticate';
 import { optionalAuthenticate } from '../middleware/optionalAuthenticate';
 import { publicRateLimiter, sensitiveRateLimiter, tokenCreateRateLimiter } from '../middleware/rateLimit';
 import { requirePermission } from '../middleware/requirePermission';
-import { SERVING_STAFF_ONLY_DENIAL } from '../services/counterAccess.service';
 import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
@@ -82,7 +81,7 @@ router.post(
   '/:tokenId/call',
   authenticate,
   requireVerified,
-  requirePermission('operate_tokens', SERVING_STAFF_ONLY_DENIAL),
+  requirePermission('operate_tokens'),
   validate(callTokenSchema),
   tokenController.call,
 );
@@ -95,7 +94,7 @@ router.post(
   sensitiveRateLimiter,
   authenticate,
   requireVerified,
-  requirePermission('operate_tokens', SERVING_STAFF_ONLY_DENIAL),
+  requirePermission('operate_tokens'),
   validate(startTokenSchema),
   tokenController.start,
 );
@@ -104,7 +103,7 @@ router.post(
   '/:tokenId/complete',
   authenticate,
   requireVerified,
-  requirePermission('operate_tokens', SERVING_STAFF_ONLY_DENIAL),
+  requirePermission('operate_tokens'),
   validate(completeTokenSchema),
   tokenController.complete,
 );
@@ -113,7 +112,7 @@ router.post(
   '/:tokenId/skip',
   authenticate,
   requireVerified,
-  requirePermission('operate_tokens', SERVING_STAFF_ONLY_DENIAL),
+  requirePermission('operate_tokens'),
   validate(skipTokenSchema),
   tokenController.skip,
 );
@@ -121,7 +120,7 @@ router.patch(
   '/:tokenId/duration',
   authenticate,
   requireVerified,
-  requirePermission('operate_tokens', SERVING_STAFF_ONLY_DENIAL),
+  requirePermission('operate_tokens'),
   validate(setRequiredDurationSchema),
   tokenController.setRequiredDuration,
 );

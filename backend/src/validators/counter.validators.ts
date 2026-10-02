@@ -50,6 +50,9 @@ export const assignCounterSchema = {
     // Null clears the assignment — the same endpoint both assigns and
     // unassigns, so the dashboard's one dropdown maps to one call.
     staffId: z.string().uuid('staffId must be a valid id.').nullable(),
+    // ADR-064: an operator already on another counter is moved here only
+    // when this says so; otherwise the request is refused.
+    move: z.boolean().optional(),
   }),
 };
 

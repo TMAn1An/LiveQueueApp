@@ -66,7 +66,7 @@ describe('counter staff assignment', () => {
     const res = await assign(org.accessToken, org.second.id, staff.id);
 
     expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('STAFF_ALREADY_ASSIGNED');
+    expect(res.body.error.code).toBe('OPERATOR_ALREADY_ASSIGNED');
     // The original assignment is untouched — never silently moved.
     const first = await prisma.counter.findUniqueOrThrow({ where: { id: org.first.id } });
     expect(first.staffId).toBe(staff.id);
@@ -114,7 +114,7 @@ describe('counter staff assignment', () => {
     const res = await assign(org.accessToken, org.first.id, suspended.id);
 
     expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('STAFF_NOT_ASSIGNABLE');
+    expect(res.body.error.code).toBe('OPERATOR_NOT_ASSIGNABLE');
   });
 
   /**
@@ -140,7 +140,9 @@ describe('counter staff assignment', () => {
 });
 
 describe('GET /api/counters/:counterId/available-staff', () => {
-  it('offers free active staff and hides anyone holding another counter', async () => {
+  // ADR-064: someone on another counter is listed with that counter, so the
+  // dashboard can offer an explicit move — never as freely assignable.
+  it('offers free active people, and marks anyone holding another counter', async () => {
     const org = await setupOrg();
     const free = await addStaff(org.organizationId, 'Free Fiona');
     const busy = await addStaff(org.organizationId, 'Busy Bilal');
@@ -149,9 +151,11 @@ describe('GET /api/counters/:counterId/available-staff', () => {
     const res = await availableStaff(org.accessToken, org.first.id);
 
     expect(res.status).toBe(200);
-    const ids = res.body.data.map((s: { id: string }) => s.id);
-    expect(ids).toContain(free.id);
-    expect(ids).not.toContain(busy.id);
+    const byId = new Map(
+      res.body.data.map((s: { id: string; currentCounter: unknown }) => [s.id, s.currentCounter]),
+    );
+    expect(byId.get(free.id)).toBeNull();
+    expect(byId.get(busy.id)).toMatchObject({ id: org.second.id });
   });
 
   it("still offers the counter's own current holder", async () => {
@@ -178,7 +182,8 @@ describe('GET /api/counters/:counterId/available-staff', () => {
     // explicitly unassigned.
     const res = await availableStaff(org.accessToken, org.first.id);
 
-    expect(res.body.data.map((s: { id: string }) => s.id)).not.toContain(busy.id);
+    const entry = res.body.data.find((s: { id: string }) => s.id === busy.id);
+    expect(entry.currentCounter).toMatchObject({ id: org.second.id });
   });
 
   it('excludes suspended staff', async () => {

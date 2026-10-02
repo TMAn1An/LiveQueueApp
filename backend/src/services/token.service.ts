@@ -1346,8 +1346,10 @@ async function transitionToken(
   terminalNote: Prisma.TokenUpdateManyMutationInput = {},
 ): Promise<{ token: SafeToken; previousStatus: TokenStatus }> {
   const token = await findTokenScoped(actor.organizationId, tokenId);
-  assertValidTransition(token.status, targetStatus);
+  // Access first: someone at another counter learns nothing about the
+  // person's state, only that they are not theirs.
   await assertMayActOnToken(actor, token);
+  assertValidTransition(token.status, targetStatus);
   const previousStatus = token.status;
 
   // The guard and the compare-and-swap share one transaction so an
@@ -1466,8 +1468,8 @@ export async function startToken(
   verificationCode: string | undefined,
 ) {
   const token = await findTokenScoped(actor.organizationId, tokenId);
-  assertValidTransition(token.status, 'IN_PROGRESS');
   await assertMayActOnToken(actor, token);
+  assertValidTransition(token.status, 'IN_PROGRESS');
 
   const queue = await prisma.queue.findUniqueOrThrow({
     where: { id: token.queueId },

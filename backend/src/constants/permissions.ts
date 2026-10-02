@@ -16,20 +16,17 @@ export const PERMISSIONS = [
 export type Permission = (typeof PERMISSIONS)[number];
 
 // Frozen RBAC policy: exactly three roles, each with a fixed permission set.
-// OWNER and ADMIN get every management permission — the two operations that
-// must stay Owner-only (deleting the Owner, deleting the organization) are
-// enforced by dedicated role checks elsewhere (staff.service.ts,
-// organization.service.ts), never by a permission, per that policy's
-// explicit "hard business rule, not a permission check" requirement.
+// OWNER and ADMIN both get full access — the two operations that must stay
+// Owner-only (deleting the Owner, deleting the organization) are enforced by
+// dedicated role checks elsewhere (staff.service.ts, organization.service.ts),
+// never by a permission, per that policy's explicit "hard business rule, not
+// a permission check" requirement.
 //
-// ADR-064: serving people (operate_tokens — claim, start, complete, skip,
-// adjust time) is STAFF work. Owners and admins decide who stands at which
-// counter; they do not serve, and they do not act on people at a counter.
-const MANAGEMENT_PERMISSIONS: Permission[] = PERMISSIONS.filter((p) => p !== 'operate_tokens');
-export const OWNER_PERMISSIONS: Permission[] = [...MANAGEMENT_PERMISSIONS];
-export const ADMIN_PERMISSIONS: Permission[] = [...MANAGEMENT_PERMISSIONS];
-// ADR-064: STAFF serve; they do not create, rename, open/close, delete or
-// staff counters — that is owner/admin management (manage_counters).
+// ADR-064: operate_tokens says a role *may* serve; whether someone actually
+// can is decided by their counter assignment (counterAccess.service.ts).
+// Every role may serve from the one counter assigned to them.
+export const OWNER_PERMISSIONS: Permission[] = [...PERMISSIONS];
+export const ADMIN_PERMISSIONS: Permission[] = [...PERMISSIONS];
 export const STAFF_PERMISSIONS: Permission[] = [
   'operate_tokens',
   'view_reports',

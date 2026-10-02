@@ -125,7 +125,7 @@ describe('QueueCountersPage — staff availability', () => {
 
     renderPage();
 
-    const select = screen.getByLabelText('Assigned staff');
+    const select = screen.getByLabelText('Assigned operator');
     const options = within(select).getAllByRole('option').map((o) => o.textContent);
     expect(options).toEqual(['Unassigned', 'Jane', 'Kara']);
     expect(options).not.toContain('Busy Bilal');
@@ -135,7 +135,7 @@ describe('QueueCountersPage — staff availability', () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.selectOptions(screen.getByLabelText('Assigned staff'), '');
+    await user.selectOptions(screen.getByLabelText('Assigned operator'), '');
 
     expect(assignMutate).toHaveBeenCalledWith(
       expect.objectContaining({ counterId: 'c1', staffId: null }),
@@ -151,7 +151,7 @@ describe('QueueCountersPage — staff availability', () => {
 
     renderPage();
 
-    expect(screen.getByLabelText('Assigned staff')).toBeDisabled();
+    expect(screen.getByLabelText('Assigned operator')).toBeDisabled();
     expect(screen.getByText('Assigning…')).toBeInTheDocument();
   });
 
@@ -165,7 +165,7 @@ describe('QueueCountersPage — staff availability', () => {
 
     renderPage();
 
-    expect(screen.getByLabelText('Assigned staff')).toBeEnabled();
+    expect(screen.getByLabelText('Assigned operator')).toBeEnabled();
     expect(screen.queryByText('Assigning…')).not.toBeInTheDocument();
   });
 
@@ -177,7 +177,7 @@ describe('QueueCountersPage — staff availability', () => {
 
     renderPage();
 
-    expect(screen.getByLabelText('Assigned staff')).toBeDisabled();
+    expect(screen.getByLabelText('Assigned operator')).toBeDisabled();
   });
 });
 
@@ -191,7 +191,7 @@ describe('QueueCountersPage — who may assign staff', () => {
   it('offers the assignment dropdown to an owner or admin', () => {
     renderPage();
 
-    expect(screen.getByLabelText('Assigned staff')).toBeInTheDocument();
+    expect(screen.getByLabelText('Assigned operator')).toBeInTheDocument();
   });
 
   // ADR-064: STAFF (operate_tokens only) see the counters, with their own
@@ -212,7 +212,7 @@ describe('QueueCountersPage — who may assign staff', () => {
     const rows = screen.getAllByRole('row').slice(1);
     expect(within(rows[0]!).getByText('Your counter')).toBeInTheDocument();
     expect(screen.queryByLabelText('Counter status')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Assigned staff')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Assigned operator')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Add Counter/ })).not.toBeInTheDocument();
@@ -230,7 +230,7 @@ describe('QueueCountersPage — who may assign staff', () => {
 
     renderPage();
 
-    expect(screen.getAllByLabelText('Assigned staff')).toHaveLength(2);
+    expect(screen.getAllByLabelText('Assigned operator')).toHaveLength(2);
     expect(screen.getAllByLabelText('Counter status')).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
   });
@@ -249,9 +249,9 @@ describe('QueueCountersPage — who may assign staff', () => {
     } as unknown as ReturnType<typeof useAssignableStaff>);
 
     renderPage();
-    await userEvent.selectOptions(screen.getByLabelText('Assigned staff'), 'staff-2');
+    await userEvent.selectOptions(screen.getByLabelText('Assigned operator'), 'staff-2');
     expect(assignMutate).toHaveBeenLastCalledWith({ counterId: 'c1', staffId: 'staff-2' }, expect.anything());
-    await userEvent.selectOptions(screen.getByLabelText('Assigned staff'), '');
+    await userEvent.selectOptions(screen.getByLabelText('Assigned operator'), '');
     expect(assignMutate).toHaveBeenLastCalledWith({ counterId: 'c1', staffId: null }, expect.anything());
   });
 
@@ -298,5 +298,63 @@ describe('QueueCountersPage — delete confirmation', () => {
     await userEvent.click(deleteButtons[deleteButtons.length - 1]);
 
     expect(mutate).toHaveBeenCalledWith('c1', expect.anything());
+  });
+});
+
+// ADR-064: owners, admins and staff can all be assigned — one counter each.
+describe('QueueCountersPage — assigned operator (ADR-064)', () => {
+  const operators = [
+    { id: 'o1', name: 'Olivia', role: 'OWNER', currentCounter: null },
+    { id: 'a1', name: 'Adam', role: 'ADMIN', currentCounter: null },
+    { id: 's1', name: 'Sami', role: 'STAFF', currentCounter: null },
+    { id: 's2', name: 'Rahim', role: 'STAFF', currentCounter: { id: 'c9', name: 'Window 9', queueName: 'Pharmacy' } },
+  ];
+
+  beforeEach(() => {
+    vi.mocked(useAssignableStaff).mockReturnValue({
+      data: operators,
+      isLoading: false,
+    } as unknown as ReturnType<typeof useAssignableStaff>);
+  });
+
+  it('labels the control "Assigned Operator" and offers owners, admins and staff', () => {
+    renderPage();
+    expect(screen.getByRole('columnheader', { name: 'Assigned Operator' })).toBeInTheDocument();
+    const select = screen.getByLabelText('Assigned operator');
+    expect(within(select).getByRole('option', { name: 'Olivia (Owner)' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Adam (Admin)' })).toBeInTheDocument();
+    expect(within(select).getByRole('option', { name: 'Sami (Staff)' })).toBeInTheDocument();
+  });
+
+  it('shows someone on another counter only as a move, never as freely assignable', () => {
+    renderPage();
+    const group = screen.getByRole('group', { name: 'On another counter — move here' });
+    expect(within(group).getByRole('option', { name: 'Rahim (Staff) — on Window 9, Pharmacy' })).toBeInTheDocument();
+  });
+
+  it('choosing them asks to confirm the move, then sends move: true', async () => {
+    renderPage();
+    await userEvent.selectOptions(screen.getByLabelText('Assigned operator'), 's2');
+    expect(assignMutate).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('dialog', { name: 'Move Rahim to Counter 1?' });
+    expect(within(dialog).getByText(/will leave Window 9 \(Pharmacy\)/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Move' }));
+    expect(assignMutate).toHaveBeenCalledWith(
+      { counterId: 'c1', staffId: 's2', move: true },
+      expect.anything(),
+    );
+  });
+
+  it('cancelling the move changes nothing', async () => {
+    renderPage();
+    await userEvent.selectOptions(screen.getByLabelText('Assigned operator'), 's2');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(assignMutate).not.toHaveBeenCalled();
+  });
+
+  it('an owner can assign themselves directly', async () => {
+    renderPage();
+    await userEvent.selectOptions(screen.getByLabelText('Assigned operator'), 'o1');
+    expect(assignMutate).toHaveBeenCalledWith({ counterId: 'c1', staffId: 'o1' }, expect.anything());
   });
 });

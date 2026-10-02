@@ -88,10 +88,11 @@ export async function remove(req: Request, res: Response) {
 }
 
 export async function assign(req: Request, res: Response) {
-  const counter = await counterService.assignCounter(
+  const { movedFromCounterId, ...counter } = await counterService.assignCounter(
     req.auth!.organizationId,
     req.params.counterId as string,
     req.body.staffId,
+    { move: req.body.move === true },
   );
   res.status(200).json({ success: true, data: counter });
   await auditService.recordAuditEventSafely({
@@ -99,12 +100,20 @@ export async function assign(req: Request, res: Response) {
     action: 'counter_changed',
     entityType: 'counter',
     entityId: counter.id,
-    metadata: { change: 'assigned', assignedStaffId: req.body.staffId },
+    metadata: {
+      change: 'assigned',
+      assignedStaffId: req.body.staffId,
+      ...(movedFromCounterId ? { movedFromCounterId } : {}),
+    },
     ipAddress: req.ip,
   });
   // Assignment is a counter update — no dedicated event exists for it in the
   // specification's 12-event list (recommended mapping, readiness review §9).
   await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
+  if (movedFromCounterId) {
+    const released = await counterService.findCounterScoped(req.auth!.organizationId, movedFromCounterId);
+    await realtime.emitCounterUpdated(released, req.auth!.organizationId);
+  }
 }
 
 /** ADR-064: the caller's own counter (null when they hold none). */

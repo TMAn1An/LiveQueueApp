@@ -14,14 +14,14 @@ import { actionErrorMessage } from '../utils/actionError';
  * ADR-064: the one way to take someone from the line.
  *
  * "Serve next" claims the next eligible person — strict first come, first
- * served — for the signed-in person, at the counter an owner or admin
- * assigned them. There is deliberately no counter picker, no staff picker
+ * served — for the signed-in person (owner, admin or staff), at the one
+ * counter they are assigned to. There is deliberately no counter picker, no staff picker
  * and no way to choose a particular person: the backend derives the counter
  * from the session and refuses anything else.
  */
 export function ServeNextPanel({ queueId }: { queueId: string }) {
   const { hasPermission } = useAuth();
-  const serves = hasPermission('operate_tokens');
+  const managesCounters = hasPermission('manage_staff');
   const { data: myCounter, isLoading } = useMyCounter();
   const serveNext = useNextToken();
   const [error, setError] = useState<string | null>(null);
@@ -31,32 +31,26 @@ export function ServeNextPanel({ queueId }: { queueId: string }) {
 
   const frame = 'rounded-xl border border-border bg-surface p-4 shadow-xs';
 
-  // ADR-064: owners and admins manage who stands where; staff serve.
-  if (!serves) {
-    if (!hasPermission('manage_staff')) return null;
-    return (
-      <div className={frame} data-testid="serve-next-panel">
-        <p className="text-sm font-semibold text-fg">Staff serve people from their own counters</p>
-        <p className="mt-1 text-sm text-muted">
-          You manage who works at which counter under{' '}
-          <Link to={`/queues/${queueId}/counters`} className="font-semibold text-brand-fg underline">
-            Counters
-          </Link>
-          . Each staff member serves the next person in line from the counter you assign them.
-        </p>
-      </div>
-    );
-  }
-
   if (!myCounter) {
     return (
       <PermissionGate permission="operate_tokens">
         <div className={frame} data-testid="serve-next-panel">
           <p className="text-sm font-semibold text-fg">You are not assigned to a counter</p>
-          <p className="mt-1 text-sm text-muted">
-            The organization owner or an admin assigns each person to a counter. Once you have one,
-            you can serve the next person here.
-          </p>
+          {managesCounters ? (
+            <p className="mt-1 text-sm text-muted">
+              Owners, admins and staff serve only from a counter they are assigned to. To serve here,
+              assign yourself to a counter under{' '}
+              <Link to={`/queues/${queueId}/counters`} className="font-semibold text-brand-fg underline">
+                Counters
+              </Link>
+              .
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-muted">
+              The organization owner or an admin assigns each person to a counter. Once you have one,
+              you can serve the next person here.
+            </p>
+          )}
         </div>
       </PermissionGate>
     );

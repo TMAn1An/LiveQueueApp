@@ -20,8 +20,7 @@ describe('POST /api/auth/register', () => {
     expect(res.body.data.staff.role).toBe('OWNER');
     expect(res.body.data.staff.email).toBe('owner@example.com');
     expect(res.body.data.permissions).toContain('manage_staff');
-    // ADR-064: owners manage; serving (operate_tokens) is STAFF work.
-    expect(res.body.data.permissions).not.toContain('operate_tokens');
+    expect(res.body.data.permissions).toContain('operate_tokens');
     expect(typeof res.body.data.accessToken).toBe('string');
     expect(typeof res.body.data.refreshToken).toBe('string');
     expect(res.body.data.staff.passwordHash).toBeUndefined();

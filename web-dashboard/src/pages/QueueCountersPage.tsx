@@ -24,9 +24,13 @@ import { PermissionGate } from '../components/PermissionGate';
 import { useAuth } from '../context/AuthContext';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { ApiError } from '../api/client';
-import type { Counter, CounterStatus } from '../types/queue';
+import type { AssignableStaff, Counter, CounterStatus } from '../types/queue';
 
 const COUNTER_STATUSES: CounterStatus[] = ['ACTIVE', 'ON_BREAK', 'OFFLINE'];
+
+function roleSuffix(role: string | undefined): string {
+  return role ? ` (${role.charAt(0)}${role.slice(1).toLowerCase()})` : '';
+}
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof ApiError ? err.message : fallback;
@@ -47,8 +51,10 @@ function CounterRow({
   const assignCounter = useAssignCounter(queueId);
   const deleteCounter = useDeleteCounter(queueId);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // ADR-064: OWNER/ADMIN manage every counter and who stands at it. STAFF
-  // only see the list, with their own counter marked — no controls at all.
+  const [confirmingMove, setConfirmingMove] = useState<AssignableStaff | null>(null);
+  // ADR-064: OWNER/ADMIN manage every counter and who stands at it — any
+  // active owner, admin or staff member, themselves included, one counter
+  // each. STAFF only see the list, with their own counter marked.
   const canAssign = hasPermission('manage_staff');
   const isMine = Boolean(staff && counter.staffId === staff.id);
   const { data: assignableStaff, isLoading: loadingStaff } = useAssignableStaff(
@@ -56,6 +62,8 @@ function CounterRow({
     canAssign,
   );
   const { data: staffResult } = useStaffList(1, 100);
+  const free = (assignableStaff ?? []).filter((s) => !s.currentCounter);
+  const elsewhere = (assignableStaff ?? []).filter((s) => s.currentCounter);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(counter.name);
   const nameError = latinNameError(name);
@@ -161,26 +169,41 @@ function CounterRow({
               <div className="flex items-center gap-1">
                 <select
                   value={counter.staffId ?? ''}
-                  aria-label="Assigned staff"
+                  aria-label="Assigned operator"
                   disabled={assignCounter.isPending || loadingStaff}
                   onChange={(e) => {
                     onError('');
+                    const chosen = (assignableStaff ?? []).find((s) => s.id === e.target.value);
+                    if (chosen?.currentCounter) {
+                      // Already on another counter: only an explicit, confirmed move.
+                      setConfirmingMove(chosen);
+                      return;
+                    }
                     assignCounter.mutate(
                       { counterId: counter.id, staffId: e.target.value || null },
                       {
                         onError: (err) =>
-                          onError(errorMessage(err, 'Failed to assign staff to counter.')),
+                          onError(errorMessage(err, 'Failed to assign the operator to this counter.')),
                       },
                     );
                   }}
                   className="rounded-md border border-border-strong bg-surface px-2.5 py-1 text-xs font-medium text-fg focus:border-brand-500"
                 >
                   <option value="">Unassigned</option>
-                  {(assignableStaff ?? []).map((s) => (
+                  {free.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name}
+                      {s.name}{roleSuffix(s.role)}
                     </option>
                   ))}
+                  {elsewhere.length > 0 && (
+                    <optgroup label="On another counter — move here">
+                      {elsewhere.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}{roleSuffix(s.role)} — on {s.currentCounter!.name}, {s.currentCounter!.queueName}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
                 {assignCounter.isPending && (
                   <span className="flex items-center gap-1 text-xs text-muted">
@@ -195,6 +218,28 @@ function CounterRow({
             </Button>
           </div>
         </PermissionGate>
+        {confirmingMove && (
+          <ConfirmDialog
+            title={`Move ${confirmingMove.name} to ${counter.name}?`}
+            message={`${confirmingMove.name} will leave ${confirmingMove.currentCounter!.name} (${confirmingMove.currentCounter!.queueName}) and stand at ${counter.name} instead. A person can only be at one counter.`}
+            confirmLabel="Move"
+            tone="primary"
+            confirming={assignCounter.isPending}
+            onConfirm={() => {
+              assignCounter.mutate(
+                { counterId: counter.id, staffId: confirmingMove.id, move: true },
+                {
+                  onSuccess: () => setConfirmingMove(null),
+                  onError: (err) => {
+                    setConfirmingMove(null);
+                    onError(errorMessage(err, 'Failed to move the operator.'));
+                  },
+                },
+              );
+            }}
+            onCancel={() => setConfirmingMove(null)}
+          />
+        )}
         {confirmingDelete && (
           <ConfirmDialog
             title={`Delete counter "${counter.name}"?`}
@@ -242,9 +287,9 @@ export function QueueCountersPage() {
         <div className="flex items-center gap-1">
           <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Counters</h1>
           <InfoHelp label="Counters">
-            Desks and service points where staff serve people for this queue. The owner or an
-            admin creates and opens counters and assigns each staff member to one; staff serve
-            only from their own.
+            Desks and service points where people are served. The owner or an admin creates and
+            opens counters and assigns one operator to each — an owner, an admin or a staff
+            member, one counter per person. Everyone serves only from their own counter.
           </InfoHelp>
         </div>
       </div>
@@ -263,7 +308,7 @@ export function QueueCountersPage() {
                 <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
                   <th className="py-3 pr-4">Name</th>
                   <th className="py-3 pr-4">Status</th>
-                  <th className="py-3 pr-4">Assigned Staff</th>
+                  <th className="py-3 pr-4">Assigned Operator</th>
                   <th className="py-3 pr-4">Actions</th>
                 </tr>
               </thead>

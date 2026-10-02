@@ -8,12 +8,11 @@ import { useNextToken } from '../hooks/useTokenActions';
 import { ApiError } from '../api/client';
 import type { MyCounter } from '../types/queue';
 
-// ADR-064: STAFF hold operate_tokens; OWNER/ADMIN hold manage_staff instead.
+// ADR-064: every role holds operate_tokens; only OWNER/ADMIN hold manage_staff.
 let isStaff = true;
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
-    hasPermission: (permission: string) =>
-      permission === 'operate_tokens' ? isStaff : permission === 'manage_staff' ? !isStaff : true,
+    hasPermission: (permission: string) => (permission === 'manage_staff' ? !isStaff : true),
   }),
 }));
 vi.mock('../hooks/useCounters');
@@ -115,13 +114,20 @@ describe('ServeNextPanel — serving is a self-claim at your own counter (ADR-06
     expect(screen.queryByRole('button', { name: 'Serve next' })).not.toBeInTheDocument();
   });
 
-  it('owner/admin get no Serve next — they manage assignments, staff serve', () => {
+  it('an assigned owner or admin gets Serve next like anyone else', () => {
+    isStaff = false;
+    mine(own);
+    renderPanel();
+    expect(screen.getByRole('button', { name: 'Serve next' })).toBeEnabled();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+  });
+
+  it('an unassigned owner or admin is pointed at Counters to assign themselves', () => {
     isStaff = false;
     mine(null);
     renderPanel();
-
     expect(screen.queryByRole('button', { name: 'Serve next' })).not.toBeInTheDocument();
-    expect(screen.getByText('Staff serve people from their own counters')).toBeInTheDocument();
+    expect(screen.getByText('You are not assigned to a counter')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Counters' })).toHaveAttribute('href', '/queues/q1/counters');
   });
 });

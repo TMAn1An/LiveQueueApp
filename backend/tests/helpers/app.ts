@@ -203,14 +203,15 @@ export interface CounterResponse {
 }
 
 /**
- * ADR-064: only STAFF serve, and only at the counter an owner or admin
- * assigned them. So that the many tests which simply "create a counter, then
- * serve at it" keep reading that way, when an owner or admin creates their
- * first counter this helper also creates a STAFF member, assigns them to it
- * through the real assign endpoint, and remembers them as that manager's
- * counter operator. Serving requests in those tests are then made with
- * `servingToken(managerAccessToken)` — the operator's own token — never the
- * manager's.
+ * ADR-064: anyone serves only from the one counter they are assigned to. So
+ * that the many tests which simply "create a counter, then serve at it" keep
+ * reading that way, when an owner or admin creates their first counter this
+ * helper also creates a STAFF member, assigns them to it through the real
+ * assign endpoint, and remembers them as that manager's counter operator.
+ * Serving requests in those tests are made with
+ * `servingToken(managerAccessToken)` — the operator's own token. (Owners and
+ * admins may serve too, once assigned; counterGovernance.test.ts covers that
+ * directly.)
  *
  * Pass `assignToCreator: false` for a counter that starts unassigned. A
  * manager's second and later counters start unassigned (use

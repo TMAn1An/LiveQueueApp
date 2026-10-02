@@ -328,7 +328,8 @@ describe('staff stay bound to the queue they were assigned in', () => {
       .set('Authorization', `Bearer ${accessToken}`);
   }
 
-  it('a staff member on a counter in one queue is not offered in another', async () => {
+  // ADR-064: listed only as "on another counter" (a move), never as free.
+  it('a staff member on a counter in one queue is not offered as free in another', async () => {
     const org = await twoQueues();
     const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
     await assign(org.ctx.accessToken, org.counterA.id, kara.staffId);
@@ -336,7 +337,10 @@ describe('staff stay bound to the queue they were assigned in', () => {
     const offered = await assignableStaff(org.ctx.accessToken, org.counterB.id);
 
     expect(offered.status).toBe(200);
-    expect(offered.body.data.map((s: { id: string }) => s.id)).not.toContain(kara.staffId);
+    expect(offered.body.data.find((s: { id: string }) => s.id === kara.staffId).currentCounter).toMatchObject({
+      id: org.counterA.id,
+      queueName: 'Pharmacy',
+    });
   });
 
   it.each([
@@ -352,11 +356,11 @@ describe('staff stay bound to the queue they were assigned in', () => {
     // Availability is about assignment, not workload: an idle or closed
     // counter still has its person standing at it.
     const offered = await assignableStaff(org.ctx.accessToken, org.counterB.id);
-    expect(offered.body.data.map((s: { id: string }) => s.id)).not.toContain(kara.staffId);
+    expect(offered.body.data.find((s: { id: string }) => s.id === kara.staffId).currentCounter).not.toBeNull();
 
     const moved = await assign(org.ctx.accessToken, org.counterB.id, kara.staffId);
     expect(moved.status).toBe(409);
-    expect(moved.body.error.code).toBe('STAFF_ALREADY_ASSIGNED');
+    expect(moved.body.error.code).toBe('OPERATOR_ALREADY_ASSIGNED');
   });
 
   it('frees them only once an administrator unassigns them', async () => {

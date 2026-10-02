@@ -132,11 +132,17 @@ export interface QueueFormField {
  * own availability answer (active, holding no other counter, plus whoever
  * currently holds this one), never a client-side filter over all staff.
  */
+/**
+ * ADR-064: an active OWNER, ADMIN or STAFF member who could stand at a
+ * counter. `currentCounter` is set when they hold another counter — they can
+ * only come here through an explicit move.
+ */
 export interface AssignableStaff {
   id: string;
   name: string;
   email: string;
   role: string;
+  currentCounter: { id: string; name: string; queueName: string } | null;
 }
 
 /**
