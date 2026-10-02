@@ -172,6 +172,16 @@ before the old one is dropped; because every existing row receives the same
 `'QUEUE'` key, the old uniqueness implies the new one, so it cannot fail on
 existing data. No backfill, no new environment variable.
 
+#### Governance and password reset (`20261002000000_service_start_verification_default_off`, `20261002000100_add_membership_removal_requests`, `20261002000200_add_password_reset`)
+
+ADR-055/057/058. **All three are additive and touch no existing row.**
+
+- `…000000` only changes the **column default** of `queues.require_service_start_otp` to `false`. Every existing queue keeps the value it has, which from this release on is fixed for that queue's lifetime (the API refuses any change with `409 QUEUE_SETTING_IMMUTABLE`).
+- `…000100` creates two enum types and the `membership_removal_requests` table.
+- `…000200` adds the nullable `staff.access_revoked_at` (null for everyone, so nothing changes) and the `password_reset_tokens` table.
+
+Order does not matter between them, and the previous backend release runs unchanged against the migrated schema (it never reads the new table/column, and it writes `require_service_start_otp` explicitly). Rolling the code back needs no schema change. Forgot-password needs the same `RESEND_API_KEY`, `EMAIL_FROM` and `APP_BASE_URL` as verification emails; reset links point at `APP_BASE_URL/reset-password`. Optional: `PASSWORD_RESET_TTL_MINUTES` (default `30`, max `240`).
+
 #### Unique organization names (`20261001000131_add_organization_name_key`)
 
 ADR-051. Adds `organizations.name_key` (`NOT NULL`, unique) — the lower-case,
@@ -445,7 +455,8 @@ Check a real message's headers ("Show original" in Gmail): `SPF: PASS`,
 | `RATE_LIMIT_TOKEN_CREATE_WINDOW_MS` / `RATE_LIMIT_TOKEN_CREATE_MAX` | `60000` / `10` | `POST /api/tokens`'s stricter limiter. |
 | `RATE_LIMIT_SENSITIVE_WINDOW_MS` / `RATE_LIMIT_SENSITIVE_MAX` | `900000` / `30` | Sensitive authenticated mutations (incl. OTP-gated `/start`). |
 | `RATE_LIMIT_REPORT_WINDOW_MS` / `RATE_LIMIT_REPORT_MAX` | `900000` / `10` | Reports/export. |
-| `RATE_LIMIT_EMAIL_WINDOW_MS` / `RATE_LIMIT_EMAIL_MAX` | `900000` / `3` | Verification-email resend (deliberately tighter — a real email is sent). |
+| `RATE_LIMIT_EMAIL_WINDOW_MS` / `RATE_LIMIT_EMAIL_MAX` | `900000` / `3` | Verification-email resend (deliberately tighter — a real email is sent). Forgot-password requests use the same budget on a separate counter (ADR-058), plus a 60-second per-account cooldown. |
+| `PASSWORD_RESET_TTL_MINUTES` | `30` | How long a forgot-password link works (ADR-058). Max `240`. |
 | `RATE_LIMIT_PHONE_VERIFICATION_WINDOW_MS` / `RATE_LIMIT_PHONE_VERIFICATION_MAX` | `900000` / `10` | Dormant with `SMS_PROVIDER` (ADR-037). |
 | `RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_WINDOW_MS` / `RATE_LIMIT_CUSTOMER_EMAIL_VERIFICATION_MAX` | `900000` / `10` | Customer email-verification start/confirm (ADR-037). One of the tightest buckets in the app — a start request costs a real email. Separate from `RATE_LIMIT_EMAIL_*`, which covers staff traffic rather than anonymous customers. |
 | `EMAIL_VERIFICATION_CODE_TTL_MINUTES` | `5` | How long a sent customer code stays usable. |

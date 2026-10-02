@@ -1174,7 +1174,7 @@ Backend 718/718 (9 test files touched: nine recall-specific tests replaced with 
 
 ## ADR-041: The service-start verification code is a per-queue setting, decided at start time (2026-09-30)
 
-**Status:** Implemented, tested, committed. One additive migration. Not deployed.
+**Status:** Implemented, tested, committed. One additive migration. Not deployed. **Partly superseded by ADR-055 (2026-10-02):** the setting is now chosen once at creation, defaults to off for new queues, and can no longer be changed — so the "OFF → ON / ON → OFF while CALLED" handling and the live `token.called` refresh described below were removed. The start-time enforcement, code handling and exposure rules are unchanged.
 
 ### Decision
 
@@ -1547,3 +1547,71 @@ SKIPPED and CANCELLED still delete the hold (never an entitlement); COMPLETED st
 **Why this does not accept stale authorization.** Authorization is never granted by the client. While reconnecting, the app holds a token and shows nothing; the first thing it does when the backend returns is have that token checked, and a refusal signs the user out. The token itself still expires and can still be revoked server-side during the outage — the wait cannot outlive either.
 
 **Residual.** A rotation whose response is lost, followed by more than 10 seconds before the server is reachable again, is still reported as reuse and revokes that user's sessions. Closing that fully needs an idempotency key on the refresh exchange (a schema and protocol change); not done here, recorded so it is not rediscovered.
+
+## ADR-055: Multiple services and service-start verification are fixed when a queue is created (2026-10-02)
+
+**Status:** Implemented on `feature/dashboard-ux-governance-fixes`. One additive migration. Not deployed.
+
+**Decision.** `Queue.allowMultipleServices` and `Queue.requireServiceStartOtp` are chosen in Create Queue and never change afterwards, in either direction. Both change what customers and staff are entitled to do partway through a visit, so they must not shift under a queue that is already operating.
+
+- **Backend is the enforcement.** `updateQueue` compares each field with the stored value; any *change* is refused with `409 QUEUE_SETTING_IMMUTABLE` (`details.field` names it) and the whole request is rejected. Repeating the stored value is a harmless no-op, so a client sending its full form back is not broken. Both fields stay in the update schema on purpose: dropping them would make the parser silently ignore a crafted change instead of refusing it. Applies to every role.
+- **New default.** Service-start verification defaults to **off** (validator default and, via `20261002000000_service_start_verification_default_off`, the column default). Multiple services keeps its default (on). The migration changes only the column default — **every existing queue keeps the value it had**, which is now frozen.
+- **Removed as unreachable:** `issueServiceStartCodesForCalledTokens`, `listCalledTokenIds`, `refreshCalledTokens` and the controller hook that called them (ADR-041's mid-lifecycle switch handling). `/call`'s share-locked read and the direct-start `WHERE requireServiceStartOtp = false` guard stay as cheap defense in depth.
+- **Dashboard.** Create Queue shows both as switches with a visible "Permanent — cannot be changed after the queue is created" note (reason behind ⓘ). Turning verification on opens a confirmation ("Service-start verification will be permanently enabled for this queue. This setting cannot be changed after the queue is created."); Cancel leaves it off. Queue Settings shows both read-only under *Fixed at Creation* with a lock badge — never a disabled toggle, which would read as a permission problem. The multiple-services checkbox was removed from Edit Details, and `UpdateQueueInput` no longer has either field, so the compiler rejects any new editor.
+- **Tests.** `queue.creationSettingsImmutable.test.ts` (create OFF/ON for both, all four later transitions refused, smuggled change refuses the whole request, same-value no-op, ADMIN refused too, pre-existing queue frozen at its stored value, column default). The test helper still creates code-requiring queues by default, because most suites exercise the ADR-029 code flow.
+
+## ADR-056: Human-entered names and descriptions are English/Latin script only (2026-10-02)
+
+**Status:** Implemented on `feature/dashboard-ux-governance-fixes`. No migration.
+
+**Decision.** Two shared validators (`backend/src/validators/latinText.ts`, copied to `web-dashboard/src/utils/latinText.ts`; a dashboard test asserts the two patterns are identical):
+
+- **NAME** — `A–Z a–z 0–9`, space and `. , - _ ' ( ) / & : +`. Applied to: organization name (register, rename, availability check), queue name, queue customer terminology, token prefix (dashboard only — the backend already bounds its length), service name, counter name, staff name (invite, update).
+- **TEXT** — any printable ASCII plus line breaks. Applied to: queue description, service description, form-field label, placeholder and dropdown/radio options, and the reason/review note on membership requests. Questions end in "?" and descriptions have paragraphs; every non-Latin script and emoji is still refused.
+
+**Not restricted:** email addresses, tokens, codes, ids, URLs, search terms, IANA timezones, form-field keys (own stricter rule), and anything a customer types into a queue form or as feedback — the product deliberately accepts arbitrary customer content there.
+
+Text is **rejected, never stripped** (`422 VALIDATION_ERROR` with a clear message). The dashboard flags it as typed and disables the submit. Accented Latin ("Café") is outside A–Z and is refused too — the requirement is English letters. Existing rows are not touched; the rule applies to writes from now on.
+
+## ADR-057: Nobody removes themselves; the owner reviews leave and admin-removal requests (2026-10-02)
+
+**Status:** Implemented on `feature/dashboard-ux-governance-fixes`. One additive migration. Not deployed.
+
+| Actor | Remove directly | Ask the owner (request) |
+|---|---|---|
+| OWNER | any ADMIN or STAFF | — (removes directly; cannot leave — deletes the organization instead) |
+| ADMIN | any STAFF | leave (self), or removal of another ADMIN |
+| STAFF | nobody | leave (self) only |
+
+Nobody may act against the OWNER, and nobody removes themselves directly.
+
+- **Direct removal** (`DELETE /api/staff/:id`) now goes through `membership.service.removeMember`: `CANNOT_REMOVE_SELF`, `CANNOT_DELETE_OWNER`, `REMOVAL_REQUIRES_OWNER_APPROVAL` (admin → admin). It deletes the Staff row in a transaction (sessions cascade, so no refresh is possible; `authenticate` reads the row on every request, so access tokens die at once), closes any open request about that person, audits `staff_removed` (removal was not audited before), and disconnects their live sockets.
+- **Requests** — `MembershipRemovalRequest` (`20261002000100_add_membership_removal_requests`). The type is derived by the server (`SELF_LEAVE` / `ADMIN_REMOVAL_REQUEST`), never sent. Requester, target and reviewer are snapshot columns with no FK, like `AuditLog`, because approval deletes the target. One pending request per (target, type) via the ADR-035 slot pattern (`activeSlot` = `"PENDING"` while open, the row id once closed) instead of a partial index Prisma cannot express; a duplicate is `409 REMOVAL_REQUEST_ALREADY_PENDING`. An admin asking about a STAFF member gets `422 REMOVAL_REQUEST_NOT_NEEDED` (they can remove directly).
+- **Review** is owner-only (`OWNER_ONLY`). Approve/reject lock the request row (`FOR UPDATE`), so two simultaneous decisions resolve to exactly one; approval removes the member in the same transaction and re-applies the direct-removal rules. A request whose target already left is closed as `CANCELLED`. The requester may withdraw a pending request. Every step is audited (`membership_request_created/approved/rejected/cancelled`).
+- **Endpoints:** `GET/POST /api/staff/removal-requests`, `POST /api/staff/removal-requests/:id/{approve,reject,cancel}` — authenticated, not behind `manage_staff`, so STAFF can ask to leave; the service decides.
+- **Dashboard.** Staff page rows are role-aware (Remove / Request removal / Request to leave; never Remove on yourself or the owner); the owner gets a *Pending requests* inbox (Approve asks for confirmation first); others see their own pending requests with Withdraw. Because `/staff` stays `manage_staff`-only, STAFF (and anyone) leaves from **Profile → Leave Organization**. The owner sees there that they must delete the organization instead.
+- **Unchanged and noted:** an ADMIN can still *suspend* another ADMIN through `PUT /api/staff/:id` (existing behaviour, not a removal). If that should also need owner approval it is a separate decision.
+
+## ADR-058: Forgot password (2026-10-02)
+
+**Status:** Implemented on `feature/dashboard-ux-governance-fixes`. One additive migration and one optional env var. Not deployed.
+
+- **Request** — `POST /api/auth/password-reset/request {email}` always answers `200` with *"If an account exists for this email, a reset link has been sent."* It replies **before** doing any work, so neither body nor timing reveals an account. Only an ACTIVE account in an ACTIVE organization gets an email (a pending invitee uses their invitation; a suspended account is not revived). Limits: its own per-IP limiter (`RATE_LIMIT_EMAIL_*` budget, separate counter) plus a 60-second per-account cooldown stored in the database.
+- **Token** — 48 random bytes, emailed once; only the SHA-256 hash is stored (`PasswordResetToken`, `20261002000200_add_password_reset`). Expires after `PASSWORD_RESET_TTL_MINUTES` (default 30). A newer request deletes older unused links. The link is built from `APP_BASE_URL` only (no request input, so no open redirect).
+- **Check** — `GET /api/auth/password-reset/validate?token=` (read-only) lets the page say "expired" before anyone types.
+- **Reset** — `POST /api/auth/password-reset/confirm {token, password}` enforces the normal password policy, claims the token with a conditional `UPDATE … WHERE used_at IS NULL AND expires_at > now()` (so two simultaneous submissions cannot both succeed), sets the new hash, revokes every refresh session, deletes other outstanding links, and sets `Staff.accessRevokedAt`. `authenticate` refuses any access token issued before that instant (`401 SESSION_REVOKED`), so "signed out everywhere" is immediate rather than up to 15 minutes later. Unknown, expired and used links share one error (`400 INVALID_OR_EXPIRED_TOKEN`). It never signs anyone in. Audited as `password_reset`.
+- **Dashboard** — "Forgot password?" on Login; `/forgot-password` (always the generic confirmation); `/reset-password?token=` (link checked first, live policy and match feedback, success tells them they are signed out everywhere, invalid/used/expired link offers "Request a new link").
+- **Not done:** no CAPTCHA. The per-IP limiter and per-account cooldown bound abuse; add one if the endpoint is ever targeted.
+
+## ADR-059: One Create Queue action, real button links, bordered tabs, readable header actions (2026-10-02)
+
+**Status:** Implemented on `feature/dashboard-ux-governance-fixes`. Dashboard only.
+
+- **Create Queue.** `CreateQueueButton` + `CreateQueueModal` are the only create entry point; they open the real form in place (the dashboard header and empty-state buttons used to be links to `/queues` that opened nothing). Shown on the dashboard header, dashboard empty state, Queues header and Queues empty state; the duplicate "View All Queues" header link is gone (the section's "Manage all queues" and the sidebar remain). The button renders nothing without `manage_queues`, so STAFF sees no Create Queue anywhere; their empty state says an owner or admin creates queues. The backend already refused STAFF (`403`).
+- **`ButtonLink`.** Navigation actions are a single `<a>` with the Button's exact classes instead of `<Link><Button/></Link>` — that nesting was invalid (two focus stops) and its inline anchor box caused the 1–2px height/baseline drift between neighbouring actions. Inputs and selects that sit in a row with buttons are `h-9`, the same as an `md` button. Mixed `lg`/`md` pairs were fixed (Live page Manage Counters/Queue Settings, Form Builder Add Field/Save Form).
+- **Header actions** (`PageHeader.actions`) are `lg` (44px, 16px text) everywhere, primary or outline; the top-bar Log out is a real outline button.
+- **`TabBar`.** Queue settings tabs are bordered on all sides, 40px tall, 14px text; the active tab is brand-filled and also carries a check mark and `aria-current`, so it is not colour alone; tabs wrap on narrow screens. The unused `QueueWorkspaceHeader` (a second, divergent tab bar) was removed.
+- **Counters.** "Manage Counters (n)" is now "Manage Counters" — the count is already in the card's stats.
+- **InfoHelp sweep (ADR-053 applied further).** Moved behind ⓘ: Create Queue's switch descriptions, token-prefix hint and repeat-visit note; Edit Details' field hints; repeat-visit scope descriptions, identity-mode help (including the shared-mailbox caveat), identifying-question rule and "when changes apply"; timezone guidance; schedule switch descriptions; form-builder key and preview notes; staff role/permission note. Kept on the page: validation errors, the permanent-setting notes, current-status summaries, live consequence previews (e.g. "a customer served now could return after…"), the per-session-unavailable explanation, destructive-action and skip consequences, empty and first-run guidance. An ⓘ is never placed inside a `<label>` (opening it would toggle the control).
+- **Fixed on the way:** `--color-brand-950` did not exist, so six `dark:bg-brand-950/…` tints silently fell back to the light `brand-50` fill in dark mode (e.g. the ADMIN role badge); the token is now defined. Add Service used to fail silently; it now shows the server's message.
+
