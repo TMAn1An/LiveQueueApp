@@ -15,6 +15,7 @@ import 'package:mobile_app/repositories/history_repository.dart';
 import 'package:mobile_app/repositories/queue_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
 import 'package:mobile_app/screens/qr_scanner_screen.dart';
+import 'package:mobile_app/screens/service_selection_screen.dart';
 import 'package:mobile_app/services/api_client.dart';
 import 'package:mobile_app/services/device_api_service.dart';
 import 'package:mobile_app/services/device_identity_service.dart';
@@ -74,6 +75,32 @@ Future<void> _pumpScanner(WidgetTester tester, QueueJoinProvider provider) async
   await tester.pumpAndSettle();
 }
 
+/// The scanner as it is really reached: pushed on top of another screen, so
+/// there is somewhere for Back to go.
+Future<void> _pumpScannerOverHome(WidgetTester tester, QueueJoinProvider provider) async {
+  await tester.pumpWidget(
+    ChangeNotifierProvider<QueueJoinProvider>.value(
+      value: provider,
+      child: MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const QrScannerScreen()),
+                ),
+                child: const Text('home: open scanner'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.tap(find.text('home: open scanner'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late FakeMobileScannerPlatform fakeScanner;
 
@@ -111,6 +138,80 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(fakeScanner.stopCount, greaterThan(0));
+    });
+  });
+
+  // ADR-063: there is no Queue Details screen between the scan and the
+  // services any more.
+  group('after a valid scan the customer is on the services screen', () {
+    QueueJoinProvider providerFor(Map<String, dynamic> queue) => _buildProvider(
+          MockClient((_) async => http.Response(jsonEncode({'success': true, 'data': queue}), 200)),
+        );
+
+    testWidgets('directly — no screen in between, and nothing to tap first', (tester) async {
+      await _pumpScannerOverHome(tester, providerFor(_queueJson()));
+
+      fakeScanner.emitBarcode(_validQr);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ServiceSelectionScreen), findsOneWidget);
+      expect(find.text('Select Services'), findsOneWidget);
+      expect(find.text('Queue Details'), findsNothing);
+      expect(find.text('Continue'), findsNothing);
+      // The queue is still named, and its service is there to choose.
+      expect(find.text('Customer Service'), findsOneWidget);
+      expect(find.text('General Inquiry'), findsOneWidget);
+    });
+
+    testWidgets('Back returns to where scanning started — not to a details screen or the scanner',
+        (tester) async {
+      await _pumpScannerOverHome(tester, providerFor(_queueJson()));
+      fakeScanner.emitBarcode(_validQr);
+      await tester.pumpAndSettle();
+
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+
+      expect(find.text('home: open scanner'), findsOneWidget);
+      expect(find.byType(ServiceSelectionScreen), findsNothing);
+      expect(find.byType(QrScannerScreen), findsNothing);
+      expect(find.text('Queue Details'), findsNothing);
+    });
+
+    testWidgets('the Android system Back does the same', (tester) async {
+      await _pumpScannerOverHome(tester, providerFor(_queueJson()));
+      fakeScanner.emitBarcode(_validQr);
+      await tester.pumpAndSettle();
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(find.text('home: open scanner'), findsOneWidget);
+      expect(find.byType(ServiceSelectionScreen), findsNothing);
+    });
+
+    testWidgets('a paused queue still opens there, saying why it cannot be joined', (tester) async {
+      await _pumpScannerOverHome(tester, providerFor({..._queueJson(), 'status': 'PAUSED'}));
+
+      fakeScanner.emitBarcode(_validQr);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ServiceSelectionScreen), findsOneWidget);
+      expect(find.text('This queue is not currently accepting new customers.'), findsOneWidget);
+      expect(find.text('General Inquiry'), findsNothing);
+      expect(find.widgetWithText(FilledButton, 'Next'), findsNothing);
+    });
+
+    testWidgets('choosing a service leads on to the next step of the join', (tester) async {
+      await _pumpScannerOverHome(tester, providerFor(_queueJson()));
+      fakeScanner.emitBarcode(_validQr);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.widgetWithText(CheckboxListTile, 'General Inquiry'));
+      await tester.pump();
+
+      final next = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next'));
+      expect(next.onPressed, isNotNull);
     });
   });
 

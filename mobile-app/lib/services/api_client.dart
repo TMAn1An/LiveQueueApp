@@ -118,5 +118,25 @@ class ApiClient {
     }
   }
 
+  Future<Map<String, dynamic>> put(String path, {Map<String, dynamic>? body}) async {
+    try {
+      final response = await _httpClient
+          .put(
+            _uri(path),
+            headers: const {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode(body ?? const {}),
+          )
+          .timeout(_requestTimeout);
+      return _handle(response);
+    } on SocketException {
+      throw NetworkException(_unreachableMessage(_noConnection));
+    } on TimeoutException {
+      throw NetworkException(_unreachableMessage(_timedOut));
+    }
+  }
+
   void close() => _httpClient.close();
 }

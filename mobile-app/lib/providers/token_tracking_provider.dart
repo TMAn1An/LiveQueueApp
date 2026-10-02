@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../models/eta_update_notice.dart';
 import '../models/live_queue_token.dart';
 import '../models/notification_preferences.dart';
+import '../models/token_reminder_status.dart';
 import '../repositories/device_repository.dart';
 import '../repositories/history_repository.dart';
 import '../repositories/token_repository.dart';
@@ -73,6 +74,29 @@ class TokenTrackingProvider extends ChangeNotifier {
   NotificationPreferences _preferences = const NotificationPreferences();
   bool _reminderShown = false;
 
+  /// ADR-062: this queue's default reminder time, as the backend last
+  /// reported it. Null until it has — and again for each new token, since
+  /// the next one may belong to a different queue.
+  int? _queueDefaultReminderMinutes;
+  bool _reminderLeadTooShort = false;
+
+  /// The reminder time in force for the tracked token: the customer's own
+  /// choice, else this queue's default.
+  int get reminderMinutes =>
+      _preferences.effectiveReminderMinutes(queueDefaultMinutes: _queueDefaultReminderMinutes);
+
+  /// Whether that time is the queue's default rather than the customer's own.
+  bool get reminderFollowsQueueDefault => _preferences.followsQueueDefault;
+
+  /// True when the turn was already closer than the reminder time while no
+  /// reminder had gone out — the reminder cannot give that much notice, and
+  /// the customer should be told so rather than left waiting for it. Decided
+  /// when tracking starts or the setting changes, not on every tick: a wait
+  /// that simply counts down past the reminder time is the reminder working,
+  /// not a problem to warn about.
+  bool get reminderLeadTooShort =>
+      _reminderLeadTooShort && token?.status == TokenStatus.waiting;
+
   /// Display context only, for the Notification Center entries this session
   /// records — never sent anywhere, never part of any request.
   String _queueName = '';
@@ -92,11 +116,18 @@ class TokenTrackingProvider extends ChangeNotifier {
     token = initialToken;
     _preferences = preferences;
     _reminderShown = false;
+    _queueDefaultReminderMinutes = null;
     _queueName = queueName;
+    _evaluateReminderLead();
+    unawaited(_registerPreferences());
 
     _tokenRepository.connectSocket();
     _tokenRepository.joinTokenRoom(initialToken.id);
     _tokenRepository.joinQueueRoom(initialToken.queueId);
+    // The socket outlives a tracking session. Opening a second token finds
+    // it already connected, and no "connected" event will follow — without
+    // this the screen would say "Reconnecting…" for as long as it is open.
+    isConnected = _tokenRepository.isSocketConnected;
 
     _connectionSub = _tokenRepository.connectionStatus.listen(_onConnectionChanged);
     _lifecycleSub = _tokenRepository.tokenLifecycleUpdates.listen(_onLifecycleUpdate);
@@ -131,15 +162,61 @@ class TokenTrackingProvider extends ChangeNotifier {
     // change and deliberately does NOT raise the in-app notice: while the
     // app is open the socket already delivers that, and showing both would
     // be two alerts for one update.
-    const handled = {'token_status_changed', 'token_eta_updated'};
+    //
+    // 'token_reminder' is the backend's own "almost your turn" push
+    // (ADR-062). The resync it prompts brings back `reminderSent`, which is
+    // what keeps this provider from announcing the same reminder again.
+    const handled = {'token_status_changed', 'token_eta_updated', 'token_reminder'};
     if (!handled.contains(data['type'])) return;
     final current = token;
     if (current == null || data['tokenId'] != current.id) return;
     await _resyncFromServer();
   }
 
+  /// A setting changed while a token is being tracked: it applies from now,
+  /// not from the next time tracking starts.
   void updatePreferences(NotificationPreferences preferences) {
     _preferences = preferences;
+    if (token == null) return;
+    _evaluateReminderLead();
+    notifyListeners();
+    unawaited(_registerPreferences());
+  }
+
+  /// Tells the backend how this customer wants to be notified about the
+  /// tracked token (ADR-062), and learns the queue's default reminder time
+  /// in return. Never allowed to disturb tracking: a failure only means the
+  /// app keeps its assumed default until the next attempt.
+  Future<void> _registerPreferences() async {
+    final current = token;
+    if (current == null || !current.isActive) return;
+    try {
+      final deviceIdentifier = await _deviceRepository.ensureRegisteredDevice();
+      final status = await _tokenRepository.setNotificationPreferences(
+        current.id,
+        deviceIdentifier,
+        _preferences,
+      );
+      // The answer may land after the customer has moved on to another token.
+      if (token?.id != status.tokenId) return;
+      _queueDefaultReminderMinutes = status.queueDefaultReminderMinutes;
+      _evaluateReminderLead();
+      notifyListeners();
+    } catch (_) {
+      // Offline, or a backend that predates this. Nothing to show for it.
+    }
+  }
+
+  void _evaluateReminderLead() {
+    final current = token;
+    _reminderLeadTooShort = current != null &&
+        !current.reminderSent &&
+        !_reminderShown &&
+        reminderLeadIsTooShort(
+          status: current.status,
+          estimatedWaitMinutes: current.estimatedWaitMinutes,
+          reminderMinutes: reminderMinutes,
+        );
   }
 
   Future<void> _onConnectionChanged(bool connected) async {
@@ -402,8 +479,11 @@ class TokenTrackingProvider extends ChangeNotifier {
     final wait = current.estimatedWaitMinutes;
     if (wait == null) return;
 
-    if (wait <= _preferences.reminderMinutesBeforeTurn) {
+    if (wait <= reminderMinutes) {
       _reminderShown = true;
+      // The backend pushes this same reminder (ADR-062). Whichever of the
+      // two gets there first tells the customer; the other stays quiet.
+      if (current.reminderSent || !_notificationService.claimReminder(current.id)) return;
       _notificationService.showReminder(
         serialNumber: current.serialNumber,
         estimatedWaitMinutes: wait,

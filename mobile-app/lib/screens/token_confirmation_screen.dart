@@ -81,8 +81,12 @@ class TokenConfirmationScreen extends StatelessWidget {
                     context
                         .read<TokenTrackingProvider>()
                         .start(token, preferences, queueName: queueName);
-                    Navigator.of(context).pushReplacement(
+                    // The join is finished, so its screens leave the stack
+                    // with it: Back from Live Tracking goes Home, not into a
+                    // service picker for a queue the customer is already in.
+                    Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
+                      (route) => route.isFirst,
                     );
                   },
                   child: const Text('Track My Token'),

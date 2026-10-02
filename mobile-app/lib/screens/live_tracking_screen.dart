@@ -8,9 +8,11 @@ import '../providers/token_tracking_provider.dart';
 import '../theme/app_colors.dart';
 import '../widgets/connection_indicator.dart';
 import '../widgets/eta_update_dialog.dart';
+import '../widgets/reminder_caution.dart';
 import '../widgets/dual_time_row.dart';
 import '../widgets/status_badge.dart';
 import 'home_screen.dart';
+import 'queue_details_screen.dart';
 
 /// Spec section 7.17 "Mobile Live Tracking" — shows token number, status,
 /// position, estimated wait, selected service, counter when called, plus
@@ -177,9 +179,43 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                             ? 'Waiting for an active counter'
                             : 'Estimated time unavailable',
                       ),
+                    // ADR-062: which reminder time is in force for this
+                    // token, and whose it is — the customer's own choice
+                    // replaces the queue's default.
+                    _InfoRow(
+                      label: 'Reminder',
+                      value: tracking.reminderFollowsQueueDefault
+                          ? '${tracking.reminderMinutes} min before (queue default)'
+                          : '${tracking.reminderMinutes} min before',
+                    ),
+                    if (tracking.reminderLeadTooShort) ...[
+                      const SizedBox(height: 8),
+                      ReminderCaution(
+                        message:
+                            'Your turn is expected sooner than your '
+                            '${tracking.reminderMinutes}-minute reminder, so it cannot give you '
+                            'that much notice. Please stay nearby.',
+                      ),
+                    ],
                   ],
                   if (token.status == TokenStatus.called && token.counter != null)
                     _InfoRow(label: 'Counter', value: token.counter!.name),
+                  // ADR-063: the queue's own details — hours, repeat-visit
+                  // rule, services — are one tap away here, now that they are
+                  // no longer a screen the customer passes through to join.
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.info_outline),
+                      label: const Text('Queue details'),
+                      style: TextButton.styleFrom(padding: EdgeInsets.zero),
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => QueueDetailsScreen(queueId: token.queueId),
+                        ),
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 24),
                   if (token.status == TokenStatus.called)
                     Container(

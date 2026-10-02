@@ -14,6 +14,9 @@ export interface NotificationPayload {
    * compatible — reminderDispatch.service.ts's existing call site omits it
    * and continues to send a notification-only message exactly as before. */
   data?: Record<string, string>;
+  /** The Android channel to show this on — see utils/notificationChannel.ts.
+   * Omitted: Android uses its default channel, exactly as before. */
+  androidChannelId?: string;
 }
 
 /** First 8 chars + length only — the raw token itself must never be logged. */
@@ -53,6 +56,9 @@ export async function sendNotification(fcmToken: string, payload: NotificationPa
       token: fcmToken,
       notification: { title: payload.title, body: payload.body },
       ...(payload.data ? { data: payload.data } : {}),
+      ...(payload.androidChannelId
+        ? { android: { notification: { channelId: payload.androidChannelId } } }
+        : {}),
     });
     logger.info({ token: redact(fcmToken) }, 'FCM notification sent');
     return { ok: true, invalidToken: false };

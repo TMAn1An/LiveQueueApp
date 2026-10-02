@@ -4,7 +4,7 @@ import * as notificationPreferenceService from '../services/notificationPreferen
 export async function set(req: Request, res: Response) {
   const { deviceIdentifier, ...preferenceInput } = req.body as {
     deviceIdentifier: string;
-    reminderMinutes: number;
+    reminderMinutes?: number | null;
     vibrationEnabled?: boolean;
     soundEnabled?: boolean;
     notificationsEnabled?: boolean;

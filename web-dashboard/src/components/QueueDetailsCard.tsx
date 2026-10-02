@@ -13,6 +13,11 @@ import type { Queue } from '../types/queue';
 const inputClass =
   'w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-fg focus:border-brand-500';
 
+/** The range a reminder time may take — the same one a customer chooses from
+ * in the app; the backend enforces it (ADR-062). */
+const MIN_REMINDER_MINUTES = 2;
+const MAX_REMINDER_MINUTES = 120;
+
 /**
  * The queue's own details. What is shown and what can be edited are the
  * same set of fields, in the same order. Form version is the one read-only
@@ -42,6 +47,13 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
 
   const baseTimeValue = Number(baseTime);
   const reminderValue = Number(reminder);
+  const reminderError =
+    reminder.trim() !== '' &&
+    (!Number.isInteger(reminderValue) ||
+      reminderValue < MIN_REMINDER_MINUTES ||
+      reminderValue > MAX_REMINDER_MINUTES)
+      ? `Enter ${MIN_REMINDER_MINUTES}–${MAX_REMINDER_MINUTES} minutes.`
+      : null;
   const nameError = latinNameError(name);
   const prefixError = latinNameError(tokenPrefix);
   const descriptionError = latinTextError(description);
@@ -52,7 +64,8 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
     !Number.isInteger(baseTimeValue) ||
     baseTimeValue < 1 ||
     !Number.isInteger(reminderValue) ||
-    reminderValue < 1;
+    reminderValue < MIN_REMINDER_MINUTES ||
+    reminderValue > MAX_REMINDER_MINUTES;
 
   function save() {
     setError(null);
@@ -121,11 +134,17 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
                 className={inputClass}
               />
             </Field>
-            <Field label="Reminder (minutes before turn)" htmlFor="queue-reminder" help="Default for customers who turn on reminders.">
+            <Field
+              label="Reminder (minutes before turn)"
+              htmlFor="queue-reminder"
+              help={`The queue's default, ${MIN_REMINDER_MINUTES}–${MAX_REMINDER_MINUTES} minutes. Used unless a customer picks their own time in the app.`}
+              error={reminderError}
+            >
               <input
                 id="queue-reminder"
                 type="number"
-                min={1}
+                min={MIN_REMINDER_MINUTES}
+                max={MAX_REMINDER_MINUTES}
                 value={reminder}
                 onChange={(e) => setReminder(e.target.value)}
                 className={inputClass}
@@ -156,7 +175,13 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
           <Detail label="Name" value={queue.name} />
           <Detail label="Token prefix" value={queue.tokenPrefix} />
           <Detail label="Base time" value={`${queue.baseTimeMinutes} min`} />
-          <Detail label="Reminder" value={`${queue.defaultNotificationMinutes} min before`} />
+          <Detail
+            label="Reminder"
+            value={`${queue.defaultNotificationMinutes} min before`}
+            help="Unless the customer picks their own time"
+          />
+          {/* Multiple services is fixed at creation (ADR-055) and shown,
+              locked, under Services & Verification — not here. */}
           <Detail label="Form version" value={`v${queue.formVersion}`} help="Changes by itself whenever the customer form is edited." />
           <div className="col-span-full rounded-lg bg-subtle/50 p-3">
             <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Description</dt>

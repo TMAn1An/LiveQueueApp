@@ -1,4 +1,6 @@
 import '../models/live_queue_token.dart';
+import '../models/notification_preferences.dart';
+import '../models/token_reminder_status.dart';
 import '../models/service_start_verification_code.dart';
 import '../services/socket_service.dart';
 import '../services/token_api_service.dart';
@@ -90,6 +92,15 @@ class TokenRepository {
     return _apiService.cancelToken(tokenId, deviceIdentifier);
   }
 
+  /// ADR-062 — see [TokenApiService.setNotificationPreferences].
+  Future<TokenReminderStatus> setNotificationPreferences(
+    String tokenId,
+    String deviceIdentifier,
+    NotificationPreferences preferences,
+  ) {
+    return _apiService.setNotificationPreferences(tokenId, deviceIdentifier, preferences);
+  }
+
   Future<ServiceStartVerificationCode> getVerificationCode(String tokenId, String deviceIdentifier) {
     return _apiService.getVerificationCode(tokenId, deviceIdentifier);
   }
@@ -99,6 +110,11 @@ class TokenRepository {
   }
 
   Stream<bool> get connectionStatus => _socketService.connectionStatus;
+
+  /// The connection as it stands right now. [connectionStatus] only reports
+  /// changes, so a listener that subscribes to an already-open socket would
+  /// otherwise never learn it is connected.
+  bool get isSocketConnected => _socketService.isConnected;
 
   /// token.called / token.started / token.completed / token.skipped all
   /// carry the *full* customer-safe token view as their payload (Phase 4

@@ -276,6 +276,33 @@ A focused re-read of Checkpoint 7's actual committed code (not the prior checkpo
 - **Mid-session:** a token refresh that cannot reach the backend now fails that one request instead of signing the user out; the next request tries again.
 - **Verification:** dashboard 387/387 (46 new); with network errors treated as refusals again, 16 of the new tests fail. In the browser: backend stopped, two reloads — reconnecting screen on the same URL, stored session unchanged; backend started — signed in by itself within about ten seconds; a token the backend never issued — straight to sign-in.
 
+### V2 Notification Preferences That Take Effect (2026-10-02, on `feature/reminder-preferences`)
+
+**Status: implemented; tested on a physical Pixel 8 (Android 17) against a local backend; not deployed. See ADR-062. Backend (one additive migration), dashboard and mobile.**
+
+Found during physical-device QA of app build 1.0.2 (3):
+
+- **The dashboard's queue "Reminder" was read by nothing; the app's reminder only worked with Live Tracking open; Sound and Vibration changed nothing on Android 8+.** All three are now real.
+- **Whose reminder time applies:** the customer's own when they chose one, otherwise the queue's default. `notification_preferences.reminder_minutes` is nullable (migration `20261002080000_notification_preference_optional_reminder_minutes`, metadata-only, no rows rewritten); the default is resolved at dispatch, so a dashboard change reaches waiting customers who follow it.
+- **App:** Notification Settings gains "Queue's default" and a "Custom" field (2–120 minutes) beside the suggested values. Preferences are registered with the backend when tracking starts and whenever a setting changes, which is what enables the reminder push with the app closed. Live Tracking shows the reminder time in force and whose it is.
+- **Caution:** shown on Live Tracking and in Notification Settings when the turn is already closer than the reminder time and no reminder has gone out.
+- **Sound / Vibration:** one Android channel per combination, per notification kind; the backend names the matching channel on its pushes. One reminder per token whichever path delivers it (`token_reminder` push type, `reminderSent` on the customer view, a per-token claim in the app). A push Firebase refuses releases its claim, so the app's own reminder stays available and the next run retries.
+- **Dashboard:** the queue's Reminder field is limited to 2–120 and says the customer can override it. It was already editable (Queue → Details → Edit).
+- **Defects fixed alongside (all found on the device):** "Enable notifications" said "Tap to allow" although permission was granted; Back with the drawer open on Home sent the app to the background; the connection indicator said "Reconnecting…" on every token opened after the first; Back from Live Tracking after joining returned into the join screens.
+- **Verification:** backend 79 files / 896 tests (28 new); mobile 422 tests (62 new) at this point, analyzer infos only (pre-existing); dashboard 391 tests, typecheck and build clean. On the phone: settings state on open, custom value with validation and persistence, the caution on both screens from the backend's own estimate, the queue's default followed and a change to it picked up, the reminder at the chosen time, and — for each of the four Sound / Vibration combinations — the reminder posted on that combination's channel, with the channel's own sound and vibration settings matching.
+- **Not verified on a device:** pushes with the app closed — the local backend has no Firebase credentials. Covered by backend tests; needs a deployed backend to confirm end to end.
+- **Recorded, not changed:** the scanner re-requests an unknown or failing code about twice a second while it stays in frame (existing tests specify an immediate retry); a reminder's in-app card stays on top of a later "It's your turn" until dismissed.
+
+### V2 Scan Opens the Services; Queue Details After Joining (2026-10-02, on `feature/reminder-preferences`)
+
+**Status: implemented; tested on a physical Pixel 8 against a local backend; not deployed. See ADR-063. Mobile only.**
+
+- **Old flow:** scan → Queue Details (Continue) → Select Services → form → You're In → Live Tracking.
+- **New flow:** scan → Select Services → form → You're In → Live Tracking, with a "Queue details" button on Live Tracking.
+- **Nothing a customer was told is lost:** the service screen is headed by the queue's name and description, the reason a queue cannot be joined (paused, closed, full, not yet set up), the repeat-visit rule, the later-session note and today's hours. A queue that cannot be joined offers no services and no Next.
+- **Queue Details is kept**, as a read-only page loaded fresh by queue id: the same summary, a status word and the services offered. A failed load says the token is unaffected and can be retried.
+- **Verification:** mobile 453 tests (31 new), analyzer infos only. On the phone: scan to services, the join, the Queue details page from Live Tracking, and Back from it to the token and from the token to Home.
+
 ### V2 Home-PC Final Verification (2026-10-01)
 
 **Status: PASS, from the final committed source (`81e6171`).** Local databases only (`livequeue_dev`; a dedicated local `livequeue_test` was created on this PC so the suite's `resetDb()` never touches the dev database).

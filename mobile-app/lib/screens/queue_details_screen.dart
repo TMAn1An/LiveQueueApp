@@ -2,162 +2,164 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/queue_config.dart';
-import '../providers/queue_join_provider.dart';
-import '../utils/queue_time.dart';
-import 'service_selection_screen.dart';
+import '../repositories/queue_repository.dart';
+import '../widgets/queue_join_summary.dart';
 
-/// Spec section 4.3: "Customer sees queue details -> Customer selects
-/// service." Also spec 33: avoid unnecessary forms/animations here.
-class QueueDetailsScreen extends StatelessWidget {
-  const QueueDetailsScreen({super.key});
+/// Everything a customer may want to know about the queue they are in:
+/// what it is, whether it is open, today's hours, its repeat-visit rule and
+/// the services it offers (ADR-063).
+///
+/// Opened from Live Tracking, once the customer holds a token. It used to be
+/// a step between the QR scan and the service list; that step is gone, and
+/// what it had to say before a join now heads the service list instead.
+///
+/// Always read fresh from the backend by queue id — a token can be reopened
+/// days after the join that first loaded its queue, and a queue's status and
+/// hours change. Read-only: nothing here starts or changes a join.
+class QueueDetailsScreen extends StatefulWidget {
+  const QueueDetailsScreen({super.key, required this.queueId});
+
+  final String queueId;
+
+  @override
+  State<QueueDetailsScreen> createState() => _QueueDetailsScreenState();
+}
+
+class _QueueDetailsScreenState extends State<QueueDetailsScreen> {
+  late Future<QueueConfig> _config;
+
+  @override
+  void initState() {
+    super.initState();
+    _config = _load();
+  }
+
+  Future<QueueConfig> _load() => context.read<QueueRepository>().getQueueConfig(widget.queueId);
+
+  void _retry() {
+    setState(() {
+      _config = _load();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<QueueJoinProvider>();
-    final config = provider.queueConfig;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Queue Details')),
-      body: config == null
-          ? const Center(child: Text('Queue not found.'))
-          : Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(config.name, style: Theme.of(context).textTheme.headlineSmall),
-                  if (config.description != null) ...[
-                    const SizedBox(height: 8),
-                    Text(config.description!),
-                  ],
-                  const SizedBox(height: 16),
-                  if (config.status != 'ACTIVE')
-                    _Notice(
-                      // A queue that predates ADR-034 and still has no way to
-                      // recognise a customer refuses every join, so this says
-                      // so here rather than after a whole form is filled in.
-                      text: provider.queueNeedsIdentitySetup
-                          ? 'This queue is not accepting customers yet. Please contact staff.'
-                          : 'This queue is not currently accepting new customers.',
-                    )
-                  else if (provider.queueNeedsIdentitySetup)
-                    const _Notice(
-                      text: 'This queue is not accepting customers yet. Please contact staff.',
-                    )
-                  // Phase 4: the backend already composes the specific
-                  // reason (closed today / opens at 09:00 / session full,
-                  // etc.) — shown here, before a form is filled in, the same
-                  // way the identity/repeat notices above already are.
-                  else if (config.schedule.scheduleEnabled && !config.schedule.acceptingJoins)
-                    _Notice(text: config.schedule.message ?? 'This queue is not currently open.')
-                  else if (_scopedRepeatNotice(config) != null)
-                    _Notice(text: _scopedRepeatNotice(config)!),
-                  // ADR-048: before the next session starts the queue still
-                  // accepts joins — the customer is told they will be served
-                  // later today, not turned away.
-                  if (config.schedule.scheduleEnabled &&
-                      config.schedule.acceptingJoins &&
-                      !config.schedule.isOpenNow &&
-                      config.schedule.message != null) ...[
-                    const SizedBox(height: 8),
-                    Text(config.schedule.message!),
-                  ],
-                  if (config.schedule.scheduleEnabled &&
-                      config.schedule.acceptingJoins &&
-                      config.schedule.todaySessions.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      "Today's hours: ${config.schedule.todaySessions.map((s) => s.label).join(', ')}",
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                  const Spacer(),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: config.isAcceptingCustomers &&
-                              !provider.queueNeedsIdentitySetup
-                          ? () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const ServiceSelectionScreen()),
-                              )
-                          : null,
-                      child: const Text('Continue'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+      body: FutureBuilder<QueueConfig>(
+        future: _config,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final config = snapshot.data;
+          if (config == null) {
+            return _LoadFailed(onRetry: _retry);
+          }
+          return _Details(config: config);
+        },
+      ),
     );
   }
 }
 
-/// Told before anyone fills anything in, so a limit is never a surprise at
-/// the end of the flow. Says nothing about who has already visited (ADR-034).
-String? _repeatNotice(QueueConfig config) {
-  final identity = config.identity;
-  switch (identity.restrictionType) {
-    case 'ONCE_EVER':
-      return 'Each customer may use this queue once.';
-    case 'DURATION':
-      final amount = identity.restrictionAmount;
-      final unit = _unitLabel(identity.restrictionUnit, amount);
-      if (amount == null || unit == null) return 'Repeat visits are limited.';
-      return 'After being served, you can use this queue again in $amount $unit.';
-    case 'UNTIL_DATETIME':
-      final until = identity.restrictionUntil;
-      if (until == null) return 'Repeat visits are limited.';
-      // A shared cutoff is a single moment for everyone, so it is worth
-      // naming the queue's clock when the customer is on a different one.
-      final when = dualTime(until, timezoneName: config.timezone, dateAndTime: true);
-      return when.differs
-          ? 'One visit per customer until ${when.queue} (${when.timezoneName}).'
-          : 'One visit per customer until ${when.local}.';
-    default:
-      return null;
-  }
-}
+class _Details extends StatelessWidget {
+  const _Details({required this.config});
 
-/// ADR-049: the queue-wide notice, reworded when the limit is per session —
-/// a customer served in the morning must not read it as "you can never come
-/// back today".
-String? _scopedRepeatNotice(QueueConfig config) {
-  final notice = _repeatNotice(config);
-  if (notice == null || !config.identity.isPerSession) return notice;
-  if (config.identity.restrictionType == 'ONCE_EVER') {
-    return 'Each customer may be served once per session. You can still join a different session.';
-  }
-  return '$notice This limit applies per session — you can still join a different session.';
-}
-
-/// Singular or plural, so the sentence reads naturally.
-String? _unitLabel(String? unit, int? amount) {
-  const labels = {
-    'MINUTE': ['minute', 'minutes'],
-    'HOUR': ['hour', 'hours'],
-    'DAY': ['day', 'days'],
-    'WEEK': ['week', 'weeks'],
-    'MONTH': ['month', 'months'],
-    'YEAR': ['year', 'years'],
-  };
-  final pair = labels[unit];
-  if (pair == null || amount == null) return null;
-  return amount == 1 ? pair[0] : pair[1];
-}
-
-class _Notice extends StatelessWidget {
-  const _Notice({required this.text});
-
-  final String text;
+  final QueueConfig config;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
+    final theme = Theme.of(context);
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        // The customer is already in this queue, so nothing here is about
+        // whether *they* may join — a limit on repeat visits or a closed
+        // queue is shown as a fact about the queue.
+        QueueJoinSummary(
+          config: config,
+          needsIdentitySetup: config.identity.configurationRequired,
+        ),
+        const SizedBox(height: 16),
+        const Divider(),
+        _Row(label: 'Status', value: _statusLabel(config)),
+        if (config.services.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Text('Services', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          for (final service in config.services)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(service.serviceName),
+              subtitle: service.description != null ? Text(service.description!) : null,
+              trailing: Text('${service.durationMinutes} min'),
+            ),
+          Text(
+            config.allowMultipleServices
+                ? 'Several services can be chosen in one visit.'
+                : 'One service per visit.',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// The queue's own status, in a word. Whether it is taking joins right now
+  /// — a schedule can close an ACTIVE queue — is what "Open" means here.
+  static String _statusLabel(QueueConfig config) {
+    if (config.status == 'PAUSED') return 'Paused';
+    if (config.status != 'ACTIVE') return 'Closed';
+    return config.isAcceptingCustomers ? 'Open' : 'Closed for now';
+  }
+}
+
+class _Row extends StatelessWidget {
+  const _Row({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodyLarge;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: style),
+          Text(value, style: style?.copyWith(fontWeight: FontWeight.bold)),
+        ],
       ),
-      child: Text(text, style: const TextStyle(color: Colors.orange)),
+    );
+  }
+}
+
+class _LoadFailed extends StatelessWidget {
+  const _LoadFailed({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Could not load this queue\'s details just now. Your token is not affected.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton(onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
     );
   }
 }

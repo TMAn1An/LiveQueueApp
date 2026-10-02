@@ -132,7 +132,15 @@ class FcmService {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         final title = message.notification?.title;
         final body = message.notification?.body;
-        if (title != null && body != null) {
+        // The one payload detail read here: the backend's reminder push
+        // names its token so it can be claimed (ADR-062). Live Tracking
+        // raises the same reminder itself while it is open, and the customer
+        // must be told once, not once per channel.
+        final reminderTokenId =
+            message.data['type'] == 'token_reminder' ? message.data['tokenId'] as String? : null;
+        final alreadyAnnounced =
+            reminderTokenId != null && !_notificationService.claimReminder(reminderTokenId);
+        if (title != null && body != null && !alreadyAnnounced) {
           unawaited(_notificationService.showGenericNotification(title: title, body: body));
         }
         if (message.data.isNotEmpty) {
