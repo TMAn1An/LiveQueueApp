@@ -58,9 +58,10 @@ first run's summary. From then on, any build signed by a different key fails.
 
 1. Bump `version:` in `mobile-app/pubspec.yaml` (name and build number) on master
    and add `docs/releases/<tag>.md`.
-2. Actions → **Android release** → Run workflow on `master`, with `tag` set (for
-   example `v2.1.3`). First run with `publish` unticked to check the build, then
-   again with `publish` ticked.
+2. Actions → **Android release** → Run workflow on `master`, with `tag` set to
+   `v` + the Android `versionName` (for `version: 1.0.3+4`, the tag is `v1.0.3`;
+   release tags always follow the app version). First run with `publish`
+   unticked to check the build, then again with `publish` ticked.
 3. The run summary lists the APK SHA-256 and signing certificate. The release
    gets `LiveQueue-<tag>.apk` attached.
 
