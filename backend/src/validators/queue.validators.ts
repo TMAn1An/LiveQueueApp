@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_REMINDER_MINUTES, MIN_REMINDER_MINUTES } from '../utils/reminderMinutes';
 
 /**
  * The repeat-visit identity policy (ADR-034). Every field is optional here
@@ -62,6 +63,14 @@ const scheduleFields = {
   scheduleVisibleToCustomers: z.boolean().optional(),
 };
 
+/** The queue's default reminder time, within the same range a customer may
+ * choose from in the app (ADR-062). */
+const queueReminderMinutes = z
+  .number()
+  .int()
+  .min(MIN_REMINDER_MINUTES, `Reminder must be at least ${MIN_REMINDER_MINUTES} minutes.`)
+  .max(MAX_REMINDER_MINUTES, `Reminder must be at most ${MAX_REMINDER_MINUTES} minutes.`);
+
 export const createQueueSchema = {
   body: z.object({
     name: z.string().trim().min(1, 'Queue name is required.').max(120),
@@ -70,7 +79,7 @@ export const createQueueSchema = {
     tokenPrefix: z.string().trim().min(1, 'Token prefix is required.').max(10),
     startingNumber: z.number().int().positive().default(1),
     baseTimeMinutes: z.number().int().positive().default(5),
-    defaultNotificationMinutes: z.number().int().positive().default(10),
+    defaultNotificationMinutes: queueReminderMinutes.default(10),
     status: queueStatus.default('ACTIVE'),
     allowRepeatVisits: z.boolean().default(true),
     allowMultipleServices: z.boolean().default(true),
@@ -90,7 +99,7 @@ export const updateQueueSchema = {
     tokenPrefix: z.string().trim().min(1).max(10).optional(),
     startingNumber: z.number().int().positive().optional(),
     baseTimeMinutes: z.number().int().positive().optional(),
-    defaultNotificationMinutes: z.number().int().positive().optional(),
+    defaultNotificationMinutes: queueReminderMinutes.optional(),
     allowRepeatVisits: z.boolean().optional(),
     allowMultipleServices: z.boolean().optional(),
     requireServiceStartOtp: z.boolean().optional(),

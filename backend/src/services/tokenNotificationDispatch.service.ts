@@ -2,6 +2,7 @@ import type { TokenStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { logger } from '../config/logger';
 import * as fcmService from './fcm.service';
+import { androidChannelId } from '../utils/notificationChannel';
 
 /**
  * Issue #5 — pushes a customer-facing FCM notification after a token status
@@ -62,6 +63,14 @@ export async function notifyTokenStatusChange(tokenId: string): Promise<void> {
       return;
     }
 
+    // ADR-062: the customer's sound/vibration choice for this token, when
+    // the app has registered one. Without it the push goes to Android's
+    // default channel, as it always did.
+    const preference = await prisma.notificationPreference.findUnique({
+      where: { deviceId_tokenId: { deviceId: token.deviceId, tokenId: token.id } },
+      select: { soundEnabled: true, vibrationEnabled: true },
+    });
+
     const result = await fcmService.sendNotification(fcmRecord.fcmToken, {
       title: text.title,
       body: text.body,
@@ -70,6 +79,14 @@ export async function notifyTokenStatusChange(tokenId: string): Promise<void> {
         tokenId: token.id,
         status: token.status,
       },
+      ...(preference
+        ? {
+            androidChannelId: androidChannelId(
+              token.status === 'CALLED' ? 'turn_alert' : 'queue_updates',
+              preference,
+            ),
+          }
+        : {}),
     });
 
     if (!result.ok && result.invalidToken) {

@@ -696,8 +696,11 @@ model NotificationPreference {
   token    Token  @relation(fields: [tokenId], references: [id], onDelete: Cascade)
 
   /// Spec 7.18: customer-configurable, minimum 2 minutes — enforced by Zod
-  /// at the registration endpoint, not just documented here.
-  reminderMinutes      Int     @map("reminder_minutes")
+  /// at the registration endpoint, not just documented here. Null means the
+  /// customer made no choice of their own, so the queue's
+  /// defaultNotificationMinutes applies (ADR-062) — resolved when a reminder
+  /// is dispatched, so a change to the queue's default takes effect at once.
+  reminderMinutes      Int?    @map("reminder_minutes")
   vibrationEnabled     Boolean @default(true) @map("vibration_enabled")
   soundEnabled         Boolean @default(true) @map("sound_enabled")
   notificationsEnabled Boolean @default(true) @map("notifications_enabled")

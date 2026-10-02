@@ -919,6 +919,10 @@ function toCustomerView(
     estimatedWaitMinutes: computed.estimatedWaitMinutes,
     estimatedReadyAt: computed.estimatedReadyAt,
     etaUnavailableReason: computed.etaUnavailableReason,
+    /** ADR-062: whether the "almost your turn" push has already gone out for
+     * this token, so the app never announces the same reminder a second time
+     * on its own. A yes/no only — never the timestamp. */
+    reminderSent: token.reminderSentAt !== null,
     counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
     /** Phase 4: the customer-safe view of this token's fixed session
      * assignment — the snapshotted window, never the internal

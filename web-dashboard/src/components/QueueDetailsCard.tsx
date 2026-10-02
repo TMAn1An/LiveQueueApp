@@ -11,6 +11,11 @@ import type { Queue } from '../types/queue';
 const inputClass =
   'w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-fg focus:border-brand-500';
 
+/** The range a reminder time may take — the same one a customer chooses from
+ * in the app; the backend enforces it (ADR-062). */
+const MIN_REMINDER_MINUTES = 2;
+const MAX_REMINDER_MINUTES = 120;
+
 /**
  * The queue's own details. What is shown and what can be edited are the
  * same set of fields, in the same order — the view used to show token prefix
@@ -49,7 +54,8 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
     !Number.isInteger(baseTimeValue) ||
     baseTimeValue < 1 ||
     !Number.isInteger(reminderValue) ||
-    reminderValue < 1;
+    reminderValue < MIN_REMINDER_MINUTES ||
+    reminderValue > MAX_REMINDER_MINUTES;
 
   function save() {
     setError(null);
@@ -112,11 +118,16 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
                 className={inputClass}
               />
             </Field>
-            <Field label="Reminder (minutes before turn)" htmlFor="queue-reminder" hint="Default for customers who turn on reminders.">
+            <Field
+              label="Reminder (minutes before turn)"
+              htmlFor="queue-reminder"
+              hint={`Used unless a customer picks their own time in the app. ${MIN_REMINDER_MINUTES}–${MAX_REMINDER_MINUTES} minutes.`}
+            >
               <input
                 id="queue-reminder"
                 type="number"
-                min={1}
+                min={MIN_REMINDER_MINUTES}
+                max={MAX_REMINDER_MINUTES}
                 value={reminder}
                 onChange={(e) => setReminder(e.target.value)}
                 className={inputClass}
@@ -158,7 +169,11 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
           <Detail label="Name" value={queue.name} />
           <Detail label="Token prefix" value={queue.tokenPrefix} />
           <Detail label="Base time" value={`${queue.baseTimeMinutes} min`} />
-          <Detail label="Reminder" value={`${queue.defaultNotificationMinutes} min before`} />
+          <Detail
+            label="Reminder"
+            value={`${queue.defaultNotificationMinutes} min before`}
+            hint="Unless the customer picks their own time"
+          />
           <Detail label="Multiple services" value={queue.allowMultipleServices ? 'Allowed' : 'One per visit'} />
           <Detail label="Form version" value={`v${queue.formVersion}`} hint="Changes when the customer form is edited" />
           <div className="col-span-full rounded-lg bg-subtle/50 p-3">
