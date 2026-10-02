@@ -1547,3 +1547,48 @@ SKIPPED and CANCELLED still delete the hold (never an entitlement); COMPLETED st
 **Why this does not accept stale authorization.** Authorization is never granted by the client. While reconnecting, the app holds a token and shows nothing; the first thing it does when the backend returns is have that token checked, and a refusal signs the user out. The token itself still expires and can still be revoked server-side during the outage — the wait cannot outlive either.
 
 **Residual.** A rotation whose response is lost, followed by more than 10 seconds before the server is reachable again, is still reported as reuse and revokes that user's sessions. Closing that fully needs an idempotency key on the refresh exchange (a schema and protocol change); not done here, recorded so it is not rediscovered.
+
+## ADR-062: The customer's reminder time overrides the queue's default, and the notification switches are real (2026-10-02)
+
+**Status:** Implemented on `feature/reminder-preferences`. Backend (one additive migration), dashboard and mobile.
+
+**What was found.** Physical-device QA of the notification settings turned up three things that looked configurable and were not:
+
+- *The queue's "Reminder" on the dashboard did nothing.* `Queue.defaultNotificationMinutes` was stored and editable, and read by no code at all.
+- *The app's reminder time only worked while Live Tracking was open.* The backend's reminder push needs a `NotificationPreference` row (its absence is the opt-out), and the app never created one — so no customer ever received a reminder with the app closed.
+- *Sound and Vibration were dummies on Android 8+.* The app passed `playSound`/`enableVibration` per notification; since Android 8 both belong to the notification *channel* and are fixed when it is created. Every notification used the same two channels, so the switches changed nothing.
+
+**Decision 1 — whose reminder time applies.** The customer's own time, when they chose one; otherwise the queue's default. Recorded as it is: `notification_preferences.reminder_minutes` becomes nullable, and NULL means "no choice of my own". The default is resolved when a reminder is dispatched, not copied at join time, so a change staff make on the dashboard reaches every waiting customer who follows it. A customer may choose any whole number from 2 (spec 7.18's minimum) to 120 minutes; the queue's default is validated to the same range, and a value stored before that is clamped when read (`utils/reminderMinutes.ts`).
+
+- *Rejected: resolve the default in the app.* The app would need each queue's default for every remembered token and would hold a second copy of a rule the backend must apply anyway for the push. The app now sends its choice (or null) and is told the time in force, its source and the queue's default in the response.
+- *New installs follow the queue's default.* A time saved by an earlier app version is kept as the customer's own choice — it was shown to them as selected.
+
+**Decision 2 — the app registers its preferences.** `PUT /api/tokens/:id/notification-preferences` is called when tracking starts and whenever a setting changes (for every active token). The request is idempotent and failure-tolerant: offline, the app assumes the usual default of 10 until the backend answers. The response also carries the token's status and current estimate, which is how the settings screen can warn about a reminder longer than the wait without recomputing anything.
+
+**Decision 3 — one reminder, not one per channel.** With registration, a customer could be told twice: the backend's push and the app's own reminder (raised from a socket position update while Live Tracking is open). Three guards: the push carries `{type: 'token_reminder', tokenId}` and the app claims a reminder per token before showing either; the customer view carries `reminderSent` (a yes/no, never the timestamp) so a reopened app stays quiet; and the claim outlives a tracking session, so reopening the same token does not repeat it.
+
+**Decision 4 — sound and vibration by channel.** Each combination of the two switches has its own channel per notification kind: `turn_alert` / `queue_updates`, plus `_sound_only`, `_vibrate_only`, `_silent`. The both-on channel keeps the id the app has always used, so existing installs keep their settings. The backend names the matching channel on its pushes (`utils/notificationChannel.ts`) — a push shown while the app is closed runs no app code, so the server has to choose. The ids are a contract between the two; if a channel is missing on the device (older app), Android falls back to its default channel and the push is still shown. A push for a token with no registered preference names no channel, exactly as before.
+
+**Decision 5 — say when the reminder cannot give its notice.** If the turn is already closer than the reminder time and no reminder has gone out, Live Tracking and Notification Settings show a caution. It is decided when tracking starts or a setting changes, not on every tick: a wait that counts down past the reminder time is the reminder working.
+
+**Also fixed.** Notification Settings showed "Tap to allow notifications" until tapped even when permission was granted — the state is now read on open and on resume, without prompting. On Home (the bottom of the navigation stack) the system Back button with the drawer open sent the app to the background: Android only hands Back to an app that has said it will handle it, and the root route had not. A `PopScope` now claims it while the drawer is open. The connection indicator said "Reconnecting…" on every token opened after the first: the socket outlives a tracking session and only reports changes, so the provider now reads its current state when tracking starts. And Back from Live Tracking after a fresh join returned into the join screens; they now leave the stack with the join.
+
+**A refused push gives its claim back.** `reminderSentAt` is claimed before sending so that a crash under-delivers rather than duplicates. Now that the app trusts that column (`reminderSent`) to keep its own reminder quiet, a push Firebase refuses must not leave it set: the claim is released, the app's fallback stays available, and the next run retries. A dead token is still removed, which takes the device out of selection.
+
+**Consequences / limits.** Up to eight notification categories can appear in Android's settings for the app over time (only the combinations a customer has actually used are created). A foreground push for a token that is not open in Live Tracking is shown but not added to the in-app Notification Center — unchanged behaviour, recorded. iOS has no channels; `presentSound` already honoured the Sound switch there and nothing else changes.
+
+## ADR-063: A scan opens the services; Queue Details is a page for someone already in the queue (2026-10-02)
+
+**Status:** Implemented on `feature/reminder-preferences`. Mobile only; no backend or dashboard change.
+
+**Change of requirement.** Spec section 4.3 reads "Customer sees queue details → Customer selects service", and the app had a Queue Details screen between the QR scan and the service list, with a Continue button. The product owner asked for the scan to open the service list directly, and for Queue Details to be kept but shown only once a token has been taken. This ADR records that departure from the spec's sequence; the specification's content (what a customer is told, what is refused) is unchanged.
+
+**Old flow.** Scan → Queue Details (Continue) → Select Services → form → You're In → Live Tracking.
+
+**New flow.** Scan → Select Services → form → You're In → Live Tracking, with a "Queue details" button on Live Tracking that opens the Queue Details page.
+
+**What must not be lost.** The removed step was also where a customer learned, before filling anything in, that a queue was paused, closed, full, not yet set up to recognise customers, or limited to one visit — and where a queue that would refuse the join had its Continue button disabled. All of that moved to the top of the service screen (`QueueJoinSummary`, with `joinBlockedNotice` / `repeatVisitNotice`): the queue's name and description, the reason it cannot be joined (in the backend's own words for a schedule), the repeat-visit rule, the later-session note and today's hours. A queue that cannot be joined shows its reason and offers no services and no Next. The gate is the same expression as before and fails closed. The backend remains the authority at join time.
+
+**Queue Details, after a join.** `QueueDetailsScreen(queueId)` is read-only and loads the public queue configuration fresh by id — it cannot rely on the join flow's state, because a token may be reopened from Home or after a restart long after that state is gone, and a queue's status and hours change. It shows the same summary plus a status word and the services offered. A failed load says the token is unaffected and offers a retry.
+
+**Unchanged.** Service selection rules (a single service is offered, not pre-selected; one-per-visit queues swap; an empty queue says so), the form, email verification, idempotent token creation, and every backend check. Back from the service screen returns to wherever scanning started, as the scanner is replaced rather than stacked.
