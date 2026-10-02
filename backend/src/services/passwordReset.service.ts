@@ -3,14 +3,14 @@ import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { AppError } from '../utils/AppError';
 import { hashPassword } from '../utils/password';
-import { generateRefreshToken, hashRefreshToken } from '../utils/tokens';
+import { generateEmailLinkToken, hashRefreshToken } from '../utils/tokens';
 import * as emailService from './email.service';
 
 /**
  * ADR-058: "Forgot password?".
  *
- * Same token shape as email verification and staff invitations: a
- * high-entropy random value is emailed, and only its SHA-256 hash is stored.
+ * Same token shape as email verification and staff invitations (ADR-060): a
+ * 32-byte base64url value is emailed, and only its SHA-256 hash is stored.
  * The link works once, for PASSWORD_RESET_TTL_MINUTES, and redeeming it signs
  * the account out everywhere.
  *
@@ -60,7 +60,8 @@ export async function requestPasswordReset(email: string): Promise<void> {
       return;
     }
 
-    const raw = generateRefreshToken();
+    // ADR-060: the same short, 256-bit, URL-safe token as every emailed link.
+    const raw = generateEmailLinkToken();
     // One live link per account: a new request retires every older one.
     await prisma.$transaction([
       prisma.passwordResetToken.deleteMany({ where: { staffId: staff.id, usedAt: null } }),

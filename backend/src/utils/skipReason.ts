@@ -7,14 +7,17 @@ import { AppError } from './AppError';
  * reads, so both go through the same normalization before being stored.
  */
 
-/** The customer-facing wording for each predefined reason. Stored as a
- * snapshot on the token at skip time (Token.skipReasonText), so changing a
- * label here never rewrites what an earlier customer was told. */
+/** The wording the skipped person reads for each predefined reason. Neutral
+ * ("person", not "customer") because not every queue serves customers.
+ * Stored as a snapshot on the token at skip time (Token.skipReasonText), so
+ * changing a label here never rewrites what an earlier person was told — a
+ * token skipped before this wording keeps the text it was given. The codes
+ * themselves are stable identifiers and never change. */
 export const SKIP_REASON_LABELS: Record<Exclude<SkipReasonCode, 'OTHER'>, string> = {
-  CUSTOMER_NOT_PRESENT: 'Customer not present',
-  NO_RESPONSE: 'No response from customer',
+  CUSTOMER_NOT_PRESENT: 'Person not present',
+  NO_RESPONSE: 'No response from person',
   MISSING_REQUIREMENT: 'Required document/information missing',
-  CUSTOMER_LEFT: 'Customer requested to leave',
+  CUSTOMER_LEFT: 'Person requested to leave',
 };
 
 export const SKIP_REASON_CODES: readonly SkipReasonCode[] = [

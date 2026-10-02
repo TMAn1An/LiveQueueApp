@@ -1615,6 +1615,29 @@ Nobody may act against the OWNER, and nobody removes themselves directly.
 - **InfoHelp sweep (ADR-053 applied further).** Moved behind ⓘ: Create Queue's switch descriptions, token-prefix hint and repeat-visit note; Edit Details' field hints; repeat-visit scope descriptions, identity-mode help (including the shared-mailbox caveat), identifying-question rule and "when changes apply"; timezone guidance; schedule switch descriptions; form-builder key and preview notes; staff role/permission note. Kept on the page: validation errors, the permanent-setting notes, current-status summaries, live consequence previews (e.g. "a customer served now could return after…"), the per-session-unavailable explanation, destructive-action and skip consequences, empty and first-run guidance. An ⓘ is never placed inside a `<label>` (opening it would toggle the control).
 - **Fixed on the way:** `--color-brand-950` did not exist, so six `dark:bg-brand-950/…` tints silently fell back to the light `brand-50` fill in dark mode (e.g. the ADMIN role badge); the token is now defined. Add Service used to fail silently; it now shows the server's message.
 
+## ADR-060: Transactional email hygiene, and neutral skip wording (2026-10-02)
+
+**Status:** Implemented on `feature/email-deliverability-skip-wording`. No migration. Not deployed.
+
+### Email
+
+Gmail filed a verification email as spam ("similar to messages that were identified as spam in the past"). Authentication is published for `tdastudbook.au` (SPF on the `send` return-path subdomain, `resend._domainkey` DKIM, DMARC `p=none`), so the remaining signals are reputation and content. The code changes address the content side; DNS and Resend settings are listed in DEPLOYMENT.md §3b-ii.
+
+- **One template builder** (`email.service.ts`): every message has the same shape — a "LiveQueue" brand line, a plain heading, why it arrived, one call-to-action button, the destination shown once more as **copyable text (not a second link)**, expiry, and a "not you?" footer. No marketing language, urgency or capitals. The staff invitation's second link (to `/login`) was removed.
+- **Plain text** is built from the same content, so the `text/plain` part always says the same thing as the HTML.
+- **Shorter links:** emailed one-time tokens are 32 random bytes as base64url (43 characters, 256 bits) instead of 96 hex characters (`generateEmailLinkToken`). Lookup is by SHA-256 hash, as before, so links already in inboxes keep working. Session refresh tokens are unchanged.
+- **Headers:** `Auto-Submitted: auto-generated` (RFC 3834) and a unique `X-Entity-Ref-ID` per message, so Gmail does not fold a resent verification email into the earlier thread and hide the new link. Resend sets the Message-ID. No `List-Unsubscribe` — these are not subscriptions. `EMAIL_REPLY_TO` is still applied when set.
+- **Duplicates:** account verification resend now has a per-account cooldown (`EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS`, default 60s; `429 VERIFICATION_RESEND_TOO_SOON`) on top of the per-IP limiter. The last send time is implied by the stored expiry, so no column was needed. Invitations and customer codes already had cooldowns; nothing retries automatically. The dashboard banner now shows the "please wait" message.
+- **Subjects:** "Verify your LiveQueue account", "You have been invited to LiveQueue", "Your LiveQueue verification code".
+- **Logs** name the kind of message and the provider error only — never the recipient, the link, the token or the code.
+- **Not changeable from code:** click/open tracking is a Resend domain setting (disable it), and inbox placement is never guaranteed.
+
+The password-reset email (ADR-058) was built on a separate branch; at integration it was moved onto the same `render()`/`deliver()` helpers and `generateEmailLinkToken` (reset token lookup, expiry, single use and session revocation unchanged).
+
+### Skip wording
+
+The skip dialog and reason labels say "person", not "customer": "Skip person"; "The person will see this reason…"; "Person not present", "No response from person", "Person requested to leave" ("Required document/information missing" and "Other" unchanged). Changed in the backend labels (`skipReason.ts`, the text stored on the token and shown to the skipped person), the dashboard dialog and options, and the mobile fallback labels. **The codes (`CUSTOMER_NOT_PRESENT`, `NO_RESPONSE`, `CUSTOMER_LEFT`, …) are unchanged.** A token skipped before this change keeps its stored text, so history is never rewritten. No skip behaviour changed.
+
 ## ADR-061: Suspension follows the removal governance (2026-10-02)
 
 **Status:** Implemented on `feature/dashboard-ux-governance-fixes`. No migration. Not deployed.

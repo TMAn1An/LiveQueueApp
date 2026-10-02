@@ -144,7 +144,7 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
     await user.click(screen.getByText('Skip'));
 
     expect(skipMutate).not.toHaveBeenCalled();
-    expect(screen.getByText('Skip customer')).toBeInTheDocument();
+    expect(screen.getByText('Skip person')).toBeInTheDocument();
     expect(screen.getByLabelText('Reason')).toBeInTheDocument();
   });
 });
@@ -246,15 +246,27 @@ describe('TokenActions — Skip requires a reason (ADR-042)', () => {
     return user;
   }
   const confirmSkip = () =>
-    within(screen.getByRole('dialog', { name: 'Skip customer' })).getByRole('button', { name: 'Skip' });
+    within(screen.getByRole('dialog', { name: 'Skip person' })).getByRole('button', { name: 'Skip' });
+
+  it('uses neutral "person" wording, with the reason codes unchanged', async () => {
+    await openSkip();
+    expect(
+      screen.getByText(
+        'The person will see this reason. Skipping ends their visit; they would need to scan the queue QR code again.',
+      ),
+    ).toBeInTheDocument();
+    const values = screen.getAllByRole('option').map((o) => (o as HTMLOptionElement).value).filter(Boolean);
+    expect(values).toEqual(['CUSTOMER_NOT_PRESENT', 'NO_RESPONSE', 'MISSING_REQUIREMENT', 'CUSTOMER_LEFT', 'OTHER']);
+    expect(screen.queryByText(/customer/i)).not.toBeInTheDocument();
+  });
 
   it('offers the predefined reasons and keeps Skip disabled until one is chosen', async () => {
     await openSkip();
     for (const label of [
-      'Customer not present',
-      'No response from customer',
+      'Person not present',
+      'No response from person',
       'Required document/information missing',
-      'Customer requested to leave',
+      'Person requested to leave',
       'Other',
     ]) {
       expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
@@ -301,7 +313,7 @@ describe('TokenActions — Skip requires a reason (ADR-042)', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(skipMutate).not.toHaveBeenCalled();
-    expect(screen.queryByText('Skip customer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Skip person')).not.toBeInTheDocument();
   });
 
   it('shows a backend refusal in the dialog and keeps it open', async () => {
@@ -315,7 +327,7 @@ describe('TokenActions — Skip requires a reason (ADR-042)', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Cannot transition token from COMPLETED to SKIPPED.',
     );
-    expect(screen.getByText('Skip customer')).toBeInTheDocument();
+    expect(screen.getByText('Skip person')).toBeInTheDocument();
   });
 
   it('says so plainly when the server could not be reached', async () => {
@@ -335,7 +347,7 @@ describe('TokenActions — Skip requires a reason (ADR-042)', () => {
     await user.selectOptions(screen.getByLabelText('Reason'), 'CUSTOMER_NOT_PRESENT');
     await user.click(confirmSkip());
 
-    expect(screen.queryByText('Skip customer')).not.toBeInTheDocument();
+    expect(screen.queryByText('Skip person')).not.toBeInTheDocument();
   });
 });
 

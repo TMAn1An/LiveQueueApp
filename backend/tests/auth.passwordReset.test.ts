@@ -35,8 +35,11 @@ const confirm = (token: string, password: string) =>
 
 interface SentEmail {
   to: string;
+  from: string;
   subject: string;
   html: string;
+  text: string;
+  headers: Record<string, string>;
 }
 
 /** Only the password-reset sends — registration also emails a verification link. */
@@ -49,7 +52,7 @@ const resetEmails = (): SentEmail[] =>
 async function emailedToken(times = 1): Promise<string> {
   await vi.waitFor(() => expect(resetEmails()).toHaveLength(times));
   const payload = resetEmails()[times - 1]!;
-  const match = /reset-password\?token=([a-f0-9]+)/.exec(payload.html);
+  const match = /reset-password\?token=([A-Za-z0-9_-]+)/.exec(payload.html);
   expect(match).not.toBeNull();
   return match![1]!;
 }
@@ -136,6 +139,43 @@ describe('ADR-058 — requesting a reset', () => {
       .post('/api/auth/password-reset/request')
       .send({ email: 'a@example.com', staffId: 'x' });
     expect(extra.status).toBe(422);
+  });
+});
+
+describe('ADR-058 + ADR-060 — the reset email uses the shared transactional template', () => {
+  it('one button, the link once more as text, a matching text/plain part and automated headers', async () => {
+    const owner = await registerOwner();
+    await requestReset(owner.email);
+    const raw = await emailedToken();
+    const mail = resetEmails()[0]!;
+    const url = `${env.APP_BASE_URL}/reset-password?token=${raw}`;
+
+    expect(mail.from).toBe(env.EMAIL_FROM);
+    expect(mail.subject).toBe('Reset your LiveQueue password');
+    // Shared layout: brand line, one anchor (the button), fallback text.
+    expect(mail.html.startsWith('<!doctype html>')).toBe(true);
+    expect(mail.html).toContain('>LiveQueue</p>');
+    expect(mail.html.match(/<a\b/g)).toHaveLength(1);
+    expect(mail.html).toContain("If the button doesn't work, copy and paste this link into your browser:");
+    expect(mail.html.split(url)).toHaveLength(3); // href + fallback text
+    // Plain text says the same, with the link exactly once.
+    expect(mail.text.split(url)).toHaveLength(2);
+    expect(mail.text).toContain('expires in 30 minutes');
+    expect(mail.text).toContain('signs you out on every device');
+    expect(mail.text).not.toMatch(/<\/?(p|a|div|h1)\b/);
+    expect(mail.headers['Auto-Submitted']).toBe('auto-generated');
+    expect(mail.headers['X-Entity-Ref-ID']).toBeTruthy();
+    expect(Object.keys(mail.headers).map((h) => h.toLowerCase())).not.toContain('list-unsubscribe');
+  });
+
+  it('uses the short 256-bit email-link token, still stored only as a hash', async () => {
+    const owner = await registerOwner();
+    await requestReset(owner.email);
+    const raw = await emailedToken();
+    expect(raw).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const row = await prisma.passwordResetToken.findFirstOrThrow({ where: { staffId: owner.staffId } });
+    expect(row.tokenHash).toBe(hashRefreshToken(raw));
+    expect(row.tokenHash).not.toContain(raw);
   });
 });
 

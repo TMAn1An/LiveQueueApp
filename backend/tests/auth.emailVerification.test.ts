@@ -26,6 +26,17 @@ async function rawRegister(overrides: Partial<{ organizationName: string; email:
   return res;
 }
 
+/** ADR-060: resend has a per-account cooldown. Tests that resend straight
+ * after registering step past it by ageing the stored send time (implied by
+ * the expiry), rather than waiting a real minute. */
+async function ageLastVerificationSend(staffId: string, byMs = 2 * 60 * 1000) {
+  const staff = await prisma.staff.findUniqueOrThrow({ where: { id: staffId } });
+  await prisma.staff.update({
+    where: { id: staffId },
+    data: { emailVerificationExpiresAt: new Date(staff.emailVerificationExpiresAt!.getTime() - byMs) },
+  });
+}
+
 describe('V2 Checkpoint 2 — email verification', () => {
   beforeEach(async () => {
     await resetDb();
@@ -103,6 +114,7 @@ describe('V2 Checkpoint 2 — email verification', () => {
 
     const before = await prisma.staff.findUnique({ where: { id: res.body.data.staff.id } });
 
+    await ageLastVerificationSend(res.body.data.staff.id);
     const resendRes = await api()
       .post('/api/auth/email-verification/resend')
       .set('Authorization', `Bearer ${accessToken}`);
@@ -158,6 +170,7 @@ describe('V2 Checkpoint 2 — email verification', () => {
     expect(me.status).toBe(200);
     expect(me.body.data.staff.status).toBe('PENDING_EMAIL_VERIFICATION');
 
+    await ageLastVerificationSend(res.body.data.staff.id);
     const resend = await api()
       .post('/api/auth/email-verification/resend')
       .set('Authorization', `Bearer ${accessToken}`);
@@ -181,6 +194,7 @@ describe('V2 Checkpoint 2 — email verification', () => {
     expect(login.body.data.staff.status).toBe('PENDING_EMAIL_VERIFICATION');
 
     const accessToken = login.body.data.accessToken as string;
+    await ageLastVerificationSend(res.body.data.staff.id);
     const resend = await api()
       .post('/api/auth/email-verification/resend')
       .set('Authorization', `Bearer ${accessToken}`);

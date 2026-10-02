@@ -90,3 +90,20 @@ describe('EmailVerificationBanner — updates by itself once the link is opened'
     expect(invalidate).not.toHaveBeenCalled();
   });
 });
+
+describe('EmailVerificationBanner — resend cooldown (ADR-060)', () => {
+  it('shows how long to wait when the server says it is too soon', async () => {
+    const { resendVerificationEmail } = await import('../api/auth.api');
+    const { ApiError } = await import('../api/client');
+    vi.mocked(resendVerificationEmail).mockRejectedValue(
+      new ApiError(429, 'VERIFICATION_RESEND_TOO_SOON', 'Please wait 42 seconds before sending another verification email.'),
+    );
+    renderBanner();
+    await act(async () => {
+      screen.getByRole('button', { name: 'Resend verification email' }).click();
+    });
+    expect(
+      await screen.findByText('Please wait 42 seconds before sending another verification email.'),
+    ).toBeInTheDocument();
+  });
+});

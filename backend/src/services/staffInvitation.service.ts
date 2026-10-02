@@ -3,7 +3,7 @@ import { prisma } from '../config/prisma';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { AppError } from '../utils/AppError';
-import { generateRefreshToken, hashRefreshToken } from '../utils/tokens';
+import { generateEmailLinkToken, hashRefreshToken } from '../utils/tokens';
 import { hashPassword } from '../utils/password';
 import * as emailService from './email.service';
 
@@ -36,7 +36,7 @@ export interface InvitationToken {
 }
 
 export function generateInvitationToken(): InvitationToken {
-  const raw = generateRefreshToken();
+  const raw = generateEmailLinkToken();
   return { raw, hash: hashRefreshToken(raw), expiresAt: new Date(Date.now() + INVITATION_TTL_MS) };
 }
 

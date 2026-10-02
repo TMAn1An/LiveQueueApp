@@ -156,8 +156,10 @@ describe('deliverability of every message', () => {
     const sent = payload();
     const url = /href="([^"]+verify-email\?token=[^"]+)"/.exec(sent.html)![1]!;
     expectMultipart(sent, url);
-    // The link is also readable as text, not only behind the button.
-    expect(sent.html.split(url).length - 1).toBeGreaterThanOrEqual(3);
+    // ADR-060: one link (the button) and the same URL once more as copyable
+    // text — never a second anchor.
+    expect(sent.html.split(url).length - 1).toBe(2);
+    expect(sent.html.match(/<a\b/g)).toHaveLength(1);
   });
 
   it('staff invitation email', async () => {

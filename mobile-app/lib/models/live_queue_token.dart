@@ -229,15 +229,15 @@ class LiveQueueToken {
   }
 }
 
-/// ADR-042 — the customer-facing wording for each skip reason code, used
+/// ADR-042 — the wording the skipped person reads for each skip reason code, used
 /// only as a fallback when a reason arrives without its recorded text (the
 /// backend always records one). Mirrors the backend's labels.
 String? skipReasonLabel(String? code) {
   return switch (code) {
-    'CUSTOMER_NOT_PRESENT' => 'Customer not present',
-    'NO_RESPONSE' => 'No response from customer',
+    'CUSTOMER_NOT_PRESENT' => 'Person not present',
+    'NO_RESPONSE' => 'No response from person',
     'MISSING_REQUIREMENT' => 'Required document/information missing',
-    'CUSTOMER_LEFT' => 'Customer requested to leave',
+    'CUSTOMER_LEFT' => 'Person requested to leave',
     _ => null,
   };
 }

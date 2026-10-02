@@ -100,7 +100,7 @@ describe('ADR-042 — skip requires a reason', () => {
     expect(await stored(token.id)).toEqual({
       status: 'SKIPPED',
       skipReasonCode: 'NO_RESPONSE',
-      skipReasonText: 'No response from customer',
+      skipReasonText: 'No response from person',
       completionFeedback: null,
     });
   });
@@ -112,7 +112,7 @@ describe('ADR-042 — skip requires a reason', () => {
       reasonCode: 'CUSTOMER_LEFT',
       reasonText: 'internal note',
     });
-    expect((await stored(token.id)).skipReasonText).toBe('Customer requested to leave');
+    expect((await stored(token.id)).skipReasonText).toBe('Person requested to leave');
   });
 
   it('OTHER without real text is rejected', async () => {
@@ -215,7 +215,7 @@ describe('ADR-042 — skip requires a reason', () => {
     // The original reason is still what is recorded.
     expect(await stored(token.id)).toMatchObject({
       skipReasonCode: 'CUSTOMER_NOT_PRESENT',
-      skipReasonText: 'Customer not present',
+      skipReasonText: 'Person not present',
     });
   });
 
@@ -361,5 +361,49 @@ describe('ADR-042 — operator text normalization', () => {
       'line one\n\nline two',
     );
     expect(normalizeOperatorText(' \n\t ', { multiline: true })).toBeNull();
+  });
+});
+
+// Neutral wording: the labels say "person", not "customer". The codes are
+// stable identifiers and did not change, and a token skipped under the old
+// wording keeps the text it was given (it is a stored snapshot).
+describe('skip reason wording — neutral "person" labels', () => {
+  beforeEach(async () => {
+    await resetDb();
+  });
+
+  it('every predefined code keeps its identifier and stores the neutral label', async () => {
+    const org = await setupOrgQueue();
+    const expected = {
+      CUSTOMER_NOT_PRESENT: 'Person not present',
+      NO_RESPONSE: 'No response from person',
+      MISSING_REQUIREMENT: 'Required document/information missing',
+      CUSTOMER_LEFT: 'Person requested to leave',
+    } as const;
+    for (const [code, text] of Object.entries(expected)) {
+      const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
+      expect((await skip(org.accessToken, token.id, { reasonCode: code })).status).toBe(200);
+      expect(await stored(token.id)).toMatchObject({ skipReasonCode: code, skipReasonText: text });
+      const view = await api().get(`/api/tokens/${token.id}`);
+      expect(view.body.data.skipReason).toEqual({ code, text });
+      expect(text.toLowerCase()).not.toContain('customer');
+    }
+  });
+
+  it('a token skipped before the wording change keeps its original text', async () => {
+    const org = await setupOrgQueue();
+    const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
+    await skip(org.accessToken, token.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    // Stand-in for a row written by the previous release.
+    await prisma.token.update({
+      where: { id: token.id },
+      data: { skipReasonText: 'Customer not present' },
+    });
+
+    const view = await api().get(`/api/tokens/${token.id}`);
+    expect(view.body.data.skipReason).toEqual({
+      code: 'CUSTOMER_NOT_PRESENT',
+      text: 'Customer not present',
+    });
   });
 });

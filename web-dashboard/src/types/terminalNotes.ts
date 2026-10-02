@@ -11,10 +11,10 @@ export type SkipReasonCode =
   | 'OTHER';
 
 export const SKIP_REASON_OPTIONS: { code: SkipReasonCode; label: string }[] = [
-  { code: 'CUSTOMER_NOT_PRESENT', label: 'Customer not present' },
-  { code: 'NO_RESPONSE', label: 'No response from customer' },
+  { code: 'CUSTOMER_NOT_PRESENT', label: 'Person not present' },
+  { code: 'NO_RESPONSE', label: 'No response from person' },
   { code: 'MISSING_REQUIREMENT', label: 'Required document/information missing' },
-  { code: 'CUSTOMER_LEFT', label: 'Customer requested to leave' },
+  { code: 'CUSTOMER_LEFT', label: 'Person requested to leave' },
   { code: 'OTHER', label: 'Other' },
 ];
 

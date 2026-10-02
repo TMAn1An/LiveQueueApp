@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Resend } from 'resend';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
@@ -64,29 +65,6 @@ export function isEmailAvailable(): boolean {
  * other recipient is rejected by the provider. */
 const RESEND_SANDBOX_SENDER = 'onboarding@resend.dev';
 
-/**
- * Body fields shared by every message. Deliverability, not decoration:
- *  - a plain-text alternative beside the HTML — HTML-only mail is a classic
- *    spam-filter signal, and some clients only show text;
- *  - a complete HTML document rather than a bare fragment;
- *  - an optional Reply-To on a monitored mailbox (EMAIL_REPLY_TO).
- * Sender-domain authentication (SPF/DKIM/DMARC) matters more than any of
- * this and lives in DNS — see docs/DEPLOYMENT.md §3b.
- */
-function messageBody(title: string, htmlBody: string, text: string) {
-  return {
-    html: `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head>
-<body style="margin: 0; padding: 24px; background: #ffffff;">
-${htmlBody}
-</body>
-</html>`,
-    text,
-    ...(env.EMAIL_REPLY_TO ? { replyTo: env.EMAIL_REPLY_TO } : {}),
-  };
-}
-
 export interface CustomerVerificationEmail {
   to: string;
   code: string;
@@ -134,14 +112,232 @@ export function reportEmailConfiguration(): void {
 }
 
 /**
- * Never throws — a delivery failure is reported back as a result, matching
- * fcm.service.ts's sendNotification exactly, so callers (register/resend)
- * can log-and-continue rather than fail an otherwise-successful DB write
- * over an email provider outage.
+ * ADR-060: every LiveQueue email is transactional and built the same way.
+ *
+ * Deliverability, not decoration:
+ *  - a complete HTML document *and* an equivalent text/plain part (Resend
+ *    sends both as multipart/alternative) — HTML-only mail is a classic spam
+ *    signal, and some clients only show text;
+ *  - one primary call to action, and the destination shown once as a short,
+ *    copyable fallback — never a second, differently-worded link and never a
+ *    hidden destination;
+ *  - plain wording: what this is, why it arrived, what to do, when it
+ *    expires, what to do if it was not you. No marketing language, urgency or
+ *    capitals;
+ *  - `Auto-Submitted: auto-generated` (RFC 3834) so auto-responders do not
+ *    reply, and a unique `X-Entity-Ref-ID` so Gmail does not collapse a
+ *    resent verification email into the earlier thread, which hides the new
+ *    link. Resend assigns the Message-ID itself.
+ *  - No List-Unsubscribe: these are not subscriptions.
+ * Sender-domain authentication (SPF/DKIM/DMARC) matters more than any of
+ * this and lives in DNS — see docs/DEPLOYMENT.md §3b.
  */
-export async function sendVerificationEmail(to: string, verificationUrl: string): Promise<boolean> {
+export interface TransactionalEmail {
+  subject: string;
+  html: string;
+  text: string;
+}
+
+interface EmailContent {
+  heading: string;
+  /** Plain sentences; escaped for HTML here. */
+  paragraphs: string[];
+  action?: { label: string; url: string };
+  /** A one-time code shown prominently instead of (or beside) a link. */
+  code?: string;
+  /** Small print after the action: expiry and similar. */
+  notes: string[];
+  /** Why the recipient got this, and what to do if it was not them. */
+  footer: string;
+}
+
+const FALLBACK_SENTENCE = "If the button doesn't work, copy and paste this link into your browser:";
+
+function renderHtml(content: EmailContent): string {
+  const p = (text: string, style: string) => `<p style="margin: 0 0 16px; ${style}">${escapeHtml(text)}</p>`;
+  const body = [
+    `<p style="margin: 0 0 24px; font-size: 14px; font-weight: 700; color: #0f539e;">LiveQueue</p>`,
+    `<h1 style="margin: 0 0 16px; font-size: 20px; font-weight: 700; color: #1e293b;">${escapeHtml(content.heading)}</h1>`,
+    ...content.paragraphs.map((text) => p(text, 'font-size: 15px; line-height: 1.5; color: #334155;')),
+  ];
+  if (content.code) {
+    body.push(
+      `<p style="margin: 8px 0 24px; font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #1e293b;">${escapeHtml(content.code)}</p>`,
+    );
+  }
+  if (content.action) {
+    const url = escapeHtml(content.action.url);
+    body.push(
+      `<p style="margin: 24px 0;"><a href="${url}" style="display: inline-block; background: #0f539e; color: #ffffff; padding: 12px 20px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 15px;">${escapeHtml(content.action.label)}</a></p>`,
+      // The destination appears once more as text only — the same URL, not a
+      // second link — so it can be copied when the button is not clickable.
+      p(FALLBACK_SENTENCE, 'font-size: 13px; color: #64748b;'),
+      `<p style="margin: -8px 0 16px; font-size: 13px; color: #64748b; word-break: break-all;">${url}</p>`,
+    );
+  }
+  body.push(...content.notes.map((text) => p(text, 'font-size: 13px; color: #64748b;')));
+  body.push(
+    `<p style="margin: 24px 0 0; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8;">${escapeHtml(content.footer)}</p>`,
+  );
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(content.heading)}</title></head>
+<body style="margin: 0; padding: 24px; background: #ffffff; font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+<div style="max-width: 480px; margin: 0 auto;">
+${body.join('\n')}
+</div>
+</body>
+</html>`;
+}
+
+function renderText(content: EmailContent): string {
+  const lines = [content.heading, '', ...content.paragraphs.flatMap((text) => [text, ''])];
+  if (content.code) lines.push(content.code, '');
+  if (content.action) lines.push(`${content.action.label}:`, content.action.url, '');
+  lines.push(...content.notes.flatMap((text) => [text, '']));
+  lines.push(content.footer, '', '— LiveQueue');
+  return lines.join('\n');
+}
+
+function render(subject: string, content: EmailContent): TransactionalEmail {
+  return { subject, html: renderHtml(content), text: renderText(content) };
+}
+
+/** Escapes text taken from the organization or a person's own name — free
+ * text someone typed, about to be placed into HTML. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  OWNER: 'Owner',
+  ADMIN: 'Administrator',
+  STAFF: 'Staff',
+};
+
+export function verificationEmail(verificationUrl: string): TransactionalEmail {
+  return render('Verify your LiveQueue account', {
+    heading: 'Verify your email address',
+    paragraphs: [
+      'You are receiving this because this email address was used to register an organization on LiveQueue.',
+      'Verify your address to finish setting up your account.',
+    ],
+    action: { label: 'Verify email address', url: verificationUrl },
+    notes: ['This link works once and expires in 15 minutes.'],
+    footer: "If you didn't create a LiveQueue account, you can ignore this email. No account is activated without this link.",
+  });
+}
+
+export function staffInvitationEmail(input: {
+  name: string;
+  organizationName: string;
+  role: string;
+  setupUrl: string;
+}): TransactionalEmail {
+  const role = ROLE_LABELS[input.role] ?? 'Staff';
+  return render('You have been invited to LiveQueue', {
+    heading: 'Set up your LiveQueue account',
+    paragraphs: [
+      `Hi ${input.name}, ${input.organizationName} has given you access to LiveQueue as ${role}.`,
+      'Choose your own password to finish setting up your account. Nobody else will know it.',
+    ],
+    action: { label: 'Set up your account', url: input.setupUrl },
+    notes: [
+      'This link works once and expires in 7 days. After that, ask an administrator to send a new one.',
+      'Once your password is set, sign in with this email address.',
+    ],
+    footer: "If you weren't expecting this invitation, you can ignore this email. The account cannot be used until a password is set with this link.",
+  });
+}
+
+/**
+ * ADR-058's "forgot password" link, in the ADR-060 layout. Carries the link
+ * and nothing else — no password, no account details beyond the recipient's
+ * own name — and says that using it signs them out everywhere.
+ */
+export function passwordResetEmail(input: {
+  name: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+}): TransactionalEmail {
+  return render('Reset your LiveQueue password', {
+    heading: 'Reset your password',
+    paragraphs: [
+      `Hi ${input.name}, someone asked to reset the password for your LiveQueue account.`,
+      'Choose a new password with the button below.',
+    ],
+    action: { label: 'Choose a new password', url: input.resetUrl },
+    notes: [
+      `This link works once and expires in ${input.expiresInMinutes} minutes.`,
+      'Resetting your password signs you out on every device.',
+    ],
+    footer: "If you didn't ask for this, you can ignore this email. Your password stays the same.",
+  });
+}
+
+export function customerVerificationCodeEmail(input: {
+  code: string;
+  queueName: string;
+  expiresInMinutes: number;
+}): TransactionalEmail {
+  return render('Your LiveQueue verification code', {
+    heading: 'Your LiveQueue verification code',
+    paragraphs: [`Enter this code in the LiveQueue app to join ${input.queueName}.`],
+    code: input.code,
+    notes: [`This code expires in ${input.expiresInMinutes} minutes. Do not share it with anyone.`],
+    footer: "If you didn't request this, you can ignore this email. Nobody can join a queue as you without the code above.",
+  });
+}
+
+/**
+ * The one place a message reaches the provider. Never throws — a delivery
+ * failure is reported back as `false`, so callers can log-and-continue rather
+ * than fail an otherwise-successful database write over a provider outage.
+ * Logs carry the kind of message and the provider's error, never the
+ * recipient, a link, a token or a code.
+ */
+async function deliver(kind: string, to: string, email: TransactionalEmail): Promise<boolean> {
   const resend = getClient();
   if (!resend) {
+    return false;
+  }
+  try {
+    const { error } = await resend.emails.send({
+      from: env.EMAIL_FROM,
+      to,
+      subject: email.subject,
+      html: email.html,
+      text: email.text,
+      ...(env.EMAIL_REPLY_TO ? { replyTo: env.EMAIL_REPLY_TO } : {}),
+      headers: {
+        'Auto-Submitted': 'auto-generated',
+        'X-Entity-Ref-ID': randomUUID(),
+      },
+    });
+    if (error) {
+      // name/message are what distinguish an operator-fixable rejection
+      // (unverified sending domain, sandbox-sender restriction, bad key) from
+      // a transient provider outage. None carries the API key or the link.
+      logger.error(
+        { name: error.name, message: error.message, from: env.EMAIL_FROM, kind },
+        `Resend rejected the ${kind} email — check the sender domain and API key configuration`,
+      );
+      return false;
+    }
+    logger.info({ kind }, `${kind} email sent`);
+    return true;
+  } catch (err) {
+    logger.error({ message: (err as Error).message, kind }, `Failed to send the ${kind} email`);
+    return false;
+  }
+}
+
+export async function sendVerificationEmail(to: string, verificationUrl: string): Promise<boolean> {
+  if (!getClient()) {
     // Local development without a Resend account could otherwise never
     // complete a registration. Development only: the link is a one-time
     // credential, so it must never reach production or test logs.
@@ -153,293 +349,39 @@ export async function sendVerificationEmail(to: string, verificationUrl: string)
     }
     return false;
   }
-
-  try {
-    const { error } = await resend.emails.send({
-      from: env.EMAIL_FROM,
-      to,
-      subject: 'Verify your LiveQueue account',
-      ...messageBody(
-        'Verify your LiveQueue account',
-        buildVerificationEmailHtml(verificationUrl),
-        buildVerificationEmailText(verificationUrl),
-      ),
-    });
-    if (error) {
-      // name/statusCode are what distinguish an operator-fixable rejection
-      // (unverified sending domain, sandbox-sender restriction, bad key)
-      // from a transient provider outage — the message alone often doesn't.
-      // None of these fields carry the API key or the verification token.
-      logger.error(
-        {
-          name: error.name,
-          message: error.message,
-          from: env.EMAIL_FROM,
-        },
-        'Resend rejected the verification email — check the sender domain and API key configuration',
-      );
-      return false;
-    }
-    logger.info('Verification email sent');
-    return true;
-  } catch (err) {
-    logger.error({ message: (err as Error).message }, 'Failed to send verification email');
-    return false;
-  }
+  return deliver('verification', to, verificationEmail(verificationUrl));
 }
-
-/**
- * One small, self-contained template — deliberately not a template engine
- * or a multi-email system (CLAUDE.md §11: no unnecessary abstraction for a
- * single email type). No password, token value, or organization/customer
- * detail beyond the link itself.
- */
-function buildVerificationEmailHtml(verificationUrl: string): string {
-  return `
-<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-  <h2 style="color: #1e293b;">Verify your LiveQueue account</h2>
-  <p style="color: #334155;">
-    Thanks for registering with LiveQueue. Click the button below to verify your email address and activate your organization.
-  </p>
-  <p style="margin: 24px 0;">
-    <a href="${verificationUrl}" style="background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">
-      Verify email address
-    </a>
-  </p>
-  <p style="color: #64748b; font-size: 13px;">
-    Or paste this link into your browser:<br>
-    <a href="${verificationUrl}" style="color: #2563eb; word-break: break-all;">${verificationUrl}</a>
-  </p>
-  <p style="color: #64748b; font-size: 13px;">This link expires in 15 minutes.</p>
-  <p style="color: #94a3b8; font-size: 12px;">If you didn't create a LiveQueue account, you can safely ignore this email.</p>
-</div>`.trim();
-}
-
-function buildVerificationEmailText(verificationUrl: string): string {
-  return [
-    'Verify your LiveQueue account',
-    '',
-    'Thanks for registering with LiveQueue. Open the link below to verify your email address and activate your organization:',
-    '',
-    verificationUrl,
-    '',
-    'This link expires in 15 minutes.',
-    '',
-    "If you didn't create a LiveQueue account, you can safely ignore this email.",
-  ].join('\n');
-}
-
-const ROLE_LABELS: Record<string, string> = {
-  OWNER: 'Owner',
-  ADMIN: 'Administrator',
-  STAFF: 'Staff',
-};
 
 /**
  * The invitation a new colleague receives (ADR-035). Carries a one-time setup
  * link and nothing else that matters: no password, no temporary credential,
- * no token beyond the link itself, and no internal ids. Same never-throws
- * contract as sendVerificationEmail — a delivery failure is reported, not
- * raised, because the account it refers to already exists.
+ * no internal ids.
  */
-export async function sendStaffInvitationEmail(input: {
+export function sendStaffInvitationEmail(input: {
   to: string;
   name: string;
   organizationName: string;
   role: string;
   setupUrl: string;
 }): Promise<boolean> {
-  const resend = getClient();
-  if (!resend) {
-    return false;
-  }
-
-  try {
-    const { error } = await resend.emails.send({
-      from: env.EMAIL_FROM,
-      to: input.to,
-      subject: `You've been invited to LiveQueue`,
-      ...messageBody(
-        "You've been invited to LiveQueue",
-        buildStaffInvitationHtml(input),
-        buildStaffInvitationText(input),
-      ),
-    });
-    if (error) {
-      logger.error(
-        { name: error.name, message: error.message, from: env.EMAIL_FROM },
-        'Resend rejected the staff invitation email — check the sender domain and API key configuration',
-      );
-      return false;
-    }
-    logger.info('Staff invitation email sent');
-    return true;
-  } catch (err) {
-    logger.error({ message: (err as Error).message }, 'Failed to send the staff invitation email');
-    return false;
-  }
+  return deliver('staff invitation', input.to, staffInvitationEmail(input));
 }
 
-/**
- * ADR-058: the "forgot password" link. Carries the link and nothing else —
- * no password, no account details beyond the recipient's own name. Same
- * never-throws contract as every other send here.
- */
-export async function sendPasswordResetEmail(input: {
+/** ADR-058: the reset link. Same never-throws contract as every send here. */
+export function sendPasswordResetEmail(input: {
   to: string;
   name: string;
   resetUrl: string;
   expiresInMinutes: number;
 }): Promise<boolean> {
-  const resend = getClient();
-  if (!resend) {
-    return false;
-  }
-
-  try {
-    const { error } = await resend.emails.send({
-      from: env.EMAIL_FROM,
-      to: input.to,
-      subject: 'Reset your LiveQueue password',
-      ...messageBody(
-        'Reset your LiveQueue password',
-        `
-<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-  <h2 style="color: #1e293b;">Reset your LiveQueue password</h2>
-  <p style="color: #334155;">
-    Hi ${escapeHtml(input.name)}, someone asked to reset the password for your LiveQueue account.
-  </p>
-  <p style="margin: 24px 0;">
-    <a href="${input.resetUrl}" style="background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">
-      Choose a new password
-    </a>
-  </p>
-  <p style="color: #64748b; font-size: 13px;">
-    Or paste this link into your browser:<br>
-    <a href="${input.resetUrl}" style="color: #2563eb; word-break: break-all;">${input.resetUrl}</a>
-  </p>
-  <p style="color: #64748b; font-size: 13px;">
-    This link works once and expires in ${input.expiresInMinutes} minutes. Resetting your password signs
-    you out on every device.
-  </p>
-  <p style="color: #94a3b8; font-size: 12px;">
-    If you didn't ask for this, you can ignore this email — your password stays the same.
-  </p>
-</div>`.trim(),
-        [
-          `Hi ${input.name},`,
-          '',
-          'Someone asked to reset the password for your LiveQueue account.',
-          `Choose a new password here: ${input.resetUrl}`,
-          '',
-          `This link works once and expires in ${input.expiresInMinutes} minutes. Resetting your password signs you out on every device.`,
-          '',
-          "If you didn't ask for this, you can ignore this email — your password stays the same.",
-        ].join('\n'),
-      ),
-    });
-    if (error) {
-      logger.error(
-        { name: error.name, message: error.message, from: env.EMAIL_FROM },
-        'Resend rejected the password reset email — check the sender domain and API key configuration',
-      );
-      return false;
-    }
-    logger.info('Password reset email sent');
-    return true;
-  } catch (err) {
-    logger.error({ message: (err as Error).message }, 'Failed to send the password reset email');
-    return false;
-  }
-}
-
-/** Escapes text taken from the organization or the invitee's own name — both
- * are free text an admin typed, and they are being placed into HTML. */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function buildStaffInvitationHtml(input: {
-  name: string;
-  organizationName: string;
-  role: string;
-  setupUrl: string;
-}): string {
-  const role = ROLE_LABELS[input.role] ?? 'Staff';
-  return `
-<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-  <h2 style="color: #1e293b;">You've been invited to LiveQueue</h2>
-  <p style="color: #334155;">
-    Hi ${escapeHtml(input.name)}, ${escapeHtml(input.organizationName)} has given you access to
-    LiveQueue as <strong>${role}</strong>.
-  </p>
-  <p style="color: #334155;">
-    Choose a password to finish setting up your account. Nobody else knows it — not even the
-    administrator who invited you.
-  </p>
-  <p style="margin: 24px 0;">
-    <a href="${input.setupUrl}" style="background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">
-      Set up your account
-    </a>
-  </p>
-  <p style="color: #64748b; font-size: 13px;">
-    Or paste this link into your browser:<br>
-    <a href="${input.setupUrl}" style="color: #2563eb; word-break: break-all;">${input.setupUrl}</a>
-  </p>
-  <p style="color: #64748b; font-size: 13px;">
-    This link works once and expires in 7 days. After that, ask an administrator to send a new one.
-  </p>
-  <p style="color: #64748b; font-size: 13px;">
-    You'll sign in afterwards at <a href="${env.APP_BASE_URL}/login">${env.APP_BASE_URL}/login</a>.
-  </p>
-  <p style="color: #94a3b8; font-size: 12px;">
-    If you weren't expecting this invitation, you can ignore this email — the account cannot be used
-    until someone sets a password with the link above.
-  </p>
-</div>`.trim();
-}
-
-/** Plain-text twin of buildStaffInvitationHtml. Free text is not escaped
- * here — it is not HTML — and carries nothing the HTML version does not. */
-function buildStaffInvitationText(input: {
-  name: string;
-  organizationName: string;
-  role: string;
-  setupUrl: string;
-}): string {
-  const role = ROLE_LABELS[input.role] ?? 'Staff';
-  return [
-    "You've been invited to LiveQueue",
-    '',
-    `Hi ${input.name}, ${input.organizationName} has given you access to LiveQueue as ${role}.`,
-    '',
-    'Choose a password to finish setting up your account. Nobody else knows it — not even the administrator who invited you.',
-    '',
-    input.setupUrl,
-    '',
-    'This link works once and expires in 7 days. After that, ask an administrator to send a new one.',
-    `You'll sign in afterwards at ${env.APP_BASE_URL}/login`,
-    '',
-    "If you weren't expecting this invitation, you can ignore this email — the account cannot be used until someone sets a password with the link above.",
-  ].join('\n');
+  return deliver('password reset', input.to, passwordResetEmail(input));
 }
 
 /**
  * The verification code a customer needs to join a queue that identifies
- * people by email (ADR-037).
- *
- * Reuses the same Resend client, sender and never-throws contract as every
- * other message here — no second provider, no duplicated HTTP handling. The
- * caller treats `false` as a hard failure and deletes the challenge, because
- * a code nobody received must not leave a usable one behind.
- *
- * Carries the code and, at most, the queue's name. Never a national ID or
- * other form answer, never a token or device id, never the verification
- * proof, never an internal database id.
+ * people by email (ADR-037). The caller treats `false` as a hard failure and
+ * deletes the challenge, because a code nobody received must not leave a
+ * usable one behind. Carries the code and, at most, the queue's name.
  */
 export async function sendCustomerVerificationCodeEmail(
   input: CustomerVerificationEmail,
@@ -447,82 +389,5 @@ export async function sendCustomerVerificationCodeEmail(
   if (customerVerificationSenderOverride) {
     return customerVerificationSenderOverride(input);
   }
-  const resend = getClient();
-  if (!resend) {
-    return false;
-  }
-
-  try {
-    const { error } = await resend.emails.send({
-      from: env.EMAIL_FROM,
-      to: input.to,
-      subject: 'LiveQueue verification code',
-      ...messageBody(
-        'Your LiveQueue verification code',
-        buildCustomerVerificationHtml(input),
-        buildCustomerVerificationText(input),
-      ),
-    });
-    if (error) {
-      // name/statusCode distinguish an operator-fixable rejection from a
-      // transient outage. None of these fields carries the code or the
-      // recipient.
-      logger.error(
-        { name: error.name, message: error.message, from: env.EMAIL_FROM },
-        'Resend rejected a customer verification email — check the sender domain and API key configuration',
-      );
-      return false;
-    }
-    // Deliberately says nothing about who it went to or what was in it.
-    logger.info('Customer verification email sent');
-    return true;
-  } catch (err) {
-    logger.error(
-      { message: (err as Error).message },
-      'Failed to send a customer verification email',
-    );
-    return false;
-  }
-}
-
-function buildCustomerVerificationHtml(input: {
-  code: string;
-  queueName: string;
-  expiresInMinutes: number;
-}): string {
-  return `
-<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-  <h2 style="color: #1e293b;">Your LiveQueue verification code</h2>
-  <p style="color: #334155;">
-    Enter this code in the LiveQueue app to join ${escapeHtml(input.queueName)}.
-  </p>
-  <p style="margin: 24px 0; font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #1e293b;">
-    ${input.code}
-  </p>
-  <p style="color: #64748b; font-size: 13px;">
-    This code expires in ${input.expiresInMinutes} minutes. Do not share it with anyone.
-  </p>
-  <p style="color: #94a3b8; font-size: 12px;">
-    If you didn't request this, you can ignore this email — nobody can join a queue as you without
-    the code above.
-  </p>
-</div>`.trim();
-}
-
-function buildCustomerVerificationText(input: {
-  code: string;
-  queueName: string;
-  expiresInMinutes: number;
-}): string {
-  return [
-    'Your LiveQueue verification code',
-    '',
-    `Enter this code in the LiveQueue app to join ${input.queueName}:`,
-    '',
-    input.code,
-    '',
-    `This code expires in ${input.expiresInMinutes} minutes. Do not share it with anyone.`,
-    '',
-    "If you didn't request this, you can ignore this email — nobody can join a queue as you without the code above.",
-  ].join('\n');
+  return deliver('customer verification', input.to, customerVerificationCodeEmail(input));
 }

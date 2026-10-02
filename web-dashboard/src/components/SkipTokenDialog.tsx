@@ -39,11 +39,11 @@ export function SkipTokenDialog({ tokenId, onClose }: { tokenId: string; onClose
   }
 
   return (
-    <Modal title="Skip customer" onClose={onClose}>
+    <Modal title="Skip person" onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <ErrorBanner message={error} />
         <p className="text-sm text-muted">
-          The customer will see this reason. Skipping ends their visit; they would need to scan the
+          The person will see this reason. Skipping ends their visit; they would need to scan the
           queue QR code again.
         </p>
         <div>
