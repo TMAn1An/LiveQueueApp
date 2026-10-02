@@ -239,55 +239,27 @@ describe('Counter permissions', () => {
     expect(deleteRes.status).toBe(401);
   });
 
-  // ADR-064: STAFF still create counters and run their own (rename, open,
-  // pause, close), but only their own — and deleting a counter, which also
-  // ends its assignment, is an owner/admin staffing decision.
-  it('lets STAFF create counters and operate only the one they are assigned to (ADR-064)', async () => {
+  // ADR-064: counters are owner/admin management; STAFF only serve.
+  it('refuses STAFF creating, renaming, changing status of, or deleting counters (ADR-064)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const staff = await createRestrictedStaff(ctx.organizationId);
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    await assignCounterTo(ctx.accessToken, counter.id, staff.staffId);
+    const auth = `Bearer ${staff.accessToken}`;
 
-    const createRes = await api()
-      .post(`/api/queues/${queue.id}/counters`)
-      .set('Authorization', `Bearer ${staff.accessToken}`)
-      .send({ name: 'X' });
-    expect(createRes.status).toBe(201);
-    const counterId = createRes.body.data.id;
-
-    // Not theirs yet: refused.
-    const deniedRename = await api()
-      .put(`/api/counters/${counterId}`)
-      .set('Authorization', `Bearer ${staff.accessToken}`)
-      .send({ name: 'Y' });
-    expect(deniedRename.status).toBe(403);
-    expect(deniedRename.body.error.code).toBe('COUNTER_ACCESS_DENIED');
-    const deniedStatus = await api()
-      .patch(`/api/counters/${counterId}/status`)
-      .set('Authorization', `Bearer ${staff.accessToken}`)
-      .send({ status: 'ACTIVE' });
-    expect(deniedStatus.status).toBe(403);
-    expect(deniedStatus.body.error.code).toBe('COUNTER_ACCESS_DENIED');
-
-    await assignCounterTo(ctx.accessToken, counterId, staff.staffId);
-
-    const updateRes = await api()
-      .put(`/api/counters/${counterId}`)
-      .set('Authorization', `Bearer ${staff.accessToken}`)
-      .send({ name: 'Y' });
-    expect(updateRes.status).toBe(200);
-
-    const statusRes = await api()
-      .patch(`/api/counters/${counterId}/status`)
-      .set('Authorization', `Bearer ${staff.accessToken}`)
-      .send({ status: 'ON_BREAK' });
-    expect(statusRes.status).toBe(200);
-
-    const deleteRes = await api()
-      .delete(`/api/counters/${counterId}`)
-      .set('Authorization', `Bearer ${staff.accessToken}`);
-    expect(deleteRes.status).toBe(403);
-    expect(deleteRes.body.error.code).toBe('COUNTER_ASSIGNMENT_FORBIDDEN');
-    expect(await prisma.counter.findUnique({ where: { id: counterId } })).not.toBeNull();
+    const results = [
+      await api().post(`/api/queues/${queue.id}/counters`).set('Authorization', auth).send({ name: 'X' }),
+      await api().put(`/api/counters/${counter.id}`).set('Authorization', auth).send({ name: 'Y' }),
+      await api().patch(`/api/counters/${counter.id}/status`).set('Authorization', auth).send({ status: 'ON_BREAK' }),
+      await api().delete(`/api/counters/${counter.id}`).set('Authorization', auth),
+    ];
+    for (const res of results) {
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('COUNTER_MANAGEMENT_FORBIDDEN');
+    }
+    const stored = await prisma.counter.findMany({ where: { queueId: queue.id } });
+    expect(stored.map((c) => [c.name, c.status])).toEqual([['Counter 1', 'OFFLINE']]);
   });
 
   /**

@@ -28,8 +28,9 @@ export type Permission = (typeof PERMISSIONS)[number];
 const MANAGEMENT_PERMISSIONS: Permission[] = PERMISSIONS.filter((p) => p !== 'operate_tokens');
 export const OWNER_PERMISSIONS: Permission[] = [...MANAGEMENT_PERMISSIONS];
 export const ADMIN_PERMISSIONS: Permission[] = [...MANAGEMENT_PERMISSIONS];
+// ADR-064: STAFF serve; they do not create, rename, open/close, delete or
+// staff counters — that is owner/admin management (manage_counters).
 export const STAFF_PERMISSIONS: Permission[] = [
-  'manage_counters',
   'operate_tokens',
   'view_reports',
   'export_reports',

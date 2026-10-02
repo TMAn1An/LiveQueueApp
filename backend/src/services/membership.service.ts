@@ -1,5 +1,6 @@
 import { Prisma, type MembershipRemovalRequest, type Staff, type StaffRole } from '@prisma/client';
 import { prisma } from '../config/prisma';
+import { assertNoActiveServiceForStaff } from './counterAccess.service';
 import { AppError } from '../utils/AppError';
 
 /**
@@ -108,6 +109,8 @@ async function endMembership(
       data: { status: 'CANCELLED', activeSlot: id, reviewedAt: new Date() },
     });
   }
+  // ADR-064: never orphan a person this member called or is serving.
+  await assertNoActiveServiceForStaff(tx, target.id);
   // deleteMany, not delete: a concurrent removal that got there first leaves
   // nothing to delete, which is reported as "not found" rather than a 500.
   const { count } = await tx.staff.deleteMany({

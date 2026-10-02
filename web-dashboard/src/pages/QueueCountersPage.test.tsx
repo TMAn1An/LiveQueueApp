@@ -43,7 +43,7 @@ function renderPage() {
 }
 
 beforeEach(() => {
-  grantedPermissions = ['manage_counters', 'manage_staff', 'operate_tokens'];
+  grantedPermissions = ['manage_counters', 'manage_staff'];
   vi.clearAllMocks();
   vi.mocked(useQueue).mockReturnValue({ data: { id: 'q1', name: 'Front Desk' } } as unknown as ReturnType<
     typeof useQueue
@@ -194,24 +194,10 @@ describe('QueueCountersPage — who may assign staff', () => {
     expect(screen.getByLabelText('Assigned staff')).toBeInTheDocument();
   });
 
-  it('hides it from an ordinary staff member, and keeps their other controls', () => {
-    grantedPermissions = ['manage_counters', 'operate_tokens'];
-    vi.mocked(useCounters).mockReturnValue({
-      data: [{ id: 'c1', queueId: 'q1', name: 'Counter 1', status: 'ACTIVE', staffId: 'me' }],
-      isLoading: false,
-    } as unknown as ReturnType<typeof useCounters>);
-
-    renderPage();
-
-    expect(screen.queryByLabelText('Assigned staff')).not.toBeInTheDocument();
-    // Still able to run their own counter.
-    expect(screen.getByLabelText('Counter status')).toBeInTheDocument();
-  });
-
-  // ADR-064: STAFF see which counter is theirs, operate only that one, and
-  // have no way to change who stands where.
-  it('marks a staff member’s own counter and gives them controls for it alone', () => {
-    grantedPermissions = ['manage_counters', 'operate_tokens'];
+  // ADR-064: STAFF (operate_tokens only) see the counters, with their own
+  // marked, and no way to create, rename, open/close, delete or staff any.
+  it('gives an ordinary staff member a read-only list with their own counter marked', () => {
+    grantedPermissions = ['operate_tokens'];
     vi.mocked(useCounters).mockReturnValue({
       data: [
         { id: 'c1', queueId: 'q1', name: 'Counter 1', status: 'ACTIVE', staffId: 'me' },
@@ -225,12 +211,12 @@ describe('QueueCountersPage — who may assign staff', () => {
 
     const rows = screen.getAllByRole('row').slice(1);
     expect(within(rows[0]!).getByText('Your counter')).toBeInTheDocument();
-    expect(within(rows[0]!).getByLabelText('Counter status')).toBeInTheDocument();
-    expect(within(rows[1]!).queryByLabelText('Counter status')).not.toBeInTheDocument();
-    expect(within(rows[2]!).queryByLabelText('Counter status')).not.toBeInTheDocument();
-    expect(screen.getAllByLabelText('Counter status')).toHaveLength(1);
+    expect(screen.queryByLabelText('Counter status')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Assigned staff')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Add Counter/ })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('New counter name')).not.toBeInTheDocument();
   });
 
   it('owner/admin get status, assignment and delete controls on every counter', () => {
@@ -270,7 +256,7 @@ describe('QueueCountersPage — who may assign staff', () => {
   });
 
   it('does not even ask who is available when it cannot assign', () => {
-    grantedPermissions = ['manage_counters', 'operate_tokens'];
+    grantedPermissions = ['operate_tokens'];
 
     renderPage();
 

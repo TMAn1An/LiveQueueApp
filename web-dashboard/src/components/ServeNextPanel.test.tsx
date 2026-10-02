@@ -95,7 +95,8 @@ describe('ServeNextPanel — serving is a self-claim at your own counter (ADR-06
     renderPanel();
 
     expect(screen.getByRole('button', { name: 'Serve next' })).toBeDisabled();
-    expect(screen.getByText(/to start serving/)).toBeInTheDocument();
+    expect(screen.getByText(/Ask the organization owner or an admin to open it/)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Counters' })).not.toBeInTheDocument();
   });
 
   it('an unassigned person is told who assigns counters, and gets no action', () => {

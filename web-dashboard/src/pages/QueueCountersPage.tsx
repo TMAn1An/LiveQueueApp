@@ -48,11 +48,9 @@ function CounterRow({
   const deleteCounter = useDeleteCounter(queueId);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   // ADR-064: OWNER/ADMIN manage every counter and who stands at it. STAFF
-  // see their own counter marked, may open, pause or rename only that one,
-  // and get no assignment controls at all.
+  // only see the list, with their own counter marked — no controls at all.
   const canAssign = hasPermission('manage_staff');
   const isMine = Boolean(staff && counter.staffId === staff.id);
-  const canOperate = canAssign || isMine;
   const { data: assignableStaff, isLoading: loadingStaff } = useAssignableStaff(
     counter.id,
     canAssign,
@@ -104,7 +102,6 @@ function CounterRow({
         )}
       </td>
       <td className="py-3 pr-4">
-        {canOperate && (
         <PermissionGate permission="manage_counters">
           <div className="flex flex-wrap items-center gap-2">
             {editing ? (
@@ -193,14 +190,11 @@ function CounterRow({
                 )}
               </div>
             </PermissionGate>
-            <PermissionGate permission="manage_staff">
-              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-                Delete
-              </Button>
-            </PermissionGate>
+            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+              Delete
+            </Button>
           </div>
         </PermissionGate>
-        )}
         {confirmingDelete && (
           <ConfirmDialog
             title={`Delete counter "${counter.name}"?`}
@@ -249,7 +243,8 @@ export function QueueCountersPage() {
           <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">Counters</h1>
           <InfoHelp label="Counters">
             Desks and service points where staff serve people for this queue. The owner or an
-            admin assigns each staff member to one counter; staff serve only from their own.
+            admin creates and opens counters and assigns each staff member to one; staff serve
+            only from their own.
           </InfoHelp>
         </div>
       </div>

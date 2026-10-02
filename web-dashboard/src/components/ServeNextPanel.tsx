@@ -100,11 +100,7 @@ export function ServeNextPanel({ queueId }: { queueId: string }) {
             </div>
             {!active && (
               <p className="mt-1 text-xs text-muted">
-                Open your counter under{' '}
-                <Link to={`/queues/${queueId}/counters`} className="font-semibold text-brand-fg underline">
-                  Counters
-                </Link>{' '}
-                to start serving.
+                Your counter is not open. Ask the organization owner or an admin to open it.
               </p>
             )}
             {lastServed && (

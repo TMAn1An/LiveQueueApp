@@ -1,4 +1,4 @@
-import type { Counter, Prisma, StaffRole } from '@prisma/client';
+import type { Prisma, StaffRole } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 
@@ -97,17 +97,58 @@ export function assertStillAssigned(actor: CounterActor, lockedStaffId: string |
   }
 }
 
+export const COUNTER_MANAGEMENT_DENIAL = {
+  code: 'COUNTER_MANAGEMENT_FORBIDDEN',
+  message: 'Only the organization owner or an admin can create, change or delete counters.',
+};
+
 /**
- * Status changes and renames: STAFF only on their own counter; OWNER and
- * ADMIN on any counter in their organization (managing counters is theirs;
- * serving at them is not).
+ * Creating, renaming, opening/closing and deleting counters is OWNER/ADMIN
+ * management. The route already requires manage_counters, which STAFF do not
+ * hold; this is the same rule again in the service.
  */
-export function assertMayOperateCounter(actor: CounterActor, counter: Pick<Counter, 'staffId'>) {
-  if (actor.role !== 'STAFF') {
-    return;
+export function assertMayManageCounters(actor: CounterActor) {
+  if (actor.role === 'STAFF') {
+    throw new AppError(403, COUNTER_MANAGEMENT_DENIAL.code, COUNTER_MANAGEMENT_DENIAL.message);
   }
-  if (counter.staffId !== actor.staffId) {
-    throw accessDenied();
+}
+
+export const COUNTER_HAS_ACTIVE_SERVICE = 'COUNTER_HAS_ACTIVE_SERVICE';
+
+/**
+ * ADR-064: a person who has been called or is being served belongs to the
+ * staff member at that counter, and nobody else may finish them. So nothing
+ * may separate them: the counter cannot be deleted, and its staff member
+ * cannot be unassigned, moved, promoted out of STAFF, suspended or removed,
+ * until that visit is resolved (started/completed/skipped by that staff
+ * member, or cancelled by the person).
+ *
+ * Locks the counter row(s) FOR UPDATE first. A claim locks the same row
+ * before writing its CALLED token, so the two serialise: either the claim
+ * lands first and this refuses, or this lands first and the claim finds the
+ * assignment gone.
+ */
+export async function assertNoActiveServiceAtCounter(tx: Prisma.TransactionClient, counterId: string) {
+  await tx.$queryRaw`SELECT id FROM counters WHERE id = ${counterId} FOR UPDATE`;
+  const active = await tx.token.count({
+    where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] } },
+  });
+  if (active > 0) {
+    throw new AppError(
+      409,
+      COUNTER_HAS_ACTIVE_SERVICE,
+      'Someone is being called or served at this counter. That visit must be finished, skipped or cancelled first.',
+    );
+  }
+}
+
+/** The same rule, seen from the staff member who holds the counter. */
+export async function assertNoActiveServiceForStaff(tx: Prisma.TransactionClient, staffId: string) {
+  const held = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM counters WHERE staff_id = ${staffId} FOR UPDATE
+  `;
+  for (const { id } of held) {
+    await assertNoActiveServiceAtCounter(tx, id);
   }
 }
 
@@ -118,15 +159,14 @@ export function assertMayOperateCounter(actor: CounterActor, counter: Pick<Count
  * WAITING token (skipping the person at the front), only in the queue their
  * counter serves. There is no owner/admin override (ADR-064).
  *
- * Recovery when whoever called a person is gone is an assignment, not an
- * override: an owner or admin assigns another staff member to that counter,
- * who then finishes the person through these same endpoints. A token left
- * with no counter at all (its counter was deleted mid-service) may be
- * finished by any staff member whose counter serves that queue.
+ * There is no recovery override either: while a person is called or being
+ * served, their counter and its staff member are kept together
+ * (assertNoActiveServiceAtCounter), so the person can only be finished by
+ * that staff member — or cancel from the app while CALLED.
  */
 export async function assertMayActOnToken(
   actor: CounterActor,
-  token: { counterId: string | null; queueId: string },
+  token: { counterId: string | null; queueId: string; status: string },
 ) {
   if (actor.role !== 'STAFF') {
     throw servingStaffOnly();
@@ -140,6 +180,11 @@ export async function assertMayActOnToken(
       throw accessDenied('This person is being served at another counter.');
     }
     return;
+  }
+  // A called or in-service person always has a counter; one without is
+  // never finished by "any staff member in the queue".
+  if (token.status !== 'WAITING') {
+    throw accessDenied('This person is not at your counter.');
   }
   if (own.queueId !== token.queueId) {
     throw accessDenied('Your counter serves a different queue.');

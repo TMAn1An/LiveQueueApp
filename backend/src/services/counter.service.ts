@@ -3,7 +3,12 @@ import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { assertQueueMutable, requireOwnedQueue } from '../utils/tenantScope';
-import { assertMayOperateCounter, findAssignedCounter, type CounterActor } from './counterAccess.service';
+import {
+  assertMayManageCounters,
+  assertNoActiveServiceAtCounter,
+  findAssignedCounter,
+  type CounterActor,
+} from './counterAccess.service';
 import type { createCounterSchema, updateCounterSchema } from '../validators/counter.validators';
 
 type CreateCounterInput = z.infer<typeof createCounterSchema.body>;
@@ -36,11 +41,12 @@ export async function listCounters(organizationId: string, queueId: string) {
 }
 
 export async function createCounter(
-  organizationId: string,
+  actor: CounterActor,
   queueId: string,
   input: CreateCounterInput,
 ) {
-  const queue = await requireOwnedQueue(organizationId, queueId);
+  assertMayManageCounters(actor);
+  const queue = await requireOwnedQueue(actor.organizationId, queueId);
   assertQueueMutable(queue);
   return prisma.counter.create({ data: { queueId, name: input.name } });
 }
@@ -52,7 +58,7 @@ export async function updateCounter(
 ) {
   const counter = await findCounterScoped(actor.organizationId, counterId);
   assertQueueMutable(counter.queue);
-  assertMayOperateCounter(actor, counter);
+  assertMayManageCounters(actor);
   return prisma.counter.update({ where: { id: counterId }, data: input });
 }
 
@@ -63,17 +69,22 @@ export async function setCounterStatus(
 ) {
   const counter = await findCounterScoped(actor.organizationId, counterId);
   assertQueueMutable(counter.queue);
-  // ADR-064: STAFF open, pause or close only the counter they stand at.
-  assertMayOperateCounter(actor, counter);
+  // ADR-064: opening and closing counters is owner/admin management.
+  assertMayManageCounters(actor);
   return prisma.counter.update({ where: { id: counterId }, data: { status } });
 }
 
 /** Returns the deleted counter's queue id so the caller can recompute that
  * queue's ETAs — removing an ACTIVE counter changes serving capacity. */
-export async function deleteCounter(organizationId: string, counterId: string) {
-  const counter = await findCounterScoped(organizationId, counterId);
+export async function deleteCounter(actor: CounterActor, counterId: string) {
+  assertMayManageCounters(actor);
+  const counter = await findCounterScoped(actor.organizationId, counterId);
   assertQueueMutable(counter.queue);
-  await prisma.counter.delete({ where: { id: counterId } });
+  await prisma.$transaction(async (tx) => {
+    // ADR-064: never orphan a person who is called or being served here.
+    await assertNoActiveServiceAtCounter(tx, counterId);
+    await tx.counter.delete({ where: { id: counterId } });
+  });
   return { queueId: counter.queueId };
 }
 
@@ -155,8 +166,16 @@ export async function assignCounter(
   const counter = await findCounterScoped(organizationId, counterId);
   assertQueueMutable(counter.queue);
 
+  // ADR-064: re-assigning the same person is a no-op; anything that takes
+  // the current staff member away from this counter (unassign, or putting
+  // someone else here) must not orphan a person they called or are serving.
+  const changesHolder = counter.staffId !== null && counter.staffId !== staffId;
+
   if (staffId === null) {
-    return prisma.counter.update({ where: { id: counterId }, data: { staffId: null } });
+    return prisma.$transaction(async (tx) => {
+      if (changesHolder) await assertNoActiveServiceAtCounter(tx, counterId);
+      return tx.counter.update({ where: { id: counterId }, data: { staffId: null } });
+    });
   }
 
   const staff = await prisma.staff.findUnique({ where: { id: staffId } });
@@ -195,7 +214,10 @@ export async function assignCounter(
   }
 
   try {
-    return await prisma.counter.update({ where: { id: counterId }, data: { staffId } });
+    return await prisma.$transaction(async (tx) => {
+      if (changesHolder) await assertNoActiveServiceAtCounter(tx, counterId);
+      return tx.counter.update({ where: { id: counterId }, data: { staffId } });
+    });
   } catch (err) {
     // P2002 on counters_staff_id_key: another transaction claimed this staff
     // member between the check above and this write.

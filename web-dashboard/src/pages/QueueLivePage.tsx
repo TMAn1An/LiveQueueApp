@@ -1,4 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
+import { PermissionGate } from '../components/PermissionGate';
+import { useAuth } from '../context/AuthContext';
 import { useQueue } from '../hooks/useQueues';
 import { useCounters } from '../hooks/useCounters';
 import { Card } from '../components/Card';
@@ -19,6 +21,8 @@ export function QueueLivePage() {
   const { queueId } = useParams<{ queueId: string }>();
   const { data: queue, isLoading } = useQueue(queueId);
   const { data: counters } = useCounters(queueId);
+  const { hasPermission } = useAuth();
+  const canManageCounters = hasPermission('manage_counters');
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
 
@@ -63,9 +67,12 @@ export function QueueLivePage() {
 
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               {/* Same size side by side (ADR-059): these used to be lg beside md. */}
-              <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" size="lg">
-                Manage Counters
-              </ButtonLink>
+              {/* ADR-064: counters are owner/admin management. */}
+              <PermissionGate permission="manage_counters">
+                <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" size="lg">
+                  Manage Counters
+                </ButtonLink>
+              </PermissionGate>
               <ButtonLink to={`/queues/${queue.id}`} variant="secondary" size="lg">
                 Queue Settings
               </ButtonLink>
@@ -84,11 +91,18 @@ export function QueueLivePage() {
             <div>
               <p>
                 This queue has no active counter, so nobody can be called and no waiting time can be
-                estimated. Open a counter under{' '}
-                <Link to={`/queues/${queue.id}/counters`} className="font-semibold underline">
-                  Counters
-                </Link>
-                .
+                estimated.{' '}
+                {canManageCounters ? (
+                  <>
+                    Open a counter under{' '}
+                    <Link to={`/queues/${queue.id}/counters`} className="font-semibold underline">
+                      Counters
+                    </Link>
+                    .
+                  </>
+                ) : (
+                  'Ask the organization owner or an admin to open one.'
+                )}
               </p>
             </div>
           </div>

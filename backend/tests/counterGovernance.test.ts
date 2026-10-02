@@ -159,33 +159,72 @@ describe('ADR-064 — STAFF cannot change counter assignments', () => {
 
     const del = await api().delete(`/api/counters/${org.counterA.id}`).set('Authorization', bearer(org.staffS.accessToken));
     expect(del.status).toBe(403);
-    expect(del.body.error.code).toBe('COUNTER_ASSIGNMENT_FORBIDDEN');
+    expect(del.body.error.code).toBe('COUNTER_MANAGEMENT_FORBIDDEN');
     expect((await prisma.counter.findUniqueOrThrow({ where: { id: org.counterA.id } })).staffId).toBe(org.staffT.staffId);
   });
 
-  it('cannot operate a counter that is not theirs (status or name)', async () => {
+  it('cannot create, rename, open/close or delete any counter — not even their own', async () => {
     const org = await setup();
     await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
+    const t = bearer(org.staffS.accessToken);
 
-    const pause = await api()
-      .patch(`/api/counters/${org.counterB.id}/status`)
-      .set('Authorization', bearer(org.staffS.accessToken))
-      .send({ status: 'ON_BREAK' });
-    expect(pause.status).toBe(403);
-    expect(pause.body.error.code).toBe('COUNTER_ACCESS_DENIED');
-
-    const rename = await api()
-      .put(`/api/counters/${org.counterB.id}`)
-      .set('Authorization', bearer(org.staffS.accessToken))
-      .send({ name: 'Mine now' });
-    expect(rename.status).toBe(403);
-
-    const own = await api()
-      .patch(`/api/counters/${org.counterA.id}/status`)
-      .set('Authorization', bearer(org.staffS.accessToken))
-      .send({ status: 'ON_BREAK' });
-    expect(own.status).toBe(200);
+    const attempts = [
+      await api().post(`/api/queues/${org.queue.id}/counters`).set('Authorization', t).send({ name: 'Mine' }),
+      await api().put(`/api/counters/${org.counterA.id}`).set('Authorization', t).send({ name: 'Renamed' }),
+      await api().put(`/api/counters/${org.counterB.id}`).set('Authorization', t).send({ name: 'Renamed' }),
+      await api().patch(`/api/counters/${org.counterA.id}/status`).set('Authorization', t).send({ status: 'ON_BREAK' }),
+      await api().patch(`/api/counters/${org.counterB.id}/status`).set('Authorization', t).send({ status: 'OFFLINE' }),
+      await api().delete(`/api/counters/${org.counterA.id}`).set('Authorization', t),
+      await api().delete(`/api/counters/${org.counterB.id}`).set('Authorization', t),
+    ];
+    for (const res of attempts) {
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('COUNTER_MANAGEMENT_FORBIDDEN');
+    }
+    const counters = await prisma.counter.findMany({ where: { queueId: org.queue.id }, orderBy: { name: 'asc' } });
+    expect(counters.map((c) => [c.name, c.status])).toEqual([
+      ['Counter A', 'ACTIVE'],
+      ['Counter B', 'ACTIVE'],
+    ]);
   });
+
+  it('can still see their counter and Serve next from it', async () => {
+    const org = await setup();
+    await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
+    const p1 = await org.join();
+
+    const list = await api().get(`/api/queues/${org.queue.id}/counters`).set('Authorization', bearer(org.staffS.accessToken));
+    expect(list.status).toBe(200);
+    expect((await mine(org.staffS.accessToken)).body.data.id).toBe(org.counterA.id);
+    const res = await next(org.staffS.accessToken, org.queue.id);
+    expect(res.status).toBe(200);
+    expect(res.body.data.id).toBe(p1.id);
+  });
+
+  it('has operate_tokens and nothing that manages counters or staff', async () => {
+    const org = await setup();
+    const me = await api().get('/api/auth/me').set('Authorization', bearer(org.staffS.accessToken));
+    expect(me.body.data.permissions).toContain('operate_tokens');
+    expect(me.body.data.permissions).not.toContain('manage_counters');
+    expect(me.body.data.permissions).not.toContain('manage_staff');
+  });
+});
+
+describe('ADR-064 — owner and admin manage counters', () => {
+  for (const role of ['OWNER', 'ADMIN'] as const) {
+    it(`${role} creates, renames, opens/closes and deletes counters`, async () => {
+      const org = await setup();
+      const t = bearer((role === 'OWNER' ? org.owner : org.admin).accessToken);
+
+      const created = await api().post(`/api/queues/${org.queue.id}/counters`).set('Authorization', t).send({ name: 'Window C' });
+      expect(created.status).toBe(201);
+      const id = created.body.data.id as string;
+      expect((await api().put(`/api/counters/${id}`).set('Authorization', t).send({ name: 'Window D' })).status).toBe(200);
+      expect((await api().patch(`/api/counters/${id}/status`).set('Authorization', t).send({ status: 'ACTIVE' })).status).toBe(200);
+      expect((await api().patch(`/api/counters/${id}/status`).set('Authorization', t).send({ status: 'OFFLINE' })).status).toBe(200);
+      expect((await api().delete(`/api/counters/${id}`).set('Authorization', t)).status).toBe(204);
+    });
+  }
 });
 
 describe('ADR-064 — serving is a self-claim at your own counter', () => {
@@ -490,18 +529,19 @@ describe('ADR-064 — serving is STAFF work; owners and admins manage, never ser
     expect(staff.body.data.permissions).toContain('operate_tokens');
   });
 
-  it('recovery is a reassignment: a new staff member at the counter finishes the person', async () => {
+  it('there is no hand-over mid-visit: the counter keeps its staff member until the visit is resolved', async () => {
     const org = await setup();
     await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
     const p1 = await org.join();
     await call(org.staffS.accessToken, p1.id);
 
-    // S leaves the desk; the owner puts T on Counter A.
-    await assign(org.owner.accessToken, org.counterA.id, org.staffT.staffId);
-    const byS = await api().post(`/api/tokens/${p1.id}/start`).set('Authorization', bearer(org.staffS.accessToken)).send({});
-    expect(byS.status).toBe(403);
+    const handOver = await assign(org.owner.accessToken, org.counterA.id, org.staffT.staffId);
+    expect(handOver.status).toBe(409);
+    expect(handOver.body.error.code).toBe('COUNTER_HAS_ACTIVE_SERVICE');
     const byT = await api().post(`/api/tokens/${p1.id}/start`).set('Authorization', bearer(org.staffT.accessToken)).send({});
-    expect(byT.status).toBe(200);
+    expect(byT.status).toBe(403);
+    const byS = await api().post(`/api/tokens/${p1.id}/start`).set('Authorization', bearer(org.staffS.accessToken)).send({});
+    expect(byS.status).toBe(200);
   });
 
   it('promoting a staff member to admin releases their counter', async () => {
@@ -514,5 +554,107 @@ describe('ADR-064 — serving is STAFF work; owners and admins manage, never ser
       .send({ role: 'ADMIN' });
     expect(promoted.status).toBe(200);
     expect((await prisma.counter.findUniqueOrThrow({ where: { id: org.counterA.id } })).staffId).toBeNull();
+  });
+});
+
+describe('ADR-064 — a called or in-service person is never orphaned', () => {
+  async function serving(org: Awaited<ReturnType<typeof setup>>, phase: 'CALLED' | 'IN_PROGRESS') {
+    await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
+    await assign(org.owner.accessToken, org.counterB.id, org.staffT.staffId);
+    const p1 = await org.join();
+    expect((await call(org.staffS.accessToken, p1.id)).status).toBe(200);
+    if (phase === 'IN_PROGRESS') {
+      const started = await api().post(`/api/tokens/${p1.id}/start`).set('Authorization', bearer(org.staffS.accessToken)).send({});
+      expect(started.status).toBe(200);
+    }
+    return p1;
+  }
+
+  const blocked = (res: { status: number; body: { error?: { code: string } } }) => {
+    expect(res.status).toBe(409);
+    expect(res.body.error?.code).toBe('COUNTER_HAS_ACTIVE_SERVICE');
+  };
+
+  for (const phase of ['CALLED', 'IN_PROGRESS'] as const) {
+    it(`a counter with a ${phase} person cannot be deleted`, async () => {
+      const org = await setup();
+      await serving(org, phase);
+      for (const manager of [org.owner, org.admin]) {
+        blocked(await api().delete(`/api/counters/${org.counterA.id}`).set('Authorization', bearer(manager.accessToken)));
+      }
+      expect(await prisma.counter.findUnique({ where: { id: org.counterA.id } })).not.toBeNull();
+    });
+
+    it(`its staff member cannot be unassigned, replaced, moved, promoted, suspended or removed while a person is ${phase}`, async () => {
+      const org = await setup();
+      const p1 = await serving(org, phase);
+      const t = bearer(org.owner.accessToken);
+
+      blocked(await assign(org.owner.accessToken, org.counterA.id, null));
+      const extra = await createStaffWithRole(org.owner.organizationId, 'STAFF');
+      blocked(await assign(org.admin.accessToken, org.counterA.id, extra.staffId));
+      blocked(await api().put(`/api/staff/${org.staffS.staffId}`).set('Authorization', t).send({ role: 'ADMIN' }));
+      blocked(await api().put(`/api/staff/${org.staffS.staffId}`).set('Authorization', t).send({ status: 'SUSPENDED' }));
+      blocked(await api().delete(`/api/staff/${org.staffS.staffId}`).set('Authorization', t));
+
+      const counter = await prisma.counter.findUniqueOrThrow({ where: { id: org.counterA.id } });
+      expect(counter.staffId).toBe(org.staffS.staffId);
+      expect(await status(p1.id)).toBe(phase);
+      // Re-assigning the same person is a no-op, not an orphaning.
+      expect((await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId)).status).toBe(200);
+    });
+
+    it(`nobody at another counter can act on a ${phase} person`, async () => {
+      const org = await setup();
+      const p1 = await serving(org, phase);
+      const t = bearer(org.staffT.accessToken);
+      for (const [path, body] of [
+        ['start', {}],
+        ['complete', {}],
+        ['skip', { reasonCode: 'NO_RESPONSE' }],
+      ] as const) {
+        const res = await api().post(`/api/tokens/${p1.id}/${path}`).set('Authorization', t).send(body);
+        expect(res.status).toBeGreaterThanOrEqual(403);
+        expect(res.status).not.toBe(200);
+      }
+      const duration = await api().patch(`/api/tokens/${p1.id}/duration`).set('Authorization', t).send({ requiredDurationMinutes: 9 });
+      expect(duration.status).toBe(403);
+      expect(await status(p1.id)).toBe(phase);
+    });
+  }
+
+  it('a called person with no counter is not finished by "any staff in the queue"', async () => {
+    const org = await setup();
+    const p1 = await serving(org, 'CALLED');
+    // Legacy data: a CALLED token whose counter link was lost.
+    await prisma.token.update({ where: { id: p1.id }, data: { counterId: null } });
+    for (const who of [org.staffS, org.staffT]) {
+      const res = await api().post(`/api/tokens/${p1.id}/skip`).set('Authorization', bearer(who.accessToken)).send({ reasonCode: 'NO_RESPONSE' });
+      expect(res.status).toBe(403);
+      expect(res.body.error.code).toBe('COUNTER_ACCESS_DENIED');
+    }
+  });
+
+  it('once the visit is resolved, the counter can be unassigned and deleted normally', async () => {
+    const org = await setup();
+    const p1 = await serving(org, 'IN_PROGRESS');
+    const done = await api().post(`/api/tokens/${p1.id}/complete`).set('Authorization', bearer(org.staffS.accessToken));
+    expect(done.status).toBe(200);
+
+    expect((await assign(org.admin.accessToken, org.counterA.id, null)).status).toBe(200);
+    expect((await api().delete(`/api/counters/${org.counterA.id}`).set('Authorization', bearer(org.owner.accessToken))).status).toBe(204);
+    const promoted = await api()
+      .put(`/api/staff/${org.staffS.staffId}`)
+      .set('Authorization', bearer(org.owner.accessToken))
+      .send({ role: 'ADMIN' });
+    expect(promoted.status).toBe(200);
+  });
+
+  it('a person who cancels from the app releases the counter too', async () => {
+    const org = await setup();
+    const p1 = await serving(org, 'CALLED');
+    const cancelled = await api().post(`/api/tokens/${p1.id}/cancel`).send({ deviceIdentifier: p1.deviceIdentifier });
+    expect(cancelled.status).toBe(200);
+    expect((await assign(org.owner.accessToken, org.counterA.id, null)).status).toBe(200);
   });
 });

@@ -1,4 +1,5 @@
 import { useParams, useSearchParams } from 'react-router-dom';
+import { PermissionGate } from '../components/PermissionGate';
 import { useAuth } from '../context/AuthContext';
 import { useQueue } from '../hooks/useQueues';
 import { Card } from '../components/Card';
@@ -94,9 +95,11 @@ export function QueueDetailsPage() {
               </svg>
               Open Queue
             </ButtonLink>
-            <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" size="lg">
-              Manage Counters
-            </ButtonLink>
+            <PermissionGate permission="manage_counters">
+              <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" size="lg">
+                Manage Counters
+              </ButtonLink>
+            </PermissionGate>
           </div>
         </div>
 

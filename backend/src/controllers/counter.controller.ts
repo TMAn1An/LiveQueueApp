@@ -13,7 +13,7 @@ export async function list(req: Request, res: Response) {
 
 export async function create(req: Request, res: Response) {
   const counter = await counterService.createCounter(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.queueId as string,
     req.body,
   );
@@ -78,7 +78,7 @@ export async function remove(req: Request, res: Response) {
   // changes were named for counter_changed) — not audited here; see the
   // Phase 7 Step 5 report for this gap.
   const deleted = await counterService.deleteCounter(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.counterId as string,
   );
   res.status(204).send();

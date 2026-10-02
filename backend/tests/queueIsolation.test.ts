@@ -464,11 +464,13 @@ describe('only owners and admins move staff between counters', () => {
     await setCounterStatus(org.ctx.accessToken, org.counterA.id, 'ACTIVE');
     const token = await createToken({ queueId: org.queueA.id, serviceId: org.serviceA.id });
 
-    // Still able to run the line: open a counter, call, and view it.
+    // Still able to run the line from their own counter: call, and view it.
+    // Opening or closing the counter is owner/admin management (ADR-064).
     const status = await api()
       .patch(`/api/counters/${org.counterA.id}/status`)
       .set('Authorization', `Bearer ${org.operator.accessToken}`)
       .send({ status: 'ACTIVE' });
+    expect(status.status).toBe(403);
     const called = await api()
       .post(`/api/tokens/${token.id}/call`)
       .set('Authorization', `Bearer ${org.operator.accessToken}`)
@@ -478,7 +480,6 @@ describe('only owners and admins move staff between counters', () => {
       .set('Authorization', `Bearer ${org.operator.accessToken}`)
       .query({ queueId: org.queueA.id });
 
-    expect(status.status).toBe(200);
     expect(called.status).toBe(200);
     expect(line.status).toBe(200);
   });

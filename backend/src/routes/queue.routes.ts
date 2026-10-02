@@ -7,7 +7,7 @@ import * as tokenController from '../controllers/token.controller';
 import * as queueScheduleController from '../controllers/queueSchedule.controller';
 import { authenticate } from '../middleware/authenticate';
 import { requirePermission } from '../middleware/requirePermission';
-import { SERVING_STAFF_ONLY_DENIAL } from '../services/counterAccess.service';
+import { COUNTER_MANAGEMENT_DENIAL, SERVING_STAFF_ONLY_DENIAL } from '../services/counterAccess.service';
 import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
@@ -85,7 +85,7 @@ router.post(
   '/:queueId/counters',
   authenticate,
   requireVerified,
-  requirePermission('manage_counters'),
+  requirePermission('manage_counters', COUNTER_MANAGEMENT_DENIAL),
   validate(createCounterSchema),
   counterController.create,
 );

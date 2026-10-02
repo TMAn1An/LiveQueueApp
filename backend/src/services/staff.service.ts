@@ -1,6 +1,7 @@
 import type { Prisma, Staff, StaffRole } from '@prisma/client';
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
+import { assertNoActiveServiceForStaff } from './counterAccess.service';
 import { AppError } from '../utils/AppError';
 import { hashPassword } from '../utils/password';
 import {
@@ -292,6 +293,15 @@ export async function updateStaff(
     existing.invitationSentAt !== null;
 
   const staff = await prisma.$transaction(async (tx) => {
+    // ADR-064: someone called or being served at this person's counter can
+    // only be finished by them, so they keep their counter — and stay STAFF
+    // and active — until that visit is resolved.
+    const leavesServing =
+      (effectiveRole !== 'STAFF' && existing.role === 'STAFF') ||
+      (input.status !== undefined && input.status !== 'ACTIVE' && existing.status === 'ACTIVE');
+    if (leavesServing) {
+      await assertNoActiveServiceForStaff(tx, staffId);
+    }
     const updated = await tx.staff.update({
       where: { id: staffId },
       data: {

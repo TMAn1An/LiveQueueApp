@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as counterController from '../controllers/counter.controller';
 import { authenticate } from '../middleware/authenticate';
 import { requirePermission } from '../middleware/requirePermission';
+import { COUNTER_MANAGEMENT_DENIAL } from '../services/counterAccess.service';
 import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
@@ -30,18 +31,17 @@ router.put(
   '/:counterId',
   authenticate,
   requireVerified,
-  requirePermission('manage_counters'),
+  requirePermission('manage_counters', COUNTER_MANAGEMENT_DENIAL),
   validate(updateCounterSchema),
   counterController.update,
 );
-// Deleting a counter also ends its assignment, so it is a staffing decision
-// as well (ADR-064) — OWNER and ADMIN only.
+// ADR-064: creating, renaming, opening/closing and deleting counters is
+// OWNER/ADMIN management (manage_counters, which STAFF do not hold).
 router.delete(
   '/:counterId',
   authenticate,
   requireVerified,
-  requirePermission('manage_counters'),
-  requirePermission('manage_staff', COUNTER_ASSIGNMENT_DENIAL),
+  requirePermission('manage_counters', COUNTER_MANAGEMENT_DENIAL),
   validate(counterIdOnlySchema),
   counterController.remove,
 );
@@ -49,14 +49,11 @@ router.patch(
   '/:counterId/status',
   authenticate,
   requireVerified,
-  requirePermission('manage_counters'),
+  requirePermission('manage_counters', COUNTER_MANAGEMENT_DENIAL),
   validate(updateCounterStatusSchema),
   counterController.updateStatus,
 );
-// Who may operate a counter is a counter concern; who *stands* at it is a
-// staffing decision, and ordinary STAFF must not be able to make it — they
-// hold manage_counters (so they can put their own counter on break) but not
-// manage_staff. Reusing that existing permission rather than inventing one.
+// Who stands at a counter is a staffing decision (manage_staff, OWNER/ADMIN).
 router.get(
   '/:counterId/available-staff',
   authenticate,

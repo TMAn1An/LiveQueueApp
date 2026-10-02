@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { PermissionGate } from '../components/PermissionGate';
 import { useDashboardStats } from '../hooks/useDashboard';
 import { useQueues } from '../hooks/useQueues';
 import { useAuth } from '../context/AuthContext';
@@ -94,9 +95,11 @@ function QueueSummaryCard({ queue }: { queue: Queue }) {
           Open Queue
         </ButtonLink>
         <div className="flex gap-2">
-          <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" className="min-w-0 flex-1">
-            Manage Counters
-          </ButtonLink>
+          <PermissionGate permission="manage_counters">
+            <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" className="min-w-0 flex-1">
+              Manage Counters
+            </ButtonLink>
+          </PermissionGate>
           <ButtonLink to={`/queues/${queue.id}`} variant="outline">
             Settings
           </ButtonLink>
@@ -139,7 +142,7 @@ export function DashboardPage() {
                 Attention needed: {stalledQueues.length} {stalledQueues.length === 1 ? 'queue has' : 'queues have'} people waiting and no active counter.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
-                {stalledQueues.map((q) => (
+                {hasPermission('manage_counters') && stalledQueues.map((q) => (
                   <Link
                     key={q.id}
                     to={`/queues/${q.id}/counters`}
