@@ -203,15 +203,45 @@ export interface CounterResponse {
 }
 
 /**
- * ADR-064: a counter serves only through the person assigned to it, and a
- * claim (call/next) is always made at the caller's own counter. So that the
- * many tests which simply "create a counter, then call at it" keep reading
- * that way, this helper assigns a new counter to its creator when the
- * creator holds no counter yet — through the real assign endpoint, so it is
- * subject to the real rules. Pass `assignToCreator: false` for a counter that
- * starts unassigned; a second counter is never auto-assigned (a person holds
- * at most one), use `assignCounterTo` / `createCounterOperator` for that.
+ * ADR-064: only STAFF serve, and only at the counter an owner or admin
+ * assigned them. So that the many tests which simply "create a counter, then
+ * serve at it" keep reading that way, when an owner or admin creates their
+ * first counter this helper also creates a STAFF member, assigns them to it
+ * through the real assign endpoint, and remembers them as that manager's
+ * counter operator. Serving requests in those tests are then made with
+ * `servingToken(managerAccessToken)` — the operator's own token — never the
+ * manager's.
+ *
+ * Pass `assignToCreator: false` for a counter that starts unassigned. A
+ * manager's second and later counters start unassigned (use
+ * `createCounterOperator` to staff them).
  */
+const counterOperators = new Map<string, RestrictedStaffContext>();
+
+/** The access token of the STAFF member operating the first counter this
+ * manager created through `createCounter`. */
+export function servingToken(managerAccessToken: string): string {
+  const operator = counterOperators.get(managerAccessToken);
+  if (!operator) {
+    throw new Error('servingToken: this manager has not created a counter through createCounter yet');
+  }
+  return operator.accessToken;
+}
+
+/**
+ * A fresh STAFF member of this organization with no counter — for tenant
+ * isolation tests, where a serving request from another organization must be
+ * refused as "not found" before any counter rule is even reached.
+ */
+export async function staffOf(ctx: { organizationId: string }): Promise<string> {
+  return (await createStaffWithRole(ctx.organizationId, 'STAFF')).accessToken;
+}
+
+/** The STAFF operator behind `servingToken`, for tests that need their id. */
+export function counterOperatorOf(managerAccessToken: string): RestrictedStaffContext | undefined {
+  return counterOperators.get(managerAccessToken);
+}
+
 export async function createCounter(
   accessToken: string,
   queueId: string,
@@ -227,17 +257,18 @@ export async function createCounter(
     throw new Error(`createCounter failed: ${res.status} ${JSON.stringify(res.body)}`);
   }
 
-  if (!assignToCreator) {
+  if (!assignToCreator || counterOperators.has(accessToken)) {
     return res.body.data;
   }
-  const mine = await api().get('/api/counters/mine').set('Authorization', `Bearer ${accessToken}`);
   const me = await api().get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`);
-  const role = me.body?.data?.staff?.role ?? me.body?.data?.role;
-  const staffId = me.body?.data?.staff?.id ?? me.body?.data?.id;
-  if (mine.status !== 200 || mine.body.data !== null || role === 'STAFF' || !staffId) {
+  const role = me.body?.data?.staff?.role;
+  const organizationId = me.body?.data?.organization?.id ?? me.body?.data?.staff?.organizationId;
+  if (me.status !== 200 || role === 'STAFF' || !organizationId) {
     return res.body.data;
   }
-  return assignCounterTo(accessToken, res.body.data.id as string, staffId as string);
+  const operator = await createStaffWithRole(organizationId as string, 'STAFF');
+  counterOperators.set(accessToken, operator);
+  return assignCounterTo(accessToken, res.body.data.id as string, operator.staffId);
 }
 
 /** Assigns (or, with null, unassigns) a counter through the real endpoint. */

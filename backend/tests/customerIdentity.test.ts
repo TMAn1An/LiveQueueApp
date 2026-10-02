@@ -8,6 +8,7 @@ import {
   setCounterStatus,
   setFormFields,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -128,18 +129,18 @@ async function completeToken(
   await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
   const called = await api()
     .post(`/api/tokens/${tokenId}/call`)
-    .set('Authorization', `Bearer ${org.accessToken}`)
+    .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
     .send({ counterId: counter.id });
   if (called.status !== 200) {
     throw new Error(`call failed: ${called.status} ${JSON.stringify(called.body)}`);
   }
-  const started = await startToken(org.accessToken, tokenId, deviceIdentifier);
+  const started = await startToken(servingToken(org.accessToken), tokenId, deviceIdentifier);
   if (started.status !== 200) {
     throw new Error(`start failed: ${started.status} ${JSON.stringify(started.body)}`);
   }
   const completed = await api()
     .post(`/api/tokens/${tokenId}/complete`)
-    .set('Authorization', `Bearer ${org.accessToken}`);
+    .set('Authorization', `Bearer ${servingToken(org.accessToken)}`);
   if (completed.status !== 200) {
     throw new Error(`complete failed: ${completed.status} ${JSON.stringify(completed.body)}`);
   }
@@ -547,7 +548,7 @@ describe('repeat enforcement by customer identity', () => {
     const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
     await api()
       .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const second = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
@@ -568,7 +569,7 @@ describe('repeat enforcement by customer identity', () => {
     const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
     await api()
       .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const second = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd2');
@@ -581,12 +582,12 @@ describe('repeat enforcement by customer identity', () => {
 
     await api()
       .post(`/api/tokens/${second.body.data.id}/call`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ counterId: counter.id });
-    await startToken(org.accessToken, second.body.data.id, 'd2');
+    await startToken(servingToken(org.accessToken), second.body.data.id, 'd2');
     await api()
       .post(`/api/tokens/${second.body.data.id}/complete`)
-      .set('Authorization', `Bearer ${org.accessToken}`);
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`);
 
     const claim = await prisma.queueIdentityClaim.findFirstOrThrow({
       where: { queueId: org.queue.id, tokenId: second.body.data.id },
@@ -605,7 +606,7 @@ describe('repeat enforcement by customer identity', () => {
     const first = await join(org.queue.id, org.service.id, { formData: { nid: 'A-1' } }, 'd1');
     await api()
       .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     // Being skipped freed them to rejoin, and they did — from another phone.
@@ -622,7 +623,7 @@ describe('repeat enforcement by customer identity', () => {
     // The old, now-terminal token cannot be called back into service.
     const callStale = await api()
       .post(`/api/tokens/${first.body.data.id}/call`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ counterId: counter.id });
     expect(callStale.status).toBe(422);
     expect(callStale.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
@@ -636,7 +637,7 @@ describe('repeat enforcement by customer identity', () => {
 
     const called = await api()
       .post(`/api/tokens/${first.body.data.id}/call`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ counterId: counter.id });
 
     expect(called.status).toBe(200);

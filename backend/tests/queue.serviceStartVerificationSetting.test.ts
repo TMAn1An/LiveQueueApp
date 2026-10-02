@@ -10,6 +10,8 @@ import {
   registerOwner,
   setCounterStatus,
   startToken,
+  servingToken,
+  staffOf,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -67,7 +69,7 @@ function otpColumns(tokenId: string) {
 
 async function calledToken(org: Awaited<ReturnType<typeof setupOrgQueue>>) {
   const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-  const res = await callToken(org.accessToken, token.id, org.counter.id);
+  const res = await callToken(servingToken(org.accessToken), token.id, org.counter.id);
   expect(res.status).toBe(200);
   return token;
 }
@@ -95,7 +97,7 @@ describe('ADR-041 â€” a queue that requires the code', () => {
     const org = await setupOrgQueue();
     const token = await calledToken(org);
 
-    const res = await startWithoutCode(org.accessToken, token.id);
+    const res = await startWithoutCode(servingToken(org.accessToken), token.id);
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('SERVICE_START_VERIFICATION_REQUIRED');
     expect((await otpColumns(token.id)).status).toBe('CALLED');
@@ -108,7 +110,7 @@ describe('ADR-041 â€” a queue that requires the code', () => {
     expect(before.serviceStartOtpCipher).not.toBeNull();
     expect(before.serviceStartOtpExpiresAt).not.toBeNull();
 
-    const res = await startToken(org.accessToken, token.id, token.deviceIdentifier);
+    const res = await startToken(servingToken(org.accessToken), token.id, token.deviceIdentifier);
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('IN_PROGRESS');
     expect((await otpColumns(token.id)).serviceStartOtpCipher).toBeNull();
@@ -126,7 +128,7 @@ describe('ADR-041 â€” a queue that requires the code', () => {
 
     const res = await api()
       .post(`/api/tokens/${token.id}/start`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ verificationCode: wrong });
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_VERIFICATION_CODE');
@@ -155,7 +157,7 @@ describe('ADR-041 â€” a queue that does not use the code', () => {
     const org = await setupOrgQueue({ requireServiceStartOtp: false });
     const token = await calledToken(org);
 
-    const res = await startWithoutCode(org.accessToken, token.id);
+    const res = await startWithoutCode(servingToken(org.accessToken), token.id);
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('IN_PROGRESS');
     expect(res.body.data.startedAt).not.toBeNull();
@@ -212,7 +214,7 @@ describe('ADR-041 â€” a queue that does not use the code', () => {
   it('keeps the state machine: a WAITING token still cannot jump to IN_PROGRESS', async () => {
     const org = await setupOrgQueue({ requireServiceStartOtp: false });
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const res = await startWithoutCode(org.accessToken, token.id);
+    const res = await startWithoutCode(servingToken(org.accessToken), token.id);
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
     expect((await otpColumns(token.id)).status).toBe('WAITING');
@@ -226,7 +228,7 @@ describe('ADR-041 â€” a queue that does not use the code', () => {
     expect(unauthenticated.status).toBe(401);
 
     const otherOrg = await registerOwner();
-    const crossTenant = await startWithoutCode(otherOrg.accessToken, token.id);
+    const crossTenant = await startWithoutCode(await staffOf(otherOrg), token.id);
     expect(crossTenant.status).toBe(404);
     expect((await otpColumns(token.id)).status).toBe('CALLED');
   });
@@ -236,13 +238,13 @@ describe('ADR-041 â€” a queue that does not use the code', () => {
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     const second = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
-    const outOfOrder = await callToken(org.accessToken, second.id, org.counter.id);
+    const outOfOrder = await callToken(servingToken(org.accessToken), second.id, org.counter.id);
     expect(outOfOrder.status).toBe(409);
     expect(outOfOrder.body.error.code).toBe('FCFS_VIOLATION');
 
-    expect((await callToken(org.accessToken, first.id, org.counter.id)).status).toBe(200);
+    expect((await callToken(servingToken(org.accessToken), first.id, org.counter.id)).status).toBe(200);
     // The counter is now occupied, so the next customer cannot be called to it.
-    const busy = await callToken(org.accessToken, second.id, org.counter.id);
+    const busy = await callToken(servingToken(org.accessToken), second.id, org.counter.id);
     expect(busy.status).toBe(409);
     expect(busy.body.error.code).toBe('COUNTER_NOT_AVAILABLE');
   });
@@ -259,22 +261,22 @@ describe('ADR-041 â€” /next follows the same rule as /call', () => {
   it('issues a code on a code-requiring queue, and never returns the cipher to staff', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const res = await next(org.accessToken, org.queue.id, org.counter.id);
+    const res = await next(servingToken(org.accessToken), org.queue.id, org.counter.id);
     expect(res.status).toBe(200);
     expect(res.body.data.id).toBe(token.id);
     expect(res.body.data.serviceStartOtpCipher).toBeUndefined();
     expect(res.body.data.serviceStartOtpExpiresAt).toBeUndefined();
     expect((await otpColumns(token.id)).serviceStartOtpCipher).not.toBeNull();
 
-    const started = await startToken(org.accessToken, token.id, token.deviceIdentifier);
+    const started = await startToken(servingToken(org.accessToken), token.id, token.deviceIdentifier);
     expect(started.status).toBe(200);
   });
 
   it('issues no code on a queue that does not use one', async () => {
     const org = await setupOrgQueue({ requireServiceStartOtp: false });
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    expect((await next(org.accessToken, org.queue.id, org.counter.id)).status).toBe(200);
+    expect((await next(servingToken(org.accessToken), org.queue.id, org.counter.id)).status).toBe(200);
     expect((await otpColumns(token.id)).serviceStartOtpCipher).toBeNull();
-    expect((await startWithoutCode(org.accessToken, token.id)).status).toBe(200);
+    expect((await startWithoutCode(servingToken(org.accessToken), token.id)).status).toBe(200);
   });
 });

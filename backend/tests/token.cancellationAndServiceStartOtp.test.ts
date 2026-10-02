@@ -9,6 +9,7 @@ import {
   registerOwner,
   setCounterStatus,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -58,7 +59,7 @@ describe('V2 Checkpoint 7 — customer cancellation', () => {
     expect(waitingRes.body.data.cancelledAt).not.toBeNull();
 
     const called = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, called.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), called.id, org.counter.id);
     const calledRes = await cancelTokenRequest(called.id, called.deviceIdentifier);
     expect(calledRes.status).toBe(200);
     expect(calledRes.body.data.status).toBe('CANCELLED');
@@ -67,8 +68,8 @@ describe('V2 Checkpoint 7 — customer cancellation', () => {
   it('Test 3: an IN_PROGRESS token cannot be cancelled', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
-    await startToken(org.accessToken, token.id, token.deviceIdentifier);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
+    await startToken(servingToken(org.accessToken), token.id, token.deviceIdentifier);
 
     const res = await cancelTokenRequest(token.id, token.deviceIdentifier);
     expect(res.status).toBe(422);
@@ -120,7 +121,7 @@ describe('V2 Checkpoint 7 — customer cancellation', () => {
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     await cancelTokenRequest(token.id, token.deviceIdentifier);
 
-    const res = await callToken(org.accessToken, token.id, org.counter.id);
+    const res = await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
@@ -130,14 +131,14 @@ describe('V2 Checkpoint 7 — customer cancellation', () => {
     const a001 = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     const a002 = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
-    const tooEarly = await callToken(org.accessToken, a002.id, org.counter.id);
+    const tooEarly = await callToken(servingToken(org.accessToken), a002.id, org.counter.id);
     expect(tooEarly.status).toBe(409);
     expect(tooEarly.body.error.code).toBe('FCFS_VIOLATION');
 
     const cancelRes = await cancelTokenRequest(a001.id, a001.deviceIdentifier);
     expect(cancelRes.status).toBe(200);
 
-    const nowEligible = await callToken(org.accessToken, a002.id, org.counter.id);
+    const nowEligible = await callToken(servingToken(org.accessToken), a002.id, org.counter.id);
     expect(nowEligible.status).toBe(200);
     expect(nowEligible.body.data.status).toBe('CALLED');
   });
@@ -147,7 +148,7 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 8/9: a CALLED token gets a securely-derived code the owning device can read, and the raw code is never stored', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const callRes = await callToken(org.accessToken, token.id, org.counter.id);
+    const callRes = await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     expect(callRes.status).toBe(200);
 
     const codeRes = await getVerificationCode(token.id, token.deviceIdentifier);
@@ -169,13 +170,13 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 15: the code never appears in the staff-facing call/start response or the customer view', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const callRes = await callToken(org.accessToken, token.id, org.counter.id);
+    const callRes = await callToken(servingToken(org.accessToken), token.id, org.counter.id);
 
     const staffKeys = Object.keys(callRes.body.data).join(',');
     expect(staffKeys).not.toMatch(/otp/i);
 
     const codeRes = await getVerificationCode(token.id, token.deviceIdentifier);
-    const startRes = await submitStart(org.accessToken, token.id, codeRes.body.data.code);
+    const startRes = await submitStart(servingToken(org.accessToken), token.id, codeRes.body.data.code);
     const startKeys = Object.keys(startRes.body.data).join(',');
     expect(startKeys).not.toMatch(/otp/i);
 
@@ -187,15 +188,15 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 10/11: staff cannot start a CALLED token with a missing or wrong code, and the token stays CALLED', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
 
     const missing = await api()
       .post(`/api/tokens/${token.id}/start`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({});
     expect(missing.status).toBe(422);
 
-    const wrong = await submitStart(org.accessToken, token.id, '000000');
+    const wrong = await submitStart(servingToken(org.accessToken), token.id, '000000');
     expect(wrong.status).toBe(422);
     expect(wrong.body.error.code).toBe('INVALID_VERIFICATION_CODE');
 
@@ -206,14 +207,14 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 12/14: the correct code starts service exactly once — a replay fails', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     const codeRes = await getVerificationCode(token.id, token.deviceIdentifier);
 
-    const started = await submitStart(org.accessToken, token.id, codeRes.body.data.code);
+    const started = await submitStart(servingToken(org.accessToken), token.id, codeRes.body.data.code);
     expect(started.status).toBe(200);
     expect(started.body.data.status).toBe('IN_PROGRESS');
 
-    const replay = await submitStart(org.accessToken, token.id, codeRes.body.data.code);
+    const replay = await submitStart(servingToken(org.accessToken), token.id, codeRes.body.data.code);
     expect(replay.status).toBe(422);
     expect(replay.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
@@ -221,7 +222,7 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 13: an expired code is rejected', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     const codeRes = await getVerificationCode(token.id, token.deviceIdentifier);
 
     await prisma.token.update({
@@ -229,7 +230,7 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
       data: { serviceStartOtpExpiresAt: new Date(Date.now() - 60_000) },
     });
 
-    const res = await submitStart(org.accessToken, token.id, codeRes.body.data.code);
+    const res = await submitStart(servingToken(org.accessToken), token.id, codeRes.body.data.code);
     expect(res.status).toBe(410);
     expect(res.body.error.code).toBe('VERIFICATION_CODE_EXPIRED');
 
@@ -240,11 +241,11 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 16: five wrong attempts invalidate the current code, forcing a reissue', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     const codeRes = await getVerificationCode(token.id, token.deviceIdentifier);
 
     for (let i = 0; i < 5; i++) {
-      const res = await submitStart(org.accessToken, token.id, '000000');
+      const res = await submitStart(servingToken(org.accessToken), token.id, '000000');
       expect(res.status).toBe(422);
     }
 
@@ -252,7 +253,7 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
     // never actually entered wrong itself — the 5th wrong attempt already
     // cleared it, so this now reports "no code issued" rather than "wrong
     // code" or "locked" (both of which require a cipher to still be there).
-    const lockedOut = await submitStart(org.accessToken, token.id, codeRes.body.data.code);
+    const lockedOut = await submitStart(servingToken(org.accessToken), token.id, codeRes.body.data.code);
     expect(lockedOut.status).toBe(409);
     expect(lockedOut.body.error.code).toBe('VERIFICATION_CODE_REQUIRED');
 
@@ -273,11 +274,11 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 21 (Checkpoint 7A): concurrent wrong-code submissions cannot lose failed-attempt increments', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     const codeRes = await getVerificationCode(token.id, token.deviceIdentifier);
 
     const attempts = await Promise.all(
-      Array.from({ length: 5 }, () => submitStart(org.accessToken, token.id, '000000')),
+      Array.from({ length: 5 }, () => submitStart(servingToken(org.accessToken), token.id, '000000')),
     );
     for (const res of attempts) {
       expect(res.status).toBe(422);
@@ -291,7 +292,7 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
 
     // The lockout must actually be in effect — even the real code no longer
     // works, matching Test 16's sequential-attempts assertion.
-    const afterLockout = await submitStart(org.accessToken, token.id, codeRes.body.data.code);
+    const afterLockout = await submitStart(servingToken(org.accessToken), token.id, codeRes.body.data.code);
     expect(afterLockout.status).toBe(409);
     expect(afterLockout.body.error.code).toBe('VERIFICATION_CODE_REQUIRED');
   });
@@ -299,28 +300,28 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
   it('Test 17: reissuing mints a fresh code and invalidates the old one', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     const firstCode = (await getVerificationCode(token.id, token.deviceIdentifier)).body.data.code;
 
     const reissueRes = await reissueVerificationCode(token.id, token.deviceIdentifier);
     expect(reissueRes.status).toBe(200);
     expect(reissueRes.body.data.code).toMatch(/^\d{6}$/);
 
-    const oldCodeAttempt = await submitStart(org.accessToken, token.id, firstCode);
+    const oldCodeAttempt = await submitStart(servingToken(org.accessToken), token.id, firstCode);
     expect(oldCodeAttempt.status).toBe(422);
     expect(oldCodeAttempt.body.error.code).toBe('INVALID_VERIFICATION_CODE');
 
-    const newCodeAttempt = await submitStart(org.accessToken, token.id, reissueRes.body.data.code);
+    const newCodeAttempt = await submitStart(servingToken(org.accessToken), token.id, reissueRes.body.data.code);
     expect(newCodeAttempt.status).toBe(200);
   });
 
   it('Test 18: a skipped token has no retrievable verification code and its pre-skip code no longer starts service', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     const firstCode = (await getVerificationCode(token.id, token.deviceIdentifier)).body.data.code;
 
-    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${servingToken(org.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     // Recall no longer exists — a skipped token can never be CALLED again,
     // so its verification code is simply unavailable, not merely rotated.
@@ -328,19 +329,19 @@ describe('V2 Checkpoint 7 — service-start verification code', () => {
     expect(codeAfterSkip.status).toBe(409);
     expect(codeAfterSkip.body.error.code).toBe('TOKEN_NOT_CALLED');
 
-    const oldCodeAttempt = await submitStart(org.accessToken, token.id, firstCode);
+    const oldCodeAttempt = await submitStart(servingToken(org.accessToken), token.id, firstCode);
     expect(oldCodeAttempt.status).toBe(422);
   });
 
   it('Test 19: a concurrent cancel and a valid start on the same CALLED token produce exactly one winner', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await callToken(org.accessToken, token.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), token.id, org.counter.id);
     const code = (await getVerificationCode(token.id, token.deviceIdentifier)).body.data.code;
 
     const [cancelRes, startRes] = await Promise.all([
       cancelTokenRequest(token.id, token.deviceIdentifier),
-      submitStart(org.accessToken, token.id, code),
+      submitStart(servingToken(org.accessToken), token.id, code),
     ]);
 
     // Exactly one side wins (200); the other loses to a conflict — never

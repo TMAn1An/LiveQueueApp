@@ -7,6 +7,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 
@@ -85,7 +86,7 @@ describe('Token position and estimated wait', () => {
     const first = await createToken({ queueId: queue.id, serviceId: service.id });
     const second = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    await call(ctx.accessToken, first.id, counter.id);
+    await call(servingToken(ctx.accessToken), first.id, counter.id);
 
     const res = await api().get(`/api/tokens/${second.id}/status`);
     expect(res.status).toBe(200);
@@ -100,7 +101,7 @@ describe('Token position and estimated wait', () => {
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    await call(ctx.accessToken, token.id, counter.id);
+    await call(servingToken(ctx.accessToken), token.id, counter.id);
 
     const res = await api().get(`/api/tokens/${token.id}/status`);
     expect(res.body.data.position).toBeNull();

@@ -7,6 +7,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -42,7 +43,7 @@ describe('POST /api/tokens — multi-service selection (V2 Checkpoint 5)', () =>
     // reflects the full 17-minute sum, not a client-suppliable number.
     const call = await api()
       .post(`/api/tokens/${res.body.data.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
     expect(call.status).toBe(200);
 

@@ -23,6 +23,19 @@ export interface CounterActor {
 }
 
 export const STAFF_NOT_ASSIGNED_TO_COUNTER = 'STAFF_NOT_ASSIGNED_TO_COUNTER';
+export const SERVING_STAFF_ONLY = 'SERVING_STAFF_ONLY';
+
+/** The refusal for an owner or admin on a serving endpoint — both from the
+ * route's permission check and, as defence in depth, from the service. */
+export const SERVING_STAFF_ONLY_DENIAL = {
+  code: SERVING_STAFF_ONLY,
+  message:
+    'Only staff members serve people. Owners and admins manage counters and assign staff to them.',
+};
+
+function servingStaffOnly(): AppError {
+  return new AppError(403, SERVING_STAFF_ONLY_DENIAL.code, SERVING_STAFF_ONLY_DENIAL.message);
+}
 export const COUNTER_ACCESS_DENIED = 'COUNTER_ACCESS_DENIED';
 
 function notAssigned(): AppError {
@@ -50,15 +63,19 @@ export function findAssignedCounter(
 }
 
 /**
- * The counter the actor claims from. Every role is bound by it — OWNER and
- * ADMIN decide who stands at which counter, but a claim always belongs to
- * whoever makes it, at their own counter (ADR-064 §3D). A `requestedCounterId`
- * is accepted for compatibility with older clients and must match.
+ * The counter the actor claims from. Serving is STAFF work: OWNER and ADMIN
+ * decide who stands at which counter but never claim anyone themselves
+ * (ADR-064). A claim always belongs to whoever makes it, at their own
+ * counter. A `requestedCounterId` is accepted for compatibility with older
+ * clients and must match.
  */
 export async function requireClaimCounter(
   actor: CounterActor,
   requestedCounterId?: string | null,
 ) {
+  if (actor.role !== 'STAFF') {
+    throw servingStaffOnly();
+  }
   const counter = await findAssignedCounter(actor);
   if (!counter) {
     throw notAssigned();
@@ -82,7 +99,8 @@ export function assertStillAssigned(actor: CounterActor, lockedStaffId: string |
 
 /**
  * Status changes and renames: STAFF only on their own counter; OWNER and
- * ADMIN on any counter in their organization.
+ * ADMIN on any counter in their organization (managing counters is theirs;
+ * serving at them is not).
  */
 export function assertMayOperateCounter(actor: CounterActor, counter: Pick<Counter, 'staffId'>) {
   if (actor.role !== 'STAFF') {
@@ -96,19 +114,22 @@ export function assertMayOperateCounter(actor: CounterActor, counter: Pick<Count
 /**
  * Acting on a token after the claim (start, complete, skip, adjust time).
  *
- * STAFF act only on tokens at their own counter — and, for a WAITING token
- * (skipping the person at the front), only in the queue their counter
- * serves. OWNER and ADMIN may resolve a token at any counter: a person
- * already at a counter must never be stranded because whoever called them
- * was unassigned or went home. That is supervision of a claim already made,
- * not dispatching a person to someone (which no path allows).
+ * STAFF only, and only for the person at their own counter — or, for a
+ * WAITING token (skipping the person at the front), only in the queue their
+ * counter serves. There is no owner/admin override (ADR-064).
+ *
+ * Recovery when whoever called a person is gone is an assignment, not an
+ * override: an owner or admin assigns another staff member to that counter,
+ * who then finishes the person through these same endpoints. A token left
+ * with no counter at all (its counter was deleted mid-service) may be
+ * finished by any staff member whose counter serves that queue.
  */
 export async function assertMayActOnToken(
   actor: CounterActor,
   token: { counterId: string | null; queueId: string },
 ) {
   if (actor.role !== 'STAFF') {
-    return;
+    throw servingStaffOnly();
   }
   const own = await findAssignedCounter(actor);
   if (!own) {

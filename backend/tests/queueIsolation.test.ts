@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
   assignCounterTo,
+  counterOperatorOf,
   createCounter,
   createCounterOperator,
   createQueue,
@@ -11,6 +12,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -131,7 +133,7 @@ describe('first-come-first-served runs per queue', () => {
     // Clearing A001 out of the way is enough to free A002; B001 is irrelevant.
     await api()
       .post(`/api/tokens/${first.id}/skip`)
-      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.ctx.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' })
       .expect(200);
 
@@ -147,17 +149,17 @@ describe('first-come-first-served runs per queue', () => {
     // ADR-064: naming another counter is refused outright…
     const spoofed = await api()
       .post(`/api/tokens/${tokenA.id}/call`)
-      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.ctx.accessToken)}`)
       .send({ counterId: org.counterB.id });
     expect(spoofed.status).toBe(403);
     expect(spoofed.body.error.code).toBe('COUNTER_ACCESS_DENIED');
 
     // …and someone whose own counter is queue B's cannot call queue A's line.
     await assignCounterTo(org.ctx.accessToken, org.counterA.id, null);
-    await assignCounterTo(org.ctx.accessToken, org.counterB.id, org.ctx.staffId);
+    await assignCounterTo(org.ctx.accessToken, org.counterB.id, counterOperatorOf(org.ctx.accessToken)!.staffId);
     const res = await api()
       .post(`/api/tokens/${tokenA.id}/call`)
-      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.ctx.accessToken)}`)
       .send({});
 
     expect(res.status).toBe(409);
@@ -172,7 +174,7 @@ describe('first-come-first-served runs per queue', () => {
 
     const res = await api()
       .post(`/api/queues/${org.queueA.id}/next`)
-      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.ctx.accessToken)}`)
       .send({ counterId: org.counterA.id });
 
     expect(res.status).toBe(404);
@@ -190,7 +192,7 @@ describe('first-come-first-served runs per queue', () => {
 
     const res = await api()
       .post(`/api/queues/${org.queueA.id}/next`)
-      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.ctx.accessToken)}`)
       .send({ counterId: org.counterA.id });
 
     expect(res.status).toBe(200);
@@ -205,7 +207,7 @@ describe('first-come-first-served runs per queue', () => {
 
     const res = await api()
       .post(`/api/tokens/${tokenA.id}/skip`)
-      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.ctx.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     expect(res.status).toBe(409);

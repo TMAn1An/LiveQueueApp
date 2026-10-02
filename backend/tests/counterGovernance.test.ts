@@ -230,15 +230,9 @@ describe('ADR-064 — serving is a self-claim at your own counter', () => {
     await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
     const p1 = await org.join();
 
-    // The owner holds no counter, so they claim no one…
-    const unassigned = await call(org.owner.accessToken, p1.id, { counterId: org.counterA.id });
-    expect(unassigned.status).toBe(403);
-    expect(unassigned.body.error.code).toBe('STAFF_NOT_ASSIGNED_TO_COUNTER');
-    // …and holding a counter only ever lets them claim at their own.
-    await assign(org.owner.accessToken, org.counterB.id, org.owner.staffId);
-    const toS = await call(org.owner.accessToken, p1.id, { counterId: org.counterA.id });
-    expect(toS.status).toBe(403);
-    expect(toS.body.error.code).toBe('COUNTER_ACCESS_DENIED');
+    const dispatched = await call(org.owner.accessToken, p1.id, { counterId: org.counterA.id, staffId: org.staffS.staffId });
+    expect(dispatched.status).toBe(403);
+    expect(dispatched.body.error.code).toBe('SERVING_STAFF_ONLY');
     expect(await status(p1.id)).toBe('WAITING');
   });
 
@@ -319,7 +313,7 @@ describe('ADR-064 — serving is a self-claim at your own counter', () => {
     expect(again.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
 
-  it('STAFF act only on the person at their own counter; owner and admin may resolve any', async () => {
+  it('STAFF act only on the person at their own counter', async () => {
     const org = await setup();
     await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
     await assign(org.owner.accessToken, org.counterB.id, org.staffT.staffId);
@@ -342,8 +336,7 @@ describe('ADR-064 — serving is a self-claim at your own counter', () => {
     expect(await status(p1.id)).toBe('CALLED');
 
     expect((await act(org.staffS.accessToken, 'start')).status).toBe(200);
-    // Supervision of a claim already made, not a dispatch.
-    expect((await act(org.admin.accessToken, 'complete')).status).toBe(200);
+    expect((await act(org.staffS.accessToken, 'complete')).status).toBe(200);
   });
 
   it('an active counter with nobody at it is not capacity', async () => {
@@ -410,5 +403,116 @@ describe('ADR-064 — strict FCFS and atomic claims', () => {
     ]);
     expect(results.filter((r) => r.status === 200)).toHaveLength(1);
     expect(await prisma.token.count({ where: { counterId: org.counterA.id, status: 'CALLED' } })).toBe(1);
+  });
+});
+
+describe('ADR-064 — serving is STAFF work; owners and admins manage, never serve', () => {
+  for (const role of ['OWNER', 'ADMIN'] as const) {
+    it(`${role} cannot Serve next or call anyone`, async () => {
+      const org = await setup();
+      const manager = role === 'OWNER' ? org.owner : org.admin;
+      await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
+      const p1 = await org.join();
+
+      for (const res of [
+        await next(manager.accessToken, org.queue.id),
+        await next(manager.accessToken, org.queue.id, { counterId: org.counterA.id }),
+        await call(manager.accessToken, p1.id),
+      ]) {
+        expect(res.status).toBe(403);
+        expect(res.body.error.code).toBe('SERVING_STAFF_ONLY');
+      }
+      expect(await status(p1.id)).toBe('WAITING');
+    });
+
+    it(`${role} cannot be assigned to a counter, so cannot assign themselves to serve`, async () => {
+      const org = await setup();
+      const manager = role === 'OWNER' ? org.owner : org.admin;
+      const managerId = role === 'OWNER' ? org.owner.staffId : org.admin.staffId;
+
+      const res = await assign(manager.accessToken, org.counterA.id, managerId);
+      expect(res.status).toBe(409);
+      expect(res.body.error.code).toBe('STAFF_NOT_ASSIGNABLE');
+      expect((await mine(manager.accessToken)).body.data).toBeNull();
+
+      const offered = await api()
+        .get(`/api/counters/${org.counterA.id}/available-staff`)
+        .set('Authorization', bearer(manager.accessToken));
+      expect(offered.status).toBe(200);
+      expect((offered.body.data as { role: string }[]).every((s) => s.role === 'STAFF')).toBe(true);
+      expect((offered.body.data as { id: string }[]).map((s) => s.id).sort()).toEqual(
+        [org.staffS.staffId, org.staffT.staffId].sort(),
+      );
+    });
+
+    it(`${role} cannot start, complete, skip or adjust a person at a staff member's counter`, async () => {
+      const org = await setup();
+      const manager = role === 'OWNER' ? org.owner : org.admin;
+      await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
+      const p1 = await org.join();
+      const p2 = await org.join();
+      await call(org.staffS.accessToken, p1.id);
+
+      for (const [path, body] of [
+        ['start', {}],
+        ['complete', {}],
+        ['skip', { reasonCode: 'NO_RESPONSE' }],
+      ] as const) {
+        const res = await api().post(`/api/tokens/${p1.id}/${path}`).set('Authorization', bearer(manager.accessToken)).send(body);
+        expect(res.status).toBe(403);
+        expect(res.body.error.code).toBe('SERVING_STAFF_ONLY');
+      }
+      const duration = await api()
+        .patch(`/api/tokens/${p1.id}/duration`)
+        .set('Authorization', bearer(manager.accessToken))
+        .send({ requiredDurationMinutes: 9 });
+      expect(duration.status).toBe(403);
+      // Nor skip the person at the front of the line.
+      const skipWaiting = await api()
+        .post(`/api/tokens/${p2.id}/skip`)
+        .set('Authorization', bearer(manager.accessToken))
+        .send({ reasonCode: 'NO_RESPONSE' });
+      expect(skipWaiting.status).toBe(403);
+      expect(await status(p1.id)).toBe('CALLED');
+      expect(await status(p2.id)).toBe('WAITING');
+    });
+  }
+
+  it('owner and admin hold every management permission but not operate_tokens', async () => {
+    const org = await setup();
+    for (const who of [org.owner, org.admin]) {
+      const me = await api().get('/api/auth/me').set('Authorization', bearer(who.accessToken));
+      expect(me.body.data.permissions).toContain('manage_staff');
+      expect(me.body.data.permissions).toContain('manage_counters');
+      expect(me.body.data.permissions).not.toContain('operate_tokens');
+    }
+    const staff = await api().get('/api/auth/me').set('Authorization', bearer(org.staffS.accessToken));
+    expect(staff.body.data.permissions).toContain('operate_tokens');
+  });
+
+  it('recovery is a reassignment: a new staff member at the counter finishes the person', async () => {
+    const org = await setup();
+    await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
+    const p1 = await org.join();
+    await call(org.staffS.accessToken, p1.id);
+
+    // S leaves the desk; the owner puts T on Counter A.
+    await assign(org.owner.accessToken, org.counterA.id, org.staffT.staffId);
+    const byS = await api().post(`/api/tokens/${p1.id}/start`).set('Authorization', bearer(org.staffS.accessToken)).send({});
+    expect(byS.status).toBe(403);
+    const byT = await api().post(`/api/tokens/${p1.id}/start`).set('Authorization', bearer(org.staffT.accessToken)).send({});
+    expect(byT.status).toBe(200);
+  });
+
+  it('promoting a staff member to admin releases their counter', async () => {
+    const org = await setup();
+    await assign(org.owner.accessToken, org.counterA.id, org.staffS.staffId);
+
+    const promoted = await api()
+      .put(`/api/staff/${org.staffS.staffId}`)
+      .set('Authorization', bearer(org.owner.accessToken))
+      .send({ role: 'ADMIN' });
+    expect(promoted.status).toBe(200);
+    expect((await prisma.counter.findUniqueOrThrow({ where: { id: org.counterA.id } })).staffId).toBeNull();
   });
 });

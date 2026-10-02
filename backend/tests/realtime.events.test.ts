@@ -9,6 +9,7 @@ import {
   registerOwner,
   setCounterStatus,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import {
@@ -179,7 +180,7 @@ describe('All 12 specification events are emitted to the organization room', () 
 
     await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
 
     const envelope = await eventPromise;
@@ -195,13 +196,13 @@ describe('All 12 specification events are emitted to the organization room', () 
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
     await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
     const eventPromise = waitForEvent<Envelope>(socket, 'token.started');
 
-    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
+    await startToken(servingToken(ctx.accessToken), token.id, token.deviceIdentifier);
 
     const envelope = await eventPromise;
     expect(envelope.data.status).toBe('IN_PROGRESS');
@@ -216,14 +217,14 @@ describe('All 12 specification events are emitted to the organization room', () 
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
     await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
-    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
+    await startToken(servingToken(ctx.accessToken), token.id, token.deviceIdentifier);
 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
     const eventPromise = waitForEvent<Envelope>(socket, 'token.completed');
 
-    await api().post(`/api/tokens/${token.id}/complete`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().post(`/api/tokens/${token.id}/complete`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`);
 
     const envelope = await eventPromise;
     expect(envelope.data.status).toBe('COMPLETED');
@@ -242,7 +243,7 @@ describe('All 12 specification events are emitted to the organization room', () 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
     const eventPromise = waitForEvent<Envelope>(socket, 'token.skipped');
 
-    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await api().post(`/api/tokens/${token.id}/skip`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const envelope = await eventPromise;
     expect(envelope.data.status).toBe('SKIPPED');

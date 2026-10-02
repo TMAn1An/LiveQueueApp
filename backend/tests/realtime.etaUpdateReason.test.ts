@@ -8,6 +8,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import {
@@ -83,7 +84,7 @@ describe('token.position_changed — ETA update reason', () => {
     // which is the customer whose wait actually moves.
     await api()
       .post(`/api/tokens/${first.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
 
     const socket = track(connectClient(port));
@@ -99,7 +100,7 @@ describe('token.position_changed — ETA update reason', () => {
     const eventPromise = waitForEvent<PositionEnvelope>(socket, 'token.position_changed');
     const res = await api()
       .patch(`/api/tokens/${first.id}/duration`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ requiredDurationMinutes: 45 });
     expect(res.status).toBe(200);
 
@@ -121,7 +122,7 @@ describe('token.position_changed — ETA update reason', () => {
     const eventPromise = waitForEvent<PositionEnvelope>(socket, 'token.position_changed');
     await api()
       .post(`/api/tokens/${first.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
 
     const event = await eventPromise;

@@ -9,6 +9,7 @@ import {
   registerOwner,
   setCounterStatus,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -41,12 +42,12 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const a001 = await createToken({ queueId: queue.id, serviceId: service.id });
     const a002 = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const blocked = await call(ctx.accessToken, a002.id, counter.id);
+    const blocked = await call(servingToken(ctx.accessToken), a002.id, counter.id);
     expect(blocked.status).toBe(409);
     expect(blocked.body.error.code).toBe('FCFS_VIOLATION');
     expect((await prisma.token.findUnique({ where: { id: a002.id } }))!.status).toBe('WAITING');
 
-    const allowed = await call(ctx.accessToken, a001.id, counter.id);
+    const allowed = await call(servingToken(ctx.accessToken), a001.id, counter.id);
     expect(allowed.status).toBe(200);
     expect(allowed.body.data.status).toBe('CALLED');
   });
@@ -65,7 +66,7 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const a002 = await createToken({ queueId: queue.id, serviceId: service.id });
     const a003 = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const first = await call(ctx.accessToken, a001.id, counterA.id);
+    const first = await call(servingToken(ctx.accessToken), a001.id, counterA.id);
     expect(first.status).toBe(200);
 
     const second = await call(operatorB.accessToken, a002.id, counterB.id);
@@ -89,20 +90,20 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const a003 = await createToken({ queueId: queue.id, serviceId: service.id });
     const a004 = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    await call(ctx.accessToken, a001.id, counterA.id);
+    await call(servingToken(ctx.accessToken), a001.id, counterA.id);
     await call(operatorB.accessToken, a002.id, counterB.id);
 
-    const a004TooEarly = await call(ctx.accessToken, a004.id, counterA.id);
+    const a004TooEarly = await call(servingToken(ctx.accessToken), a004.id, counterA.id);
     expect(a004TooEarly.status).toBe(409);
     expect(a004TooEarly.body.error.code).toBe('FCFS_VIOLATION');
 
-    await startToken(ctx.accessToken, a001.id, a001.deviceIdentifier);
+    await startToken(servingToken(ctx.accessToken), a001.id, a001.deviceIdentifier);
     const completed = await api()
       .post(`/api/tokens/${a001.id}/complete`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`);
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`);
     expect(completed.status).toBe(200);
 
-    const a003Now = await call(ctx.accessToken, a003.id, counterA.id);
+    const a003Now = await call(servingToken(ctx.accessToken), a003.id, counterA.id);
     expect(a003Now.status).toBe(200);
     expect((await prisma.token.findUnique({ where: { id: a004.id } }))!.status).toBe('WAITING');
   });
@@ -116,9 +117,9 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const a001 = await createToken({ queueId: queue.id, serviceId: service.id });
     const a002 = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    await call(ctx.accessToken, a001.id, counter.id);
+    await call(servingToken(ctx.accessToken), a001.id, counter.id);
 
-    const res = await call(ctx.accessToken, a002.id, counter.id);
+    const res = await call(servingToken(ctx.accessToken), a002.id, counter.id);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COUNTER_NOT_AVAILABLE');
   });
@@ -136,7 +137,7 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const a001 = await createToken({ queueId: queue.id, serviceId: service.id });
 
     const [resA, resB] = await Promise.all([
-      call(ctx.accessToken, a001.id, counterA.id),
+      call(servingToken(ctx.accessToken), a001.id, counterA.id),
       call(operatorB.accessToken, a001.id, counterB.id),
     ]);
 
@@ -158,11 +159,11 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
 
     // a001 is skipped, freeing its slot; a002 (a *later* token) is then
     // called and occupies the only active counter.
-    await api().post(`/api/tokens/${a001.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
-    await call(ctx.accessToken, a002.id, counter.id);
+    await api().post(`/api/tokens/${a001.id}/skip`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await call(servingToken(ctx.accessToken), a002.id, counter.id);
 
     // Recall no longer exists — a001 is terminal and can never be called.
-    const callRes = await call(ctx.accessToken, a001.id, counter.id);
+    const callRes = await call(servingToken(ctx.accessToken), a001.id, counter.id);
     expect(callRes.status).toBe(422);
     expect(callRes.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
 

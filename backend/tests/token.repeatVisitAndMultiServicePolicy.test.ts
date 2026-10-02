@@ -8,6 +8,7 @@ import {
   registerOwner,
   setCounterStatus,
   startToken as startTokenWithOtp,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -58,9 +59,9 @@ async function completeAJourney(org: {
     deviceIdentifier: org.deviceIdentifier,
   });
   expect(first.status).toBe(201);
-  await callToken(org.accessToken, first.body.data.id, org.counter.id);
-  await startToken(org.accessToken, first.body.data.id, org.deviceIdentifier);
-  const completeRes = await completeToken(org.accessToken, first.body.data.id);
+  await callToken(servingToken(org.accessToken), first.body.data.id, org.counter.id);
+  await startToken(servingToken(org.accessToken), first.body.data.id, org.deviceIdentifier);
+  const completeRes = await completeToken(servingToken(org.accessToken), first.body.data.id);
   expect(completeRes.status).toBe(200);
   return first.body.data.id as string;
 }
@@ -112,7 +113,7 @@ describe('V2 Checkpoint 6 — queue repeat-visit policy', () => {
     const org = await setupOrgQueue();
     const deviceIdentifier = 'device-skip-then-rejoin';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    const skipRes = await skipToken(org.accessToken, first.body.data.id);
+    const skipRes = await skipToken(servingToken(org.accessToken), first.body.data.id);
     expect(skipRes.status).toBe(200);
 
     const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });

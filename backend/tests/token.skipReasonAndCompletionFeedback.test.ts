@@ -10,6 +10,8 @@ import {
   registerOwner,
   setCounterStatus,
   startToken,
+  servingToken,
+  staffOf,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -64,8 +66,8 @@ function stored(tokenId: string) {
 
 async function inProgress(org: Org) {
   const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-  expect((await call(org.accessToken, token.id, org.counter.id)).status).toBe(200);
-  expect((await startToken(org.accessToken, token.id, token.deviceIdentifier)).status).toBe(200);
+  expect((await call(servingToken(org.accessToken), token.id, org.counter.id)).status).toBe(200);
+  expect((await startToken(servingToken(org.accessToken), token.id, token.deviceIdentifier)).status).toBe(200);
   return token;
 }
 
@@ -75,7 +77,7 @@ describe('ADR-042 — skip requires a reason', () => {
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
     for (const body of [undefined, {}, { reasonCode: '' }, { reasonCode: '   ' }]) {
-      const res = await skip(org.accessToken, token.id, body);
+      const res = await skip(servingToken(org.accessToken), token.id, body);
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe('SKIP_REASON_REQUIRED');
     }
@@ -85,7 +87,7 @@ describe('ADR-042 — skip requires a reason', () => {
   it('rejects an unknown reason code', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const res = await skip(org.accessToken, token.id, { reasonCode: 'BECAUSE' });
+    const res = await skip(servingToken(org.accessToken), token.id, { reasonCode: 'BECAUSE' });
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_SKIP_REASON');
     expect((await stored(token.id)).status).toBe('WAITING');
@@ -95,7 +97,7 @@ describe('ADR-042 — skip requires a reason', () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
-    const res = await skip(org.accessToken, token.id, { reasonCode: 'NO_RESPONSE' });
+    const res = await skip(servingToken(org.accessToken), token.id, { reasonCode: 'NO_RESPONSE' });
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('SKIPPED');
     expect(await stored(token.id)).toEqual({
@@ -109,7 +111,7 @@ describe('ADR-042 — skip requires a reason', () => {
   it('a predefined reason ignores any text sent with it', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await skip(org.accessToken, token.id, {
+    await skip(servingToken(org.accessToken), token.id, {
       reasonCode: 'CUSTOMER_LEFT',
       reasonText: 'internal note',
     });
@@ -120,7 +122,7 @@ describe('ADR-042 — skip requires a reason', () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     for (const body of [{ reasonCode: 'OTHER' }, { reasonCode: 'OTHER', reasonText: '  \n\t ' }]) {
-      const res = await skip(org.accessToken, token.id, body);
+      const res = await skip(servingToken(org.accessToken), token.id, body);
       expect(res.status).toBe(422);
       expect(res.body.error.code).toBe('SKIP_REASON_TEXT_REQUIRED');
     }
@@ -130,7 +132,7 @@ describe('ADR-042 — skip requires a reason', () => {
   it('OTHER with text succeeds, stored trimmed and cleaned', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const res = await skip(org.accessToken, token.id, {
+    const res = await skip(servingToken(org.accessToken), token.id, {
       reasonCode: 'OTHER',
       reasonText: '  Wrong   queue —\nplease use Billing\u0007  ',
     });
@@ -144,14 +146,14 @@ describe('ADR-042 — skip requires a reason', () => {
   it('OTHER text over the limit is rejected with its own code', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const res = await skip(org.accessToken, token.id, {
+    const res = await skip(servingToken(org.accessToken), token.id, {
       reasonCode: 'OTHER',
       reasonText: 'x'.repeat(201),
     });
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('SKIP_REASON_TEXT_TOO_LONG');
     expect(
-      (await skip(org.accessToken, token.id, { reasonCode: 'OTHER', reasonText: 'x'.repeat(200) }))
+      (await skip(servingToken(org.accessToken), token.id, { reasonCode: 'OTHER', reasonText: 'x'.repeat(200) }))
         .status,
     ).toBe(200);
   });
@@ -159,23 +161,23 @@ describe('ADR-042 — skip requires a reason', () => {
   it('applies to skipping a CALLED and an IN_PROGRESS customer too', async () => {
     const org = await setupOrgQueue();
     const called = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await call(org.accessToken, called.id, org.counter.id);
-    expect((await skip(org.accessToken, called.id)).body.error.code).toBe('SKIP_REASON_REQUIRED');
+    await call(servingToken(org.accessToken), called.id, org.counter.id);
+    expect((await skip(servingToken(org.accessToken), called.id)).body.error.code).toBe('SKIP_REASON_REQUIRED');
     expect(
-      (await skip(org.accessToken, called.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' })).status,
+      (await skip(servingToken(org.accessToken), called.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' })).status,
     ).toBe(200);
 
     const serving = await inProgress(org);
-    expect((await skip(org.accessToken, serving.id)).body.error.code).toBe('SKIP_REASON_REQUIRED');
+    expect((await skip(servingToken(org.accessToken), serving.id)).body.error.code).toBe('SKIP_REASON_REQUIRED');
     expect(
-      (await skip(org.accessToken, serving.id, { reasonCode: 'MISSING_REQUIREMENT' })).status,
+      (await skip(servingToken(org.accessToken), serving.id, { reasonCode: 'MISSING_REQUIREMENT' })).status,
     ).toBe(200);
   });
 
   it('the customer can read the reason; staff responses carry it too', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await skip(org.accessToken, token.id, {
+    await skip(servingToken(org.accessToken), token.id, {
       reasonCode: 'OTHER',
       reasonText: 'Please visit the front desk',
     });
@@ -200,15 +202,15 @@ describe('ADR-042 — skip requires a reason', () => {
   it('a skipped token stays terminal: it cannot be called, started, completed or skipped again', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await skip(org.accessToken, token.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await skip(servingToken(org.accessToken), token.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
-    expect((await call(org.accessToken, token.id, org.counter.id)).body.error.code).toBe(
+    expect((await call(servingToken(org.accessToken), token.id, org.counter.id)).body.error.code).toBe(
       'INVALID_TOKEN_TRANSITION',
     );
-    expect((await complete(org.accessToken, token.id)).body.error.code).toBe(
+    expect((await complete(servingToken(org.accessToken), token.id)).body.error.code).toBe(
       'INVALID_TOKEN_TRANSITION',
     );
-    const again = await skip(org.accessToken, token.id, {
+    const again = await skip(servingToken(org.accessToken), token.id, {
       reasonCode: 'OTHER',
       reasonText: 'overwrite?',
     });
@@ -228,7 +230,7 @@ describe('ADR-042 — skip requires a reason', () => {
       serviceId: org.service.id,
       deviceIdentifier,
     });
-    await skip(org.accessToken, first.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await skip(servingToken(org.accessToken), first.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const second = await createToken({
       queueId: org.queue.id,
@@ -243,7 +245,7 @@ describe('ADR-042 — skip requires a reason', () => {
     const org = await setupOrgQueue();
     await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     const later = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    const res = await skip(org.accessToken, later.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    const res = await skip(servingToken(org.accessToken), later.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('FCFS_VIOLATION');
     expect((await stored(later.id)).skipReasonCode).toBeNull();
@@ -259,7 +261,7 @@ describe('ADR-042 — skip requires a reason', () => {
     expect(unauthenticated.status).toBe(401);
 
     const other = await registerOwner();
-    expect((await skip(other.accessToken, token.id, { reasonCode: 'NO_RESPONSE' })).status).toBe(
+    expect((await skip(await staffOf(other), token.id, { reasonCode: 'NO_RESPONSE' })).status).toBe(
       404,
     );
 
@@ -280,7 +282,7 @@ describe('ADR-042 — completion with optional feedback', () => {
   it('completes exactly as before with no body at all', async () => {
     const org = await setupOrgQueue();
     const token = await inProgress(org);
-    const res = await complete(org.accessToken, token.id);
+    const res = await complete(servingToken(org.accessToken), token.id);
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('COMPLETED');
     expect(await stored(token.id)).toMatchObject({ status: 'COMPLETED', completionFeedback: null });
@@ -289,7 +291,7 @@ describe('ADR-042 — completion with optional feedback', () => {
   it('stores feedback when given, trimmed, keeping line breaks', async () => {
     const org = await setupOrgQueue();
     const token = await inProgress(org);
-    const res = await complete(org.accessToken, token.id, {
+    const res = await complete(servingToken(org.accessToken), token.id, {
       feedback: '  Please bring the original document next time.\n\nThank you!  ',
     });
     expect(res.status).toBe(200);
@@ -308,18 +310,18 @@ describe('ADR-042 — completion with optional feedback', () => {
   it('treats blank feedback as an ordinary completion', async () => {
     const org = await setupOrgQueue();
     const token = await inProgress(org);
-    expect((await complete(org.accessToken, token.id, { feedback: '   \n  ' })).status).toBe(200);
+    expect((await complete(servingToken(org.accessToken), token.id, { feedback: '   \n  ' })).status).toBe(200);
     expect(await stored(token.id)).toMatchObject({ status: 'COMPLETED', completionFeedback: null });
   });
 
   it('enforces the feedback length limit and leaves the token IN_PROGRESS', async () => {
     const org = await setupOrgQueue();
     const token = await inProgress(org);
-    const res = await complete(org.accessToken, token.id, { feedback: 'x'.repeat(501) });
+    const res = await complete(servingToken(org.accessToken), token.id, { feedback: 'x'.repeat(501) });
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('COMPLETION_FEEDBACK_TOO_LONG');
     expect((await stored(token.id)).status).toBe('IN_PROGRESS');
-    expect((await complete(org.accessToken, token.id, { feedback: 'x'.repeat(500) })).status).toBe(
+    expect((await complete(servingToken(org.accessToken), token.id, { feedback: 'x'.repeat(500) })).status).toBe(
       200,
     );
   });
@@ -327,8 +329,8 @@ describe('ADR-042 — completion with optional feedback', () => {
   it('feedback does not open any new path: a CALLED token still cannot be completed', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await call(org.accessToken, token.id, org.counter.id);
-    const res = await complete(org.accessToken, token.id, { feedback: 'done' });
+    await call(servingToken(org.accessToken), token.id, org.counter.id);
+    const res = await complete(servingToken(org.accessToken), token.id, { feedback: 'done' });
     expect(res.status).toBe(422);
     expect(res.body.error.code).toBe('INVALID_TOKEN_TRANSITION');
   });
@@ -336,16 +338,16 @@ describe('ADR-042 — completion with optional feedback', () => {
   it('keeps the service-start verification rule: on a code queue, complete is only reachable after a verified start', async () => {
     const org = await setupOrgQueue({ requireServiceStartOtp: true });
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await call(org.accessToken, token.id, org.counter.id);
+    await call(servingToken(org.accessToken), token.id, org.counter.id);
     const directStart = await api()
       .post(`/api/tokens/${token.id}/start`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({});
     expect(directStart.body.error.code).toBe('SERVICE_START_VERIFICATION_REQUIRED');
-    expect((await complete(org.accessToken, token.id, { feedback: 'x' })).status).toBe(422);
+    expect((await complete(servingToken(org.accessToken), token.id, { feedback: 'x' })).status).toBe(422);
 
-    await startToken(org.accessToken, token.id, token.deviceIdentifier);
-    expect((await complete(org.accessToken, token.id, { feedback: 'x' })).status).toBe(200);
+    await startToken(servingToken(org.accessToken), token.id, token.deviceIdentifier);
+    expect((await complete(servingToken(org.accessToken), token.id, { feedback: 'x' })).status).toBe(200);
   });
 
   it('keeps permissions and tenant isolation', async () => {
@@ -353,7 +355,7 @@ describe('ADR-042 — completion with optional feedback', () => {
     const token = await inProgress(org);
     expect((await api().post(`/api/tokens/${token.id}/complete`).send({})).status).toBe(401);
     const other = await registerOwner();
-    expect((await complete(other.accessToken, token.id, { feedback: 'x' })).status).toBe(404);
+    expect((await complete(await staffOf(other), token.id, { feedback: 'x' })).status).toBe(404);
     expect((await stored(token.id)).status).toBe('IN_PROGRESS');
   });
 });
@@ -389,7 +391,7 @@ describe('skip reason wording — neutral "person" labels', () => {
     } as const;
     for (const [code, text] of Object.entries(expected)) {
       const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-      expect((await skip(org.accessToken, token.id, { reasonCode: code })).status).toBe(200);
+      expect((await skip(servingToken(org.accessToken), token.id, { reasonCode: code })).status).toBe(200);
       expect(await stored(token.id)).toMatchObject({ skipReasonCode: code, skipReasonText: text });
       const view = await api().get(`/api/tokens/${token.id}`);
       expect(view.body.data.skipReason).toEqual({ code, text });
@@ -400,7 +402,7 @@ describe('skip reason wording — neutral "person" labels', () => {
   it('a token skipped before the wording change keeps its original text', async () => {
     const org = await setupOrgQueue();
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await skip(org.accessToken, token.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await skip(servingToken(org.accessToken), token.id, { reasonCode: 'CUSTOMER_NOT_PRESENT' });
     // Stand-in for a row written by the previous release.
     await prisma.token.update({
       where: { id: token.id },

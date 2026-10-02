@@ -8,6 +8,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import {
@@ -79,7 +80,7 @@ describe('token.position_changed — targeted per-token emission', () => {
 
     await api()
       .post(`/api/tokens/${first.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
 
     // Tokens behind the one that was called shift up by exactly one position.
@@ -116,7 +117,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     // token, still WAITING and still ahead in sequence, is unaffected.
     await api()
       .post(`/api/tokens/${second.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
 
     expect(await firstEvents).toHaveLength(0);
@@ -139,7 +140,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     await joinToken(socketSecond, second.id);
     const eventPromise = waitForEvent<PositionEnvelope>(socketSecond, 'token.position_changed');
 
-    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const envelope = await eventPromise;
     expect(envelope.data.position).toBe(1);
@@ -166,7 +167,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     const callPositionEvent = waitForEvent<PositionEnvelope>(socketSecond, 'token.position_changed');
     await api()
       .post(`/api/tokens/${first.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
     await callPositionEvent;
 
@@ -176,7 +177,7 @@ describe('token.position_changed — targeted per-token emission', () => {
     // simulated ETA (V2 Checkpoint 4, ADR-026: the broadcast is no longer
     // scoped to "only tokens whose position shifted").
     const skipPositionEvent = waitForEvent<PositionEnvelope>(socketSecond, 'token.position_changed');
-    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     const envelope = await skipPositionEvent;
 
     expect(envelope.data.position).toBe(1);
@@ -199,7 +200,7 @@ describe('token.position_changed — targeted per-token emission', () => {
 
     const nextRes = await api()
       .post(`/api/queues/${queue.id}/next`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
     expect(nextRes.body.data.id).toBe(first.id);
 

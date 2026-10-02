@@ -8,6 +8,7 @@ import {
   registerOwner,
   setCounterStatus,
   startToken as startTokenWithOtp,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -61,7 +62,7 @@ describe('One active token per device per queue', () => {
     const org = await setupOrgQueue();
     const deviceIdentifier = 'device-called';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    await callToken(org.accessToken, first.body.data.id, org.counter.id);
+    await callToken(servingToken(org.accessToken), first.body.data.id, org.counter.id);
 
     const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     expect(second.status).toBe(409);
@@ -72,8 +73,8 @@ describe('One active token per device per queue', () => {
     const org = await setupOrgQueue();
     const deviceIdentifier = 'device-in-progress';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    await callToken(org.accessToken, first.body.data.id, org.counter.id);
-    const startRes = await startToken(org.accessToken, first.body.data.id, deviceIdentifier);
+    await callToken(servingToken(org.accessToken), first.body.data.id, org.counter.id);
+    const startRes = await startToken(servingToken(org.accessToken), first.body.data.id, deviceIdentifier);
     expect(startRes.status).toBe(200);
 
     const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
@@ -85,9 +86,9 @@ describe('One active token per device per queue', () => {
     const org = await setupOrgQueue();
     const deviceIdentifier = 'device-completed';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    await callToken(org.accessToken, first.body.data.id, org.counter.id);
-    await startToken(org.accessToken, first.body.data.id, deviceIdentifier);
-    const completeRes = await completeToken(org.accessToken, first.body.data.id);
+    await callToken(servingToken(org.accessToken), first.body.data.id, org.counter.id);
+    await startToken(servingToken(org.accessToken), first.body.data.id, deviceIdentifier);
+    const completeRes = await completeToken(servingToken(org.accessToken), first.body.data.id);
     expect(completeRes.status).toBe(200);
 
     const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
@@ -98,7 +99,7 @@ describe('One active token per device per queue', () => {
     const org = await setupOrgQueue();
     const deviceIdentifier = 'device-skipped';
     const first = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    const skipRes = await skipToken(org.accessToken, first.body.data.id);
+    const skipRes = await skipToken(servingToken(org.accessToken), first.body.data.id);
     expect(skipRes.status).toBe(200);
 
     const second = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
@@ -198,7 +199,7 @@ describe('One active token per device per queue', () => {
 
     const firstReq = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     const firstId = firstReq.body.data.id;
-    const skipRes = await skipToken(org.accessToken, firstId);
+    const skipRes = await skipToken(servingToken(org.accessToken), firstId);
     expect(skipRes.status).toBe(200);
 
     // Recall no longer exists — the only way back to service is a brand new

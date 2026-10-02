@@ -9,6 +9,7 @@ import {
   registerOwner,
   setCounterStatus,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -227,7 +228,7 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
       const res = await api()
         .post(`/api/tokens/${token.id}/call`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
         .send({ counterId: counter.id });
       expect(res.status).toBe(200);
 
@@ -244,7 +245,7 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
       const res = await api()
         .post(`/api/tokens/${token.id}/skip`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
         .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
       expect(res.status).toBe(200);
 
@@ -266,11 +267,11 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
       await api()
         .post(`/api/tokens/${token.id}/skip`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
         .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
       const res = await api()
         .post(`/api/tokens/${token.id}/call`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
         .send({ counterId: counter.id });
       expect(res.status).toBe(422);
 
@@ -285,12 +286,12 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
       await api()
         .post(`/api/tokens/${token.id}/call`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
         .send({ counterId: counter.id });
-      await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
+      await startToken(servingToken(ctx.accessToken), token.id, token.deviceIdentifier);
       const res = await api()
         .post(`/api/tokens/${token.id}/complete`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`);
+        .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`);
       expect(res.status).toBe(200);
 
       const rows = await waitForAuditLogs({
@@ -315,7 +316,7 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
       const res = await api()
         .post(`/api/tokens/${token.id}/call`)
-        .set('Authorization', `Bearer ${ctx.accessToken}`)
+        .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
         .send({ counterId: '00000000-0000-0000-0000-000000000000' });
       expect(res.status).toBeGreaterThanOrEqual(400);
 

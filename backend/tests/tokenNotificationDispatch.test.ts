@@ -10,6 +10,7 @@ import {
   registerOwner,
   setCounterStatus,
   startToken as startTokenWithOtp,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -88,29 +89,29 @@ async function setupToken(registerFcm = true): Promise<Setup> {
 function callToken(setup: Setup) {
   return api()
     .post(`/api/tokens/${setup.tokenId}/call`)
-    .set('Authorization', `Bearer ${setup.accessToken}`)
+    .set('Authorization', `Bearer ${servingToken(setup.accessToken)}`)
     .send({ counterId: setup.counterId });
 }
 
 // V2 Checkpoint 7 (ADR-029): /start now requires a verified customer code.
 function startToken(setup: Setup) {
-  return startTokenWithOtp(setup.accessToken, setup.tokenId, setup.deviceIdentifier);
+  return startTokenWithOtp(servingToken(setup.accessToken), setup.tokenId, setup.deviceIdentifier);
 }
 
 function completeToken(setup: Setup) {
   return api()
     .post(`/api/tokens/${setup.tokenId}/complete`)
-    .set('Authorization', `Bearer ${setup.accessToken}`);
+    .set('Authorization', `Bearer ${servingToken(setup.accessToken)}`);
 }
 
 function skipToken(setup: Setup) {
-  return api().post(`/api/tokens/${setup.tokenId}/skip`).set('Authorization', `Bearer ${setup.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+  return api().post(`/api/tokens/${setup.tokenId}/skip`).set('Authorization', `Bearer ${servingToken(setup.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 }
 
 function nextToken(setup: Setup) {
   return api()
     .post(`/api/queues/${setup.queueId}/next`)
-    .set('Authorization', `Bearer ${setup.accessToken}`)
+    .set('Authorization', `Bearer ${servingToken(setup.accessToken)}`)
     .send({ counterId: setup.counterId });
 }
 

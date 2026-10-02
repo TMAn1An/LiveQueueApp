@@ -1927,7 +1927,6 @@ export async function setRequiredDuration(
   requiredDurationMinutes: number,
 ) {
   const token = await findTokenScoped(actor.organizationId, tokenId);
-  await assertMayActOnToken(actor, token);
 
   if (token.status !== 'CALLED' && token.status !== 'IN_PROGRESS') {
     throw new AppError(
@@ -1936,6 +1935,9 @@ export async function setRequiredDuration(
       'Required duration can only be set for a person who has been called or is being served.',
     );
   }
+  // ADR-064: only the staff member at this person's counter (the route has
+  // already refused owners and admins).
+  await assertMayActOnToken(actor, token);
 
   const updated = await prisma.token.update({
     where: { id: tokenId },

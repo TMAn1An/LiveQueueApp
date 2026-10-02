@@ -8,6 +8,7 @@ import {
   setCounterStatus,
   setFormFields,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -111,14 +112,14 @@ function join(setup: Setup, who: string, device = `device-${Math.random().toStri
 async function serve(setup: Setup, tokenId: string, device: string) {
   const called = await api()
     .post(`/api/tokens/${tokenId}/call`)
-    .set('Authorization', `Bearer ${setup.ctx.accessToken}`)
+    .set('Authorization', `Bearer ${servingToken(setup.ctx.accessToken)}`)
     .send({ counterId: setup.counter.id });
   expect(called.status).toBe(200);
-  const started = await startToken(setup.ctx.accessToken, tokenId, device);
+  const started = await startToken(servingToken(setup.ctx.accessToken), tokenId, device);
   expect(started.status).toBe(200);
   const completed = await api()
     .post(`/api/tokens/${tokenId}/complete`)
-    .set('Authorization', `Bearer ${setup.ctx.accessToken}`);
+    .set('Authorization', `Bearer ${servingToken(setup.ctx.accessToken)}`);
   expect(completed.status).toBe(200);
 }
 
@@ -306,7 +307,7 @@ describe('session scope — occurrence identity and lifecycle', () => {
     const { res: first } = await join(setup, 'alice');
     const skipped = await api()
       .post(`/api/tokens/${first.body.data.id}/skip`)
-      .set('Authorization', `Bearer ${setup.ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(setup.ctx.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     expect(skipped.status).toBe(200);
 

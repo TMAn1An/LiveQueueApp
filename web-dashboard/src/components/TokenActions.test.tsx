@@ -11,14 +11,16 @@ import {
 } from '../hooks/useTokenActions';
 import { ApiError } from '../api/client';
 
-// ADR-064: OWNER/ADMIN (manage_staff) supervise every counter; STAFF act
-// only at their own. Tests default to a supervisor and switch per test.
-let supervises = true;
+// ADR-064: only STAFF serve (operate_tokens), and only at their own
+// counter. Tests default to a staff member at counter c1 of queue q1.
+let isStaff = true;
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
-    hasPermission: (permission: string) => permission !== 'manage_staff' || supervises,
+    hasPermission: (permission: string) =>
+      permission === 'operate_tokens' ? isStaff : permission === 'manage_staff' ? !isStaff : true,
   }),
 }));
+const ownCounter = { id: 'c1', name: 'Counter 1', status: 'ACTIVE', queueId: 'q1', queueName: 'Q' };
 vi.mock('../hooks/useCounters');
 vi.mock('../hooks/useTokenActions');
 
@@ -29,8 +31,8 @@ const setRequiredDurationMutate = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  supervises = true;
-  vi.mocked(useMyCounter).mockReturnValue({ data: null } as unknown as ReturnType<typeof useMyCounter>);
+  isStaff = true;
+  vi.mocked(useMyCounter).mockReturnValue({ data: ownCounter } as unknown as ReturnType<typeof useMyCounter>);
   vi.mocked(useStartToken).mockReturnValue({ mutate: startMutate } as unknown as ReturnType<typeof useStartToken>);
   vi.mocked(useCompleteToken).mockReturnValue({
     mutate: completeMutate,
@@ -504,11 +506,7 @@ describe('TokenActions — Skip unlocks exactly with Call', () => {
 });
 
 describe('TokenActions — STAFF act only at their own counter (ADR-064)', () => {
-  const ownCounter = { id: 'c1', name: 'Counter 1', status: 'ACTIVE', queueId: 'q1', queueName: 'Q' };
-
   it('shows no actions for a person being served at another counter', () => {
-    supervises = false;
-    vi.mocked(useMyCounter).mockReturnValue({ data: ownCounter } as unknown as ReturnType<typeof useMyCounter>);
     render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" counterId="c2" />);
     expect(screen.getByText('At another counter')).toBeInTheDocument();
     expect(screen.queryByText('Complete')).not.toBeInTheDocument();
@@ -517,15 +515,13 @@ describe('TokenActions — STAFF act only at their own counter (ADR-064)', () =>
   });
 
   it('shows the actions for the person at their own counter', () => {
-    supervises = false;
-    vi.mocked(useMyCounter).mockReturnValue({ data: ownCounter } as unknown as ReturnType<typeof useMyCounter>);
     render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" counterId="c1" />);
     expect(screen.getByText('Complete')).toBeInTheDocument();
     expect(screen.getByText('Skip')).toBeInTheDocument();
   });
 
   it('an unassigned staff member gets no actions at all', () => {
-    supervises = false;
+    vi.mocked(useMyCounter).mockReturnValue({ data: null } as unknown as ReturnType<typeof useMyCounter>);
     render(
       <TokenActions
         tokenId="t1"
@@ -538,9 +534,21 @@ describe('TokenActions — STAFF act only at their own counter (ADR-064)', () =>
     expect(screen.queryByText('Skip')).not.toBeInTheDocument();
   });
 
-  it('owner and admin may resolve a person at any counter', () => {
-    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" counterId="c9" />);
-    expect(screen.queryByText('At another counter')).not.toBeInTheDocument();
-    expect(screen.getByText('Skip')).toBeInTheDocument();
+  it('a staff member whose counter serves another queue cannot skip the front of this one', () => {
+    vi.mocked(useMyCounter).mockReturnValue({
+      data: { ...ownCounter, queueId: 'q2' },
+    } as unknown as ReturnType<typeof useMyCounter>);
+    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" position={1} />);
+    expect(screen.queryByText('Skip')).not.toBeInTheDocument();
+  });
+
+  it('owner and admin get no serving actions anywhere — no supervisor override', () => {
+    isStaff = false;
+    vi.mocked(useMyCounter).mockReturnValue({ data: null } as unknown as ReturnType<typeof useMyCounter>);
+    for (const status of ['WAITING', 'CALLED', 'IN_PROGRESS'] as const) {
+      const { unmount } = render(<TokenActions tokenId="t1" queueId="q1" status={status} counterId="c9" />);
+      expect(screen.queryByRole('button')).not.toBeInTheDocument();
+      unmount();
+    }
   });
 });

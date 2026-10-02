@@ -9,6 +9,8 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  servingToken,
+  staffOf,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -29,7 +31,7 @@ describe('Token tenant isolation', () => {
 
     const callRes = await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${orgB.accessToken}`)
+      .set('Authorization', `Bearer ${await staffOf(orgB)}`)
       .send({ counterId: counterA.id });
     expect(callRes.status).toBe(404);
     expect(callRes.body.error.code).toBe('TOKEN_NOT_FOUND');
@@ -39,18 +41,18 @@ describe('Token tenant isolation', () => {
     // check runs.
     const startRes = await api()
       .post(`/api/tokens/${token.id}/start`)
-      .set('Authorization', `Bearer ${orgB.accessToken}`)
+      .set('Authorization', `Bearer ${await staffOf(orgB)}`)
       .send({ verificationCode: '000000' });
     expect(startRes.status).toBe(404);
 
     const completeRes = await api()
       .post(`/api/tokens/${token.id}/complete`)
-      .set('Authorization', `Bearer ${orgB.accessToken}`);
+      .set('Authorization', `Bearer ${await staffOf(orgB)}`);
     expect(completeRes.status).toBe(404);
 
     const skipRes = await api()
       .post(`/api/tokens/${token.id}/skip`)
-      .set('Authorization', `Bearer ${orgB.accessToken}`)
+      .set('Authorization', `Bearer ${await staffOf(orgB)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     expect(skipRes.status).toBe(404);
   });
@@ -68,7 +70,7 @@ describe('Token tenant isolation', () => {
 
     const res = await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${orgA.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(orgA.accessToken)}`)
       .send({ counterId: counterB.id });
 
     // ADR-064: refused as "not your counter", identically for any foreign id.

@@ -8,6 +8,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -343,20 +344,20 @@ describe('a scheduled token is not callable before its session starts (ADR-048)'
   it('cannot be called, skipped, or picked by Next before its session starts', async () => {
     const { ctx, queue, counter, morning, future } = await morningFullWithFutureToken();
 
-    const directCall = await call(ctx.accessToken, future.id, counter.id);
+    const directCall = await call(servingToken(ctx.accessToken), future.id, counter.id);
     expect(directCall.status).toBe(409);
     expect(directCall.body.error.code).toBe('SESSION_NOT_STARTED');
 
-    const skipped = await skip(ctx.accessToken, future.id);
+    const skipped = await skip(servingToken(ctx.accessToken), future.id);
     expect(skipped.status).toBe(409);
     expect(skipped.body.error.code).toBe('SESSION_NOT_STARTED');
 
     // Next takes the morning customer, then finds nobody callable.
-    const first = await next(ctx.accessToken, queue.id, counter.id);
+    const first = await next(servingToken(ctx.accessToken), queue.id, counter.id);
     expect(first.status).toBe(200);
     expect(first.body.data.id).toBe(morning.id);
-    await api().post(`/api/tokens/${morning.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
-    const second = await next(ctx.accessToken, queue.id, counter.id);
+    await api().post(`/api/tokens/${morning.id}/skip`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    const second = await next(servingToken(ctx.accessToken), queue.id, counter.id);
     expect(second.status).toBe(404);
     expect(second.body.error.code).toBe('NO_ELIGIBLE_TOKENS');
 
@@ -376,13 +377,13 @@ describe('a scheduled token is not callable before its session starts (ADR-048)'
     const later = await createToken({ queueId: queue.id, serviceId: service.id });
     expect(later.assignedSession).toMatchObject(MORNING);
 
-    await call(ctx.accessToken, morning.id, counter.id);
-    await api().post(`/api/tokens/${morning.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await call(servingToken(ctx.accessToken), morning.id, counter.id);
+    await api().post(`/api/tokens/${morning.id}/skip`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const laterView = await api().get(`/api/tokens/${later.id}`);
     expect(laterView.body.data.position).toBe(1);
 
-    const allowed = await call(ctx.accessToken, later.id, counter.id);
+    const allowed = await call(servingToken(ctx.accessToken), later.id, counter.id);
     expect(allowed.status).toBe(200);
     expect((await prisma.token.findUniqueOrThrow({ where: { id: future.id } })).status).toBe('WAITING');
   });
@@ -401,11 +402,11 @@ describe('a scheduled token is not callable before its session starts (ADR-048)'
     expect(view.body.data.estimatedReadyAt).not.toBeNull();
 
     // Still strictly FCFS: the morning customer goes first.
-    const blocked = await call(ctx.accessToken, future.id, counter.id);
+    const blocked = await call(servingToken(ctx.accessToken), future.id, counter.id);
     expect(blocked.body.error.code).toBe('FCFS_VIOLATION');
-    await call(ctx.accessToken, morning.id, counter.id);
-    await api().post(`/api/tokens/${morning.id}/skip`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
-    const allowed = await call(ctx.accessToken, future.id, counter.id);
+    await call(servingToken(ctx.accessToken), morning.id, counter.id);
+    await api().post(`/api/tokens/${morning.id}/skip`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    const allowed = await call(servingToken(ctx.accessToken), future.id, counter.id);
     expect(allowed.status).toBe(200);
   });
 

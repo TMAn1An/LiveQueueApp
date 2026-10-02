@@ -12,6 +12,7 @@ import {
   setCounterStatus,
   setFormFields,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -419,7 +420,7 @@ describe('Issue #4: GET /api/devices customerContext', () => {
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ counterId: counter.id });
 
     const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
@@ -437,9 +438,9 @@ describe('Issue #4: GET /api/devices customerContext', () => {
     const token = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
     await api()
       .post(`/api/tokens/${token.id}/call`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ counterId: counter.id });
-    await startToken(org.accessToken, token.id, deviceIdentifier);
+    await startToken(servingToken(org.accessToken), token.id, deviceIdentifier);
 
     const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
     const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
@@ -457,11 +458,11 @@ describe('Issue #4: GET /api/devices customerContext', () => {
     await setCounterStatus(org.accessToken, counter.id, 'ACTIVE');
     const deviceIdentifier = 'device-ctx-history';
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await api().post(`/api/tokens/${first.id}/skip`).set('Authorization', `Bearer ${servingToken(org.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     const second = await createToken({ queueId: org.queue.id, serviceId: org.service.id, deviceIdentifier });
-    await api().post(`/api/tokens/${second.id}/skip`).set('Authorization', `Bearer ${org.accessToken}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
+    await api().post(`/api/tokens/${second.id}/skip`).set('Authorization', `Bearer ${servingToken(org.accessToken)}`).send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
-    const res = await api().get('/api/devices').set('Authorization', `Bearer ${org.accessToken}`);
+    const res = await api().get('/api/devices').set('Authorization', `Bearer ${servingToken(org.accessToken)}`);
     const row = res.body.data.find((d: { deviceIdentifier: string }) => d.deviceIdentifier === deviceIdentifier);
 
     expect(row.customerContext.tokenId).toBe(second.id);

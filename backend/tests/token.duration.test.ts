@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createCounter, createQueue, createService, createToken, registerOwner, setCounterStatus, startToken } from './helpers/app';
+import { api, createCounter, createQueue, createService, createToken, registerOwner, setCounterStatus, startToken, servingToken, staffOf } from './helpers/app';
 import { resetDb } from './helpers/db';
 
 beforeEach(async () => {
@@ -28,9 +28,9 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     const counter = await createCounter(ctx.accessToken, queue.id);
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
-    await call(ctx.accessToken, token.id, counter.id);
+    await call(servingToken(ctx.accessToken), token.id, counter.id);
 
-    const res = await setDuration(ctx.accessToken, token.id, 18);
+    const res = await setDuration(servingToken(ctx.accessToken), token.id, 18);
     expect(res.status).toBe(200);
     expect(res.body.data.requiredDurationMinutes).toBe(18);
   });
@@ -42,10 +42,10 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     const counter = await createCounter(ctx.accessToken, queue.id);
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
-    await call(ctx.accessToken, token.id, counter.id);
-    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
+    await call(servingToken(ctx.accessToken), token.id, counter.id);
+    await startToken(servingToken(ctx.accessToken), token.id, token.deviceIdentifier);
 
-    const res = await setDuration(ctx.accessToken, token.id, 25);
+    const res = await setDuration(servingToken(ctx.accessToken), token.id, 25);
     expect(res.status).toBe(200);
     expect(res.body.data.requiredDurationMinutes).toBe(25);
   });
@@ -56,7 +56,7 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     const service = await createService(ctx.accessToken, queue.id);
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const res = await setDuration(ctx.accessToken, token.id, 15);
+    const res = await setDuration(await staffOf(ctx), token.id, 15);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('TOKEN_NOT_ACTIVE');
   });
@@ -68,11 +68,11 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     const counter = await createCounter(ctx.accessToken, queue.id);
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
-    await call(ctx.accessToken, token.id, counter.id);
-    await startToken(ctx.accessToken, token.id, token.deviceIdentifier);
-    await api().post(`/api/tokens/${token.id}/complete`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await call(servingToken(ctx.accessToken), token.id, counter.id);
+    await startToken(servingToken(ctx.accessToken), token.id, token.deviceIdentifier);
+    await api().post(`/api/tokens/${token.id}/complete`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`);
 
-    const res = await setDuration(ctx.accessToken, token.id, 15);
+    const res = await setDuration(await staffOf(ctx), token.id, 15);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('TOKEN_NOT_ACTIVE');
   });
@@ -84,9 +84,9 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     const counter = await createCounter(ctx.accessToken, queue.id);
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
-    await call(ctx.accessToken, token.id, counter.id);
+    await call(servingToken(ctx.accessToken), token.id, counter.id);
 
-    const res = await setDuration(ctx.accessToken, token.id, 0);
+    const res = await setDuration(servingToken(ctx.accessToken), token.id, 0);
     expect(res.status).toBe(422);
   });
 
@@ -98,9 +98,9 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     const counterA = await createCounter(orgA.accessToken, queueA.id);
     await setCounterStatus(orgA.accessToken, counterA.id, 'ACTIVE');
     const token = await createToken({ queueId: queueA.id, serviceId: serviceA.id });
-    await call(orgA.accessToken, token.id, counterA.id);
+    await call(servingToken(orgA.accessToken), token.id, counterA.id);
 
-    const res = await setDuration(orgB.accessToken, token.id, 15);
+    const res = await setDuration(await staffOf(orgB), token.id, 15);
     expect(res.status).toBe(404);
   });
 
@@ -113,12 +113,12 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
 
     const served = await createToken({ queueId: queue.id, serviceId: service.id });
     const waiting = await createToken({ queueId: queue.id, serviceId: service.id });
-    await call(ctx.accessToken, served.id, counter.id);
+    await call(servingToken(ctx.accessToken), served.id, counter.id);
 
     const before = await api().get(`/api/tokens/${waiting.id}/status`);
     const beforeMinutes = before.body.data.estimatedWaitMinutes as number;
 
-    const overrideRes = await setDuration(ctx.accessToken, served.id, beforeMinutes + 30);
+    const overrideRes = await setDuration(servingToken(ctx.accessToken), served.id, beforeMinutes + 30);
     expect(overrideRes.status).toBe(200);
 
     const after = await api().get(`/api/tokens/${waiting.id}/status`);

@@ -10,6 +10,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -105,7 +106,7 @@ describe('dispatchReminders — selection rules', () => {
     const send = vi.spyOn(fcmService, 'sendNotification').mockResolvedValue({ ok: true, invalidToken: false });
     await api()
       .post(`/api/tokens/${setup.tokenId}/skip`)
-      .set('Authorization', `Bearer ${setup.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(setup.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
     await waitForCalls(send, 1);
     send.mockClear();
@@ -137,7 +138,7 @@ describe('dispatchReminders — selection rules', () => {
     expect(blockerRes.status).toBe(201);
     await api()
       .post(`/api/tokens/${blockerRes.body.data.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
 
     const deviceIdentifier = `reminder-device-${randomUUID()}`;

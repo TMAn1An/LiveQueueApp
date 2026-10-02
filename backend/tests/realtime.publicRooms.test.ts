@@ -8,6 +8,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import {
@@ -188,7 +189,7 @@ describe('Token room isolation', () => {
 
     const events = collectEvents(socket, 'token.called', 800);
 
-    await callToken(ctx.accessToken, tokenB.id, counter.id);
+    await callToken(servingToken(ctx.accessToken), tokenB.id, counter.id);
 
     expect(await events).toHaveLength(0);
   });
@@ -209,7 +210,7 @@ describe('Token room isolation', () => {
       socket.once('token.called', resolve);
     });
 
-    await callToken(ctx.accessToken, token.id, counter.id);
+    await callToken(servingToken(ctx.accessToken), token.id, counter.id);
 
     const envelope = await eventPromise;
     expect(envelope.data.status).toBe('CALLED');

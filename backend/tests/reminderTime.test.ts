@@ -10,6 +10,7 @@ import {
   createTokenRequest,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -60,7 +61,7 @@ async function setupToken(options: { aheadMinutes?: number; queueDefaultMinutes?
     expect(blocker.status).toBe(201);
     await api()
       .post(`/api/tokens/${blocker.body.data.id}/call`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`)
       .send({ counterId: counter.id });
   }
 
@@ -359,7 +360,7 @@ describe('pushes honour the sound and vibration choice', () => {
 
     await api()
       .post(`/api/tokens/${setup.tokenId}/call`)
-      .set('Authorization', `Bearer ${setup.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(setup.accessToken)}`)
       .send({ counterId: setup.counterId });
 
     const calls = await waitForCalls(send, 1);
@@ -373,7 +374,7 @@ describe('pushes honour the sound and vibration choice', () => {
 
     await api()
       .post(`/api/tokens/${setup.tokenId}/skip`)
-      .set('Authorization', `Bearer ${setup.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(setup.accessToken)}`)
       .send({ reasonCode: 'CUSTOMER_NOT_PRESENT' });
 
     const calls = await waitForCalls(send, 1);
@@ -386,7 +387,7 @@ describe('pushes honour the sound and vibration choice', () => {
 
     await api()
       .post(`/api/tokens/${setup.tokenId}/call`)
-      .set('Authorization', `Bearer ${setup.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(setup.accessToken)}`)
       .send({ counterId: setup.counterId });
 
     const calls = await waitForCalls(send, 1);

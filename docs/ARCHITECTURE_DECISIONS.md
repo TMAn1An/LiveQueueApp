@@ -1729,6 +1729,14 @@ Blocking only `status` would not have been enough: an admin could demote a fello
 
 **Consequences.** A queue needs at least one counter *with someone assigned* to serve; an owner who serves alone assigns themselves. Older dashboards that still send `counterId` keep working when it is their own counter.
 
+**Revision before merge (same date) — serving is STAFF-only, with no supervisor override.** The first version above let OWNER and ADMIN serve from a counter they assigned to themselves, and resolve a person at any counter. Both are withdrawn:
+
+- *Owners and admins do not serve.* `operate_tokens` is removed from the OWNER and ADMIN permission sets (they keep every management permission); every serving endpoint — call, Serve next, start, complete, skip, adjust time — refuses them with `403 SERVING_STAFF_ONLY`, at the route and again in the service. No existing product requirement asked for owners or admins to serve.
+- *Only STAFF stand at counters.* Assigning an OWNER or ADMIN is refused (`409 STAFF_NOT_ASSIGNABLE`), the assignable list offers STAFF only, promoting a staff member out of STAFF releases their counter in the same transaction, and migration `20261002090000_counters_staff_only` releases any counter an owner or admin already held (data only).
+- *No supervisor bypass.* Start, complete, skip and adjust time are bound to the staff member assigned to that person's counter for every role. The serving matrix is therefore: STAFF — Serve next at their own counter (the next FCFS-eligible person only), and act on the person at their own counter or skip the front of their own counter's queue; OWNER/ADMIN — none.
+- *Recovery is an assignment, not an override.* If whoever called a person is gone, an owner or admin assigns another staff member to that counter (or moves one there), and that person finishes the visit through the normal endpoints. A token whose counter was deleted mid-service has no counter, and any staff member whose counter serves that queue may finish it. The person can also cancel from the app. No owner/admin recovery endpoint exists; one can be added later as an explicit, audited action if this proves insufficient.
+- *Dashboard.* Owners and admins see no Serve next or row actions; the Live Queue page tells them staff serve from their own counters and links to Counters.
+
 ## ADR-065: A form field's key follows its label until someone types it, and never outlives the label (2026-10-02)
 
 **Status:** Implemented on `feature/terminology-form-counter-governance`. Dashboard only; the backend's rules (label and key required, key `^[a-zA-Z0-9_]+$`, keys unique) are unchanged.
@@ -1752,3 +1760,11 @@ Blocking only `status` would not have been enough: an admin could demote a fello
 **Unchanged on purpose.** Stable identifiers and contracts: enum codes (`CUSTOMER_NOT_PRESENT`, `CUSTOMER_LEFT`, reminder source `CUSTOMER`), API fields (`customerContext`, `scheduleVisibleToCustomers`, `customerEmail…`), database tables and columns (`customer_email_verifications`, …), migration names, environment variables (`CUSTOMER_IDENTITY_SECRET`), the HMAC purpose strings in `utils/customerIdentity.ts` (changing them would invalidate every stored identity), type/function names, log messages and code comments. A queue's own `clientTerminology` (an organization may call its people "Customer", "Patient" …) is the organization's choice and is shown as they set it. The specification and older ADRs keep their historical wording.
 
 **Guard.** `web-dashboard/src/terminology.test.ts` fails if a bare "customer" appears outside a comment in dashboard source.
+
+## ADR-067: The Live Queue header's waiting count comes from the queue itself (2026-10-02)
+
+**Status:** Implemented on `feature/terminology-form-counter-governance`.
+
+**Bug.** The header read `queue.waitingCount`, which only the queue *list* endpoint computed; `GET /api/queues/:id` never returned it, so the header always said "0 people waiting".
+
+**Decision.** `countWaitingByQueue(organizationId, queueIds)` in `queue.service.ts` is the one definition, used by both the list and the single-queue endpoint: one grouped query for any number of queues (no N+1), scoped to the organization and grouped per queue. It counts `WAITING` tokens that are in the line now — a token booked into a session that has not started is excluded, as it is from position numbering (ADR-048). CALLED, IN_PROGRESS and terminal statuses are excluded by the status filter. Token events and the dashboard's own serving actions now also refresh the queue and the queue list, so the header follows the line. The header reads "1 person waiting" / "N people waiting".

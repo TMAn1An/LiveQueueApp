@@ -94,16 +94,18 @@ describe('Counter CRUD', () => {
 describe('Counter staff assignment', () => {
   it('assigns a counter to a staff member in the same organization', async () => {
     const ctx = await registerOwner();
+    // ADR-064: only STAFF are assigned to counters.
+    const worker = await createRestrictedStaff(ctx.organizationId);
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
 
     const res = await api()
       .patch(`/api/counters/${counter.id}/assign`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ staffId: ctx.staffId });
+      .send({ staffId: worker.staffId });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.staffId).toBe(ctx.staffId);
+    expect(res.body.data.staffId).toBe(worker.staffId);
   });
 
   it('rejects assignment to a staff member from another organization', async () => {
@@ -137,6 +139,8 @@ describe('Counter staff assignment', () => {
 
   it('rejects assigning a staff member who is already assigned to a different counter', async () => {
     const ctx = await registerOwner();
+    // ADR-064: only STAFF are assigned to counters.
+    const worker = await createRestrictedStaff(ctx.organizationId);
     const queue = await createQueue(ctx.accessToken);
     const counterA = await createCounter(ctx.accessToken, queue.id, 'Counter A');
     const counterB = await createCounter(ctx.accessToken, queue.id, 'Counter B');
@@ -144,12 +148,12 @@ describe('Counter staff assignment', () => {
     await api()
       .patch(`/api/counters/${counterA.id}/assign`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ staffId: ctx.staffId });
+      .send({ staffId: worker.staffId });
 
     const res = await api()
       .patch(`/api/counters/${counterB.id}/assign`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ staffId: ctx.staffId });
+      .send({ staffId: worker.staffId });
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('STAFF_ALREADY_ASSIGNED');
@@ -164,21 +168,23 @@ describe('Counter staff assignment', () => {
 
   it('allows re-assigning a counter to the staff member already assigned to it (no-op, not a conflict)', async () => {
     const ctx = await registerOwner();
+    // ADR-064: only STAFF are assigned to counters.
+    const worker = await createRestrictedStaff(ctx.organizationId);
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
 
     await api()
       .patch(`/api/counters/${counter.id}/assign`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ staffId: ctx.staffId });
+      .send({ staffId: worker.staffId });
 
     const res = await api()
       .patch(`/api/counters/${counter.id}/assign`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ staffId: ctx.staffId });
+      .send({ staffId: worker.staffId });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.staffId).toBe(ctx.staffId);
+    expect(res.body.data.staffId).toBe(worker.staffId);
   });
 
   it('allows a different, unassigned staff member to be assigned to a second counter', async () => {

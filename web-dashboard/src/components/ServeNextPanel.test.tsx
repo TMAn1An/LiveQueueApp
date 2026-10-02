@@ -8,8 +8,13 @@ import { useNextToken } from '../hooks/useTokenActions';
 import { ApiError } from '../api/client';
 import type { MyCounter } from '../types/queue';
 
+// ADR-064: STAFF hold operate_tokens; OWNER/ADMIN hold manage_staff instead.
+let isStaff = true;
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({
+    hasPermission: (permission: string) =>
+      permission === 'operate_tokens' ? isStaff : permission === 'manage_staff' ? !isStaff : true,
+  }),
 }));
 vi.mock('../hooks/useCounters');
 vi.mock('../hooks/useTokenActions');
@@ -34,6 +39,7 @@ function renderPanel(queueId = 'q1') {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  isStaff = true;
   vi.mocked(useNextToken).mockReturnValue({ mutate: nextMutate, isPending: false } as unknown as ReturnType<
     typeof useNextToken
   >);
@@ -106,5 +112,15 @@ describe('ServeNextPanel — serving is a self-claim at your own counter (ADR-06
 
     expect(screen.getByText('Your counter, Counter A, serves Registration')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Serve next' })).not.toBeInTheDocument();
+  });
+
+  it('owner/admin get no Serve next — they manage assignments, staff serve', () => {
+    isStaff = false;
+    mine(null);
+    renderPanel();
+
+    expect(screen.queryByRole('button', { name: 'Serve next' })).not.toBeInTheDocument();
+    expect(screen.getByText('Staff serve people from their own counters')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Counters' })).toHaveAttribute('href', '/queues/q1/counters');
   });
 });

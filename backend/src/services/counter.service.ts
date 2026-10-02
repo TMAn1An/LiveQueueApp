@@ -125,6 +125,8 @@ export async function listAssignableStaff(organizationId: string, counterId: str
       // SUSPENDED and PENDING_EMAIL_VERIFICATION accounts cannot operate a
       // counter, so they are not offered as options.
       status: 'ACTIVE',
+      // ADR-064: only STAFF serve, so only STAFF stand at counters.
+      role: 'STAFF',
       OR: [
         { counters: { none: {} } },
         ...(counter.staffId ? [{ id: counter.staffId }] : []),
@@ -166,6 +168,15 @@ export async function assignCounter(
       403,
       'STAFF_ORGANIZATION_MISMATCH',
       'Staff member does not belong to this organization.',
+    );
+  }
+  // ADR-064: owners and admins manage counters; they are never assigned to
+  // one, because only staff serve.
+  if (staff.role !== 'STAFF') {
+    throw new AppError(
+      409,
+      'STAFF_NOT_ASSIGNABLE',
+      'Only staff members can be assigned to a counter. Owners and admins manage counters but do not serve.',
     );
   }
   if (staff.status !== 'ACTIVE') {

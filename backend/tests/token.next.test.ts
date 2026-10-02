@@ -8,6 +8,8 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  servingToken,
+  staffOf,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -32,7 +34,7 @@ describe('POST /api/queues/:queueId/next', () => {
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const res = await next(ctx.accessToken, queue.id, counter.id);
+    const res = await next(servingToken(ctx.accessToken), queue.id, counter.id);
 
     expect(res.status).toBe(200);
     expect(res.body.data.id).toBe(token.id);
@@ -50,7 +52,7 @@ describe('POST /api/queues/:queueId/next', () => {
     await createToken({ queueId: queue.id, serviceId: service.id });
     await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const res = await next(ctx.accessToken, queue.id, counter.id);
+    const res = await next(servingToken(ctx.accessToken), queue.id, counter.id);
 
     expect(res.status).toBe(200);
     expect(res.body.data.id).toBe(first.id);
@@ -71,7 +73,7 @@ describe('POST /api/queues/:queueId/next', () => {
     await createToken({ queueId: queue.id, serviceId: service.id });
 
     const [resA, resB] = await Promise.all([
-      next(ctx.accessToken, queue.id, counterA.id),
+      next(servingToken(ctx.accessToken), queue.id, counterA.id),
       next(operatorB.accessToken, queue.id, counterB.id),
     ]);
 
@@ -94,8 +96,8 @@ describe('POST /api/queues/:queueId/next', () => {
     await createToken({ queueId: queue.id, serviceId: service.id });
 
     const [resA, resB] = await Promise.all([
-      next(ctx.accessToken, queue.id, counter.id),
-      next(ctx.accessToken, queue.id, counter.id),
+      next(servingToken(ctx.accessToken), queue.id, counter.id),
+      next(servingToken(ctx.accessToken), queue.id, counter.id),
     ]);
 
     const statuses = [resA.status, resB.status].sort();
@@ -112,7 +114,7 @@ describe('POST /api/queues/:queueId/next', () => {
     const counter = await createCounter(ctx.accessToken, queue.id);
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
 
-    const res = await next(ctx.accessToken, queue.id, counter.id);
+    const res = await next(servingToken(ctx.accessToken), queue.id, counter.id);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NO_ELIGIBLE_TOKENS');
@@ -125,7 +127,7 @@ describe('POST /api/queues/:queueId/next', () => {
     const counter = await createCounter(ctx.accessToken, queue.id); // OFFLINE
     await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const res = await next(ctx.accessToken, queue.id, counter.id);
+    const res = await next(servingToken(ctx.accessToken), queue.id, counter.id);
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COUNTER_NOT_AVAILABLE');
@@ -139,7 +141,7 @@ describe('POST /api/queues/:queueId/next', () => {
     const counterB = await createCounter(ctx.accessToken, queueB.id);
     await setCounterStatus(ctx.accessToken, counterB.id, 'ACTIVE');
 
-    const res = await next(ctx.accessToken, queueA.id, counterB.id);
+    const res = await next(servingToken(ctx.accessToken), queueA.id, counterB.id);
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COUNTER_QUEUE_MISMATCH');
@@ -154,7 +156,7 @@ describe('POST /api/queues/:queueId/next', () => {
     const queueB = await createQueue(orgB.accessToken);
     const counterB = await createCounter(orgB.accessToken, queueB.id);
 
-    const res = await next(orgA.accessToken, queueA.id, counterB.id);
+    const res = await next(servingToken(orgA.accessToken), queueA.id, counterB.id);
 
     // ADR-064: any counter other than the caller's own is refused the same
     // way, so a foreign id reveals nothing about whether it exists.
@@ -168,7 +170,7 @@ describe('POST /api/queues/:queueId/next', () => {
     const queueA = await createQueue(orgA.accessToken);
     const counterA = await createCounter(orgA.accessToken, queueA.id);
 
-    const res = await next(orgB.accessToken, queueA.id, counterA.id);
+    const res = await next(await staffOf(orgB), queueA.id, counterA.id);
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('QUEUE_NOT_FOUND');

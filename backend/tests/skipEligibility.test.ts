@@ -7,6 +7,7 @@ import {
   createToken,
   registerOwner,
   setCounterStatus,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 
@@ -50,7 +51,7 @@ describe('WAITING skip eligibility', () => {
     const org = await setupQueue();
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
-    const res = await skip(org.accessToken, first.id);
+    const res = await skip(servingToken(org.accessToken), first.id);
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('SKIPPED');
@@ -62,11 +63,11 @@ describe('WAITING skip eligibility', () => {
     const second = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
     // Same rejection Call gives for the same token — the point of the rule.
-    const callRes = await call(org.accessToken, second.id, org.counters[0]!.id);
+    const callRes = await call(servingToken(org.accessToken), second.id, org.counters[0]!.id);
     expect(callRes.status).toBe(409);
     expect(callRes.body.error.code).toBe('FCFS_VIOLATION');
 
-    const skipRes = await skip(org.accessToken, second.id);
+    const skipRes = await skip(servingToken(org.accessToken), second.id);
     expect(skipRes.status).toBe(409);
     expect(skipRes.body.error.code).toBe('FCFS_VIOLATION');
 
@@ -83,11 +84,11 @@ describe('WAITING skip eligibility', () => {
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
     const second = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
-    expect((await skip(org.accessToken, second.id)).status).toBe(409);
+    expect((await skip(servingToken(org.accessToken), second.id)).status).toBe(409);
 
-    expect((await skip(org.accessToken, first.id)).status).toBe(200);
+    expect((await skip(servingToken(org.accessToken), first.id)).status).toBe(200);
 
-    const nowAllowed = await skip(org.accessToken, second.id);
+    const nowAllowed = await skip(servingToken(org.accessToken), second.id);
     expect(nowAllowed.status).toBe(200);
     expect(nowAllowed.body.data.status).toBe('SKIPPED');
   });
@@ -96,7 +97,7 @@ describe('WAITING skip eligibility', () => {
     const org = await setupQueue({ activeCounters: 0 });
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
-    const res = await skip(org.accessToken, first.id);
+    const res = await skip(servingToken(org.accessToken), first.id);
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COUNTER_NOT_AVAILABLE');
@@ -108,9 +109,9 @@ describe('WAITING skip eligibility', () => {
     const second = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
     // The only counter is now busy with `first`.
-    expect((await call(org.accessToken, first.id, org.counters[0]!.id)).status).toBe(200);
+    expect((await call(servingToken(org.accessToken), first.id, org.counters[0]!.id)).status).toBe(200);
 
-    const res = await skip(org.accessToken, second.id);
+    const res = await skip(servingToken(org.accessToken), second.id);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COUNTER_NOT_AVAILABLE');
   });
@@ -118,11 +119,11 @@ describe('WAITING skip eligibility', () => {
   it('still allows skipping a customer who is already at a counter', async () => {
     const org = await setupQueue();
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    await call(org.accessToken, first.id, org.counters[0]!.id);
+    await call(servingToken(org.accessToken), first.id, org.counters[0]!.id);
 
     // CALLED -> SKIPPED is unchanged by this rule: that customer is at the
     // counter already, so neither queue order nor free capacity applies.
-    const res = await skip(org.accessToken, first.id);
+    const res = await skip(servingToken(org.accessToken), first.id);
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('SKIPPED');
@@ -135,9 +136,9 @@ describe('WAITING skip eligibility', () => {
     const third = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
 
     const results = await Promise.all([
-      skip(org.accessToken, first.id),
-      skip(org.accessToken, second.id),
-      skip(org.accessToken, third.id),
+      skip(servingToken(org.accessToken), first.id),
+      skip(servingToken(org.accessToken), second.id),
+      skip(servingToken(org.accessToken), third.id),
     ]);
 
     // A later skip succeeding is legitimate *if* the one ahead of it already
@@ -169,11 +170,11 @@ describe('WAITING skip eligibility', () => {
   it('leaves a skipped token terminal — no route back to CALLED', async () => {
     const org = await setupQueue();
     const first = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-    expect((await skip(org.accessToken, first.id)).status).toBe(200);
+    expect((await skip(servingToken(org.accessToken), first.id)).status).toBe(200);
 
     const callRes = await api()
       .post(`/api/tokens/${first.id}/call`)
-      .set('Authorization', `Bearer ${org.accessToken}`)
+      .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
       .send({ counterId: org.counters[0]!.id });
 
     expect(callRes.status).toBe(422);

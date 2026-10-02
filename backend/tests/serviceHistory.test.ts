@@ -10,6 +10,7 @@ import {
   setCounterStatus,
   setFormFields,
   startToken,
+  servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -45,12 +46,12 @@ async function completeOneToken(
   // waiting one — these tests need a deterministic subject.
   await api()
     .post(`/api/tokens/${token.id}/call`)
-    .set('Authorization', `Bearer ${org.accessToken}`)
+    .set('Authorization', `Bearer ${servingToken(org.accessToken)}`)
     .send({ counterId: org.counter.id });
-  await startToken(org.accessToken, token.id, token.deviceIdentifier);
+  await startToken(servingToken(org.accessToken), token.id, token.deviceIdentifier);
   await api()
     .post(`/api/tokens/${token.id}/complete`)
-    .set('Authorization', `Bearer ${org.accessToken}`);
+    .set('Authorization', `Bearer ${servingToken(org.accessToken)}`);
   return token;
 }
 

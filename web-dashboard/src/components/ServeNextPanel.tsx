@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { Link } from 'react-router-dom';
 import { useMyCounter } from '../hooks/useCounters';
 import { useNextToken } from '../hooks/useTokenActions';
@@ -19,6 +20,8 @@ import { actionErrorMessage } from '../utils/actionError';
  * from the session and refuses anything else.
  */
 export function ServeNextPanel({ queueId }: { queueId: string }) {
+  const { hasPermission } = useAuth();
+  const serves = hasPermission('operate_tokens');
   const { data: myCounter, isLoading } = useMyCounter();
   const serveNext = useNextToken();
   const [error, setError] = useState<string | null>(null);
@@ -27,6 +30,23 @@ export function ServeNextPanel({ queueId }: { queueId: string }) {
   if (isLoading) return null;
 
   const frame = 'rounded-xl border border-border bg-surface p-4 shadow-xs';
+
+  // ADR-064: owners and admins manage who stands where; staff serve.
+  if (!serves) {
+    if (!hasPermission('manage_staff')) return null;
+    return (
+      <div className={frame} data-testid="serve-next-panel">
+        <p className="text-sm font-semibold text-fg">Staff serve people from their own counters</p>
+        <p className="mt-1 text-sm text-muted">
+          You manage who works at which counter under{' '}
+          <Link to={`/queues/${queueId}/counters`} className="font-semibold text-brand-fg underline">
+            Counters
+          </Link>
+          . Each staff member serves the next person in line from the counter you assign them.
+        </p>
+      </div>
+    );
+  }
 
   if (!myCounter) {
     return (

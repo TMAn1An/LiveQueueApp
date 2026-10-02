@@ -291,17 +291,26 @@ export async function updateStaff(
     existing.status === 'PENDING_EMAIL_VERIFICATION' &&
     existing.invitationSentAt !== null;
 
-  const staff = await prisma.staff.update({
-    where: { id: staffId },
-    data: {
-      name: input.name,
-      email: input.email,
-      role: input.role,
-      permissions: getEffectivePermissions(effectiveRole),
-      status: input.status ?? (activatesInvitee ? 'ACTIVE' : undefined),
-      ...(passwordHash ? { passwordHash } : {}),
-      ...(activatesInvitee ? { invitationTokenHash: null, invitationExpiresAt: null } : {}),
-    },
+  const staff = await prisma.$transaction(async (tx) => {
+    const updated = await tx.staff.update({
+      where: { id: staffId },
+      data: {
+        name: input.name,
+        email: input.email,
+        role: input.role,
+        permissions: getEffectivePermissions(effectiveRole),
+        status: input.status ?? (activatesInvitee ? 'ACTIVE' : undefined),
+        ...(passwordHash ? { passwordHash } : {}),
+        ...(activatesInvitee ? { invitationTokenHash: null, invitationExpiresAt: null } : {}),
+      },
+    });
+    // ADR-064: only STAFF stand at counters. Someone promoted out of STAFF
+    // leaves their counter in the same write; a person they were serving
+    // stays at that counter for whoever is assigned to it next.
+    if (effectiveRole !== 'STAFF') {
+      await tx.counter.updateMany({ where: { staffId }, data: { staffId: null } });
+    }
+    return updated;
   });
 
   return serializeStaff(staff);
