@@ -1590,7 +1590,7 @@ Nobody may act against the OWNER, and nobody removes themselves directly.
 - **Review** is owner-only (`OWNER_ONLY`). Approve/reject lock the request row (`FOR UPDATE`), so two simultaneous decisions resolve to exactly one; approval removes the member in the same transaction and re-applies the direct-removal rules. A request whose target already left is closed as `CANCELLED`. The requester may withdraw a pending request. Every step is audited (`membership_request_created/approved/rejected/cancelled`).
 - **Endpoints:** `GET/POST /api/staff/removal-requests`, `POST /api/staff/removal-requests/:id/{approve,reject,cancel}` — authenticated, not behind `manage_staff`, so STAFF can ask to leave; the service decides.
 - **Dashboard.** Staff page rows are role-aware (Remove / Request removal / Request to leave; never Remove on yourself or the owner); the owner gets a *Pending requests* inbox (Approve asks for confirmation first); others see their own pending requests with Withdraw. Because `/staff` stays `manage_staff`-only, STAFF (and anyone) leaves from **Profile → Leave Organization**. The owner sees there that they must delete the organization instead.
-- **Unchanged and noted:** an ADMIN can still *suspend* another ADMIN through `PUT /api/staff/:id` (existing behaviour, not a removal). If that should also need owner approval it is a separate decision.
+- **Suspension:** aligned with this matrix in ADR-061.
 
 ## ADR-058: Forgot password (2026-10-02)
 
@@ -1615,3 +1615,20 @@ Nobody may act against the OWNER, and nobody removes themselves directly.
 - **InfoHelp sweep (ADR-053 applied further).** Moved behind ⓘ: Create Queue's switch descriptions, token-prefix hint and repeat-visit note; Edit Details' field hints; repeat-visit scope descriptions, identity-mode help (including the shared-mailbox caveat), identifying-question rule and "when changes apply"; timezone guidance; schedule switch descriptions; form-builder key and preview notes; staff role/permission note. Kept on the page: validation errors, the permanent-setting notes, current-status summaries, live consequence previews (e.g. "a customer served now could return after…"), the per-session-unavailable explanation, destructive-action and skip consequences, empty and first-run guidance. An ⓘ is never placed inside a `<label>` (opening it would toggle the control).
 - **Fixed on the way:** `--color-brand-950` did not exist, so six `dark:bg-brand-950/…` tints silently fell back to the light `brand-50` fill in dark mode (e.g. the ADMIN role badge); the token is now defined. Add Service used to fail silently; it now shows the server's message.
 
+## ADR-061: Suspension follows the removal governance (2026-10-02)
+
+**Status:** Implemented on `feature/dashboard-ux-governance-fixes`. No migration. Not deployed.
+
+ADR-057 left one gap: an ADMIN could still suspend another ADMIN through `PUT /api/staff/:id`. That endpoint is the only one that changes `status`, `role`, `email` or `password`, so it is where the rule is enforced (`staff.service.assertMayUpdate`, given the caller):
+
+| Actor | May change | May not |
+|---|---|---|
+| OWNER | any ADMIN or STAFF account, including suspend/reactivate | the owner account (unchanged `CANNOT_MODIFY_OWNER`) |
+| ADMIN | STAFF accounts, including suspend/reactivate; their own display name | another ADMIN's account in any way (`SUSPENSION_REQUIRES_OWNER_APPROVAL` for status, `ADMIN_CHANGE_REQUIRES_OWNER` otherwise); their own status (`CANNOT_SUSPEND_SELF`), role, email or password (`CANNOT_CHANGE_OWN_ACCESS` — the password changes through Profile) |
+| STAFF | nothing (`manage_staff`, unchanged) | — |
+
+Blocking only `status` would not have been enough: an admin could demote a fellow admin to STAFF and then suspend them, or set their password and take the account over, so every access-affecting field is covered. A field counts only when it would actually change, so a form re-sent with the stored values is accepted. For another admin, the admin's route is the existing owner-approved removal request — that workflow is unchanged. Suspension takes effect immediately, as before (`authenticate` refuses a SUSPENDED account).
+
+**Dashboard:** Suspend/Reactivate appears only where the table allows it; suspending asks for confirmation ("They will be signed out and cannot sign in until they are reactivated."), reactivating does not.
+
+**Tests:** owner suspends/reactivates an admin (and the admin is signed out at once), owner suspends staff, admin suspends/reactivates staff, admin cannot suspend or reactivate another admin, cannot demote/re-address/rename/re-password one, cannot suspend the owner, cannot suspend, demote or re-password themselves (renaming is allowed), unchanged values pass, staff cannot suspend anyone, and the request workflow still works.

@@ -153,8 +153,14 @@ function rowActions(actor: Staff | null, target: Staff) {
     canRequestRemoval: !isSelf && isAdminActor && target.role === 'ADMIN',
     // An admin's own leave request lives on their own row.
     canRequestLeave: isSelf && isAdminActor,
-    // Suspend/Reactivate and invitations are unchanged: never on the owner.
+    // Invitations: never on the owner or yourself.
     canManage: target.role !== 'OWNER' && !isSelf,
+    // ADR-061: suspension follows removal — the owner suspends admins and
+    // staff, an admin only staff, nobody themselves or the owner.
+    canSuspend:
+      !isSelf &&
+      target.role !== 'OWNER' &&
+      (isOwnerActor || (isAdminActor && target.role === 'STAFF')),
   };
 }
 
@@ -164,10 +170,25 @@ function StaffRow({ staff, pendingAbout }: { staff: Staff; pendingAbout: boolean
   const deleteStaff = useDeleteStaff();
   const resendInvitation = useResendInvitation();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingSuspend, setConfirmingSuspend] = useState(false);
   const [requesting, setRequesting] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowNote, setRowNote] = useState<string | null>(null);
   const actions = rowActions(actor, staff);
+
+  function setStatus(status: 'ACTIVE' | 'SUSPENDED') {
+    setRowError(null);
+    updateStaff.mutate(
+      { staffId: staff.id, input: { status } },
+      {
+        onSuccess: () => setConfirmingSuspend(false),
+        onError: (err) => {
+          setConfirmingSuspend(false);
+          setRowError(actionErrorMessage(err));
+        },
+      },
+    );
+  }
 
   async function handleResend() {
     setRowNote(null);
@@ -231,19 +252,14 @@ function StaffRow({ staff, pendingAbout }: { staff: Staff; pendingAbout: boolean
               {resendInvitation.isPending ? 'Sending…' : 'Resend invite'}
             </Button>
           )}
-          {actions.canManage && (
+          {actions.canSuspend && (
             <Button
               variant="secondary"
               loading={updateStaff.isPending}
               onClick={() => {
-                setRowError(null);
-                updateStaff.mutate(
-                  {
-                    staffId: staff.id,
-                    input: { status: staff.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' },
-                  },
-                  { onError: (err) => setRowError(actionErrorMessage(err)) },
-                );
+                // Suspending is confirmed first; reactivating is not.
+                if (staff.status === 'ACTIVE') setConfirmingSuspend(true);
+                else setStatus('ACTIVE');
               }}
             >
               {updateStaff.isPending
@@ -276,6 +292,17 @@ function StaffRow({ staff, pendingAbout }: { staff: Staff; pendingAbout: boolean
             target={actions.isSelf ? 'self' : { id: staff.id, name: staff.name }}
             onClose={() => setRequesting(false)}
             onSent={() => setRowNote('Request sent to the owner.')}
+          />
+        )}
+        {confirmingSuspend && (
+          <ConfirmDialog
+            title={`Suspend ${staff.name}?`}
+            message="They will be signed out and cannot sign in until they are reactivated."
+            confirmLabel="Suspend"
+            confirmingLabel="Suspending…"
+            confirming={updateStaff.isPending}
+            onConfirm={() => setStatus('SUSPENDED')}
+            onCancel={() => setConfirmingSuspend(false)}
           />
         )}
         {confirmingDelete && (

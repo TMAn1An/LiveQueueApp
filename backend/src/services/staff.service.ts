@@ -184,9 +184,78 @@ export async function createStaff(organizationId: string, input: CreateStaffInpu
   return { ...serializeStaff(staff), invitationEmailSent: emailSent };
 }
 
-export async function updateStaff(organizationId: string, staffId: string, input: UpdateStaffInput) {
+/**
+ * ADR-061: suspension follows the same governance as removal (ADR-057).
+ *
+ * - OWNER: may change any ADMIN or STAFF account, suspension included.
+ * - ADMIN: may change STAFF accounts, suspension included. On another ADMIN
+ *   they may change nothing — suspending, demoting, re-addressing or setting
+ *   the password of a fellow admin would each end or take over that admin's
+ *   access, which only the owner decides (they ask through a removal
+ *   request). On their own account only the display name; never their own
+ *   status, role, email or password through this endpoint.
+ * - STAFF: never reaches here (manage_staff).
+ *
+ * A field counts only when it would actually change, so a client sending a
+ * whole form back with the stored values is not refused.
+ */
+function assertMayUpdate(
+  actor: { staffId: string; role: StaffRole },
+  existing: Staff,
+  input: UpdateStaffInput,
+): void {
+  if (actor.role === 'OWNER') return;
+  const isSelf = actor.staffId === existing.id;
+  if (!isSelf && existing.role !== 'ADMIN') return;
+
+  const changes = {
+    status: input.status !== undefined && input.status !== existing.status,
+    role: input.role !== undefined && input.role !== existing.role,
+    email: input.email !== undefined && input.email !== existing.email,
+    password: input.password !== undefined,
+    name: input.name !== undefined && input.name !== existing.name,
+  };
+
+  if (isSelf) {
+    if (changes.status) {
+      throw new AppError(403, 'CANNOT_SUSPEND_SELF', 'You cannot change your own account status.');
+    }
+    if (changes.role || changes.email || changes.password) {
+      throw new AppError(
+        403,
+        'CANNOT_CHANGE_OWN_ACCESS',
+        'You cannot change your own role, email or password here. Use your Profile for your password.',
+      );
+    }
+    return;
+  }
+
+  // Another ADMIN.
+  if (changes.status) {
+    throw new AppError(
+      403,
+      'SUSPENSION_REQUIRES_OWNER_APPROVAL',
+      'Only the owner can suspend or reactivate an admin. Send a request to the owner instead.',
+    );
+  }
+  if (changes.role || changes.email || changes.password || changes.name) {
+    throw new AppError(
+      403,
+      'ADMIN_CHANGE_REQUIRES_OWNER',
+      "Only the owner can change another admin's account.",
+    );
+  }
+}
+
+export async function updateStaff(
+  organizationId: string,
+  staffId: string,
+  input: UpdateStaffInput,
+  actor: { staffId: string; role: StaffRole },
+) {
   const existing = await findStaffScoped(organizationId, staffId);
   assertNotOwner(existing);
+  assertMayUpdate(actor, existing, input);
 
   if (input.email && input.email !== existing.email) {
     const emailOwner = await prisma.staff.findUnique({ where: { email: input.email } });

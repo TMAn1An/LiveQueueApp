@@ -321,3 +321,120 @@ describe('ADR-057 — owner review', () => {
     expect(pending.body.data).toHaveLength(0);
   });
 });
+
+/**
+ * ADR-061: suspension follows the removal governance. PUT /api/staff/:id is
+ * the only endpoint that changes status, role, email or password, so every
+ * route around the rule (demote-then-suspend, password takeover) is covered.
+ */
+describe('ADR-061 — suspension governance', () => {
+  const update = (accessToken: string, staffId: string, body: Record<string, unknown>) =>
+    api().put(`/api/staff/${staffId}`).set('Authorization', `Bearer ${accessToken}`).send(body);
+  const statusOf = async (staffId: string) =>
+    (await prisma.staff.findUniqueOrThrow({ where: { id: staffId } })).status;
+
+  it('the owner suspends and reactivates an admin; the suspended admin is signed out at once', async () => {
+    const { owner, admin } = await setup();
+    expect((await update(owner.accessToken, admin.staffId, { status: 'SUSPENDED' })).status).toBe(200);
+    expect(await statusOf(admin.staffId)).toBe('SUSPENDED');
+    const me = await api().get('/api/auth/me').set('Authorization', `Bearer ${admin.accessToken}`);
+    expect(me.status).toBe(401);
+    expect((await update(owner.accessToken, admin.staffId, { status: 'ACTIVE' })).status).toBe(200);
+    expect(await statusOf(admin.staffId)).toBe('ACTIVE');
+  });
+
+  it('the owner suspends a staff member', async () => {
+    const { owner, staff } = await setup();
+    expect((await update(owner.accessToken, staff.staffId, { status: 'SUSPENDED' })).status).toBe(200);
+    expect(await statusOf(staff.staffId)).toBe('SUSPENDED');
+  });
+
+  it('an admin suspends and reactivates a staff member', async () => {
+    const { admin, staff } = await setup();
+    expect((await update(admin.accessToken, staff.staffId, { status: 'SUSPENDED' })).status).toBe(200);
+    expect(await statusOf(staff.staffId)).toBe('SUSPENDED');
+    expect((await update(admin.accessToken, staff.staffId, { status: 'ACTIVE' })).status).toBe(200);
+  });
+
+  it('an admin cannot suspend or reactivate another admin', async () => {
+    const { owner, admin, admin2 } = await setup();
+    const res = await update(admin.accessToken, admin2.staffId, { status: 'SUSPENDED' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('SUSPENSION_REQUIRES_OWNER_APPROVAL');
+    expect(await statusOf(admin2.staffId)).toBe('ACTIVE');
+
+    await update(owner.accessToken, admin2.staffId, { status: 'SUSPENDED' });
+    const reactivate = await update(admin.accessToken, admin2.staffId, { status: 'ACTIVE' });
+    expect(reactivate.status).toBe(403);
+    expect(await statusOf(admin2.staffId)).toBe('SUSPENDED');
+  });
+
+  it('an admin cannot get around it by demoting, re-addressing, renaming or re-passwording another admin', async () => {
+    const { admin, admin2 } = await setup();
+    for (const body of [
+      { role: 'STAFF' },
+      { role: 'STAFF', status: 'SUSPENDED' },
+      { password: 'Takeover123' },
+      { email: 'hijack@example.com' },
+      { name: 'Renamed' },
+    ]) {
+      const res = await update(admin.accessToken, admin2.staffId, body);
+      expect(res.status, JSON.stringify(body)).toBe(403);
+    }
+    const row = await prisma.staff.findUniqueOrThrow({ where: { id: admin2.staffId } });
+    expect(row).toMatchObject({ role: 'ADMIN', status: 'ACTIVE', name: 'Test ADMIN' });
+    const login = await api().post('/api/auth/login').send({ email: row.email, password: 'Password123' });
+    expect(login.status).toBe(200);
+  });
+
+  it('an admin cannot suspend the owner', async () => {
+    const { owner, admin } = await setup();
+    const res = await update(admin.accessToken, owner.staffId, { status: 'SUSPENDED' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('CANNOT_MODIFY_OWNER');
+    expect(await statusOf(owner.staffId)).toBe('ACTIVE');
+  });
+
+  it('an admin cannot suspend, demote or re-password themselves; renaming is fine', async () => {
+    const { admin } = await setup();
+    const suspend = await update(admin.accessToken, admin.staffId, { status: 'SUSPENDED' });
+    expect(suspend.status).toBe(403);
+    expect(suspend.body.error.code).toBe('CANNOT_SUSPEND_SELF');
+    for (const body of [{ role: 'STAFF' }, { password: 'Another123' }, { email: 'me2@example.com' }]) {
+      expect((await update(admin.accessToken, admin.staffId, body)).status).toBe(403);
+    }
+    expect(await statusOf(admin.staffId)).toBe('ACTIVE');
+    expect((await update(admin.accessToken, admin.staffId, { name: 'Adam A.' })).status).toBe(200);
+  });
+
+  it('repeating the stored values is not treated as a change', async () => {
+    const { admin, admin2 } = await setup();
+    const res = await update(admin.accessToken, admin2.staffId, { status: 'ACTIVE', role: 'ADMIN' });
+    expect(res.status).toBe(200);
+  });
+
+  it('staff cannot suspend anyone', async () => {
+    const { owner, admin, staff, staff2 } = await setup();
+    for (const target of [owner.staffId, admin.staffId, staff2.staffId, staff.staffId]) {
+      const res = await update(staff.accessToken, target, { status: 'SUSPENDED' });
+      expect(res.status).toBe(403);
+    }
+    for (const id of [owner.staffId, admin.staffId, staff2.staffId, staff.staffId]) {
+      expect(await statusOf(id)).toBe('ACTIVE');
+    }
+  });
+
+  it('the removal/leave request workflow is unchanged', async () => {
+    const { owner, admin, admin2 } = await setup();
+    const req = await api()
+      .post('/api/staff/removal-requests')
+      .set('Authorization', `Bearer ${admin.accessToken}`)
+      .send({ targetStaffId: admin2.staffId });
+    expect(req.status).toBe(201);
+    const approve = await api()
+      .post(`/api/staff/removal-requests/${req.body.data.id}/approve`)
+      .set('Authorization', `Bearer ${owner.accessToken}`)
+      .send({});
+    expect(approve.status).toBe(200);
+  });
+});

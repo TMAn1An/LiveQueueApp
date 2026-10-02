@@ -39,6 +39,7 @@ export async function update(req: Request, res: Response) {
     req.auth!.organizationId,
     req.params.staffId as string,
     req.body,
+    { staffId: req.auth!.staffId, role: req.auth!.role },
   );
   res.status(200).json({ success: true, data: staff });
   await auditService.recordAuditEventSafely({

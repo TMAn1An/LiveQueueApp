@@ -302,3 +302,52 @@ describe('StaffPage — ADR-056 Latin-only names', () => {
     expect(screen.getByRole('button', { name: /send invitation/i })).toBeDisabled();
   });
 });
+
+describe('StaffPage — ADR-061 suspension follows the removal rules', () => {
+  const rows = [
+    member('owner1', 'OWNER', 'Olivia Owner'),
+    member('admin1', 'ADMIN', 'Adam Admin'),
+    member('admin2', 'ADMIN', 'Aisha Admin'),
+    member('staff1', 'STAFF', 'Sami Staff'),
+  ];
+
+  it('owner: Suspend on admins and staff, never on themselves', () => {
+    mockList(rows);
+    render(<StaffPage />);
+    expect(labels('Adam Admin')).toContain('Suspend');
+    expect(labels('Sami Staff')).toContain('Suspend');
+    expect(labels('Olivia Owner')).not.toContain('Suspend');
+  });
+
+  it('admin: Suspend on staff only — never on another admin, the owner or themselves', () => {
+    setActor('admin1', 'ADMIN');
+    mockList(rows);
+    render(<StaffPage />);
+    expect(labels('Sami Staff')).toContain('Suspend');
+    expect(labels('Aisha Admin')).not.toContain('Suspend');
+    expect(labels('Aisha Admin')).toContain('Request removal');
+    expect(labels('Olivia Owner')).not.toContain('Suspend');
+    expect(labels('Adam Admin')).not.toContain('Suspend');
+  });
+
+  it('suspending asks for confirmation first; reactivating does not', async () => {
+    const mutate = vi.fn();
+    vi.mocked(useUpdateStaff).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<
+      typeof useUpdateStaff
+    >);
+    mockList([member('staff1', 'STAFF', 'Sami Staff'), { ...member('staff2', 'STAFF', 'Suki Staff'), status: 'SUSPENDED' }]);
+    render(<StaffPage />);
+
+    const suspend = Array.from(buttonsIn('Sami Staff')).find((b) => b.textContent === 'Suspend')!;
+    await userEvent.click(suspend);
+    expect(screen.getByText('Suspend Sami Staff?')).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+    const confirmButtons = screen.getAllByRole('button', { name: 'Suspend' });
+    await userEvent.click(confirmButtons[confirmButtons.length - 1]!);
+    expect(mutate).toHaveBeenCalledWith({ staffId: 'staff1', input: { status: 'SUSPENDED' } }, expect.anything());
+
+    const reactivate = Array.from(buttonsIn('Suki Staff')).find((b) => b.textContent === 'Reactivate')!;
+    await userEvent.click(reactivate);
+    expect(mutate).toHaveBeenLastCalledWith({ staffId: 'staff2', input: { status: 'ACTIVE' } }, expect.anything());
+  });
+});
