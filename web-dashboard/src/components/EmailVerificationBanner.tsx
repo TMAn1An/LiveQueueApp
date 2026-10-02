@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import * as authApi from '../api/auth.api';
+import { ApiError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { onEmailVerifiedElsewhere } from '../utils/emailVerificationSync';
 
@@ -26,6 +27,7 @@ export const VERIFICATION_RECHECK_MS = 15_000;
  */
 export function EmailVerificationBanner({ email }: { email: string }) {
   const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { refreshIdentity } = useAuth();
   const queryClient = useQueryClient();
 
@@ -64,10 +66,14 @@ export function EmailVerificationBanner({ email }: { email: string }) {
 
   async function handleResend() {
     setState('sending');
+    setErrorMessage(null);
     try {
       await authApi.resendVerificationEmail();
       setState('sent');
-    } catch {
+    } catch (err) {
+      // A cooldown or rate limit says how long to wait; anything else keeps
+      // the generic message.
+      if (err instanceof ApiError && err.status === 429) setErrorMessage(err.message);
       setState('error');
     }
   }
@@ -90,7 +96,9 @@ export function EmailVerificationBanner({ email }: { email: string }) {
           {state === 'sending' ? 'Sending…' : 'Resend verification email'}
         </button>
         {state === 'sent' && <span className="text-green-700">Sent — check your inbox.</span>}
-        {state === 'error' && <span className="text-red-700">Failed to send. Please try again shortly.</span>}
+        {state === 'error' && (
+          <span className="text-red-700">{errorMessage ?? 'Failed to send. Please try again shortly.'}</span>
+        )}
       </div>
     </div>
   );

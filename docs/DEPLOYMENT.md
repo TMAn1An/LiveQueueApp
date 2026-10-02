@@ -425,12 +425,38 @@ and authentication, not by this code. In order of impact:
    regardless; marking them "Not spam" and adding the sender to contacts
    trains the recipient's filter, and reputation builds with normal volume.
    Avoid bursts of test sends to many addresses from a brand-new domain.
-5. **Content** is already handled in code: every message is sent as
-   HTML + plain text, as a complete HTML document, with the link also shown
-   as visible text.
+5. **Content** is already handled in code (ADR-060): every message is
+   HTML + an equivalent plain-text part, one call to action, the link shown
+   once more as copyable text (never a second anchor), a short 43-character
+   token, `Auto-Submitted: auto-generated`, and a unique `X-Entity-Ref-ID` so
+   a resent email is not folded into the earlier Gmail thread.
+6. **Turn off click and open tracking for the sending domain** (Resend →
+   Domains → the domain → Configuration). Click tracking rewrites every link
+   through a tracking redirect, so the visible address no longer matches the
+   destination — a classic phishing signal, and it adds a hop to a one-time
+   link. These are security emails; nothing needs to be tracked.
+7. **Add DMARC aggregate reports** once DMARC exists, so you can see whether
+   SPF/DKIM actually pass at Gmail:
+   `_dmarc.<your-domain>` TXT `v=DMARC1; p=none; rua=mailto:<a mailbox you read>; adkim=r; aspf=r`.
+   After a few clean weeks of reports, tighten to `p=quarantine`.
 
 Check a real message's headers ("Show original" in Gmail): `SPF: PASS`,
 `DKIM: PASS` and `DMARC: PASS` together are the goal.
+
+**Audit of the production sender `tdastudbook.au` (2026-10-02, public DNS only).**
+DNS is hosted at Hostinger. Published: SPF for the root
+(`v=spf1 include:_spf.mail.hostinger.com ~all`, Hostinger mailboxes), a
+separate SPF and MX on `send.tdastudbook.au` — the subdomain Resend uses for
+its return path (its values are not Resend's older Amazon SES records, so
+confirm they match what the Resend dashboard lists today), a
+`resend._domainkey` DKIM key, and DMARC `v=DMARC1; p=none` with no report
+address. With Resend sending, SPF (via `send.`) and DKIM (`d=tdastudbook.au`)
+should both align with the From domain, so DMARC should pass — confirm in
+"Show original". What DNS cannot show: whether Resend reports the domain as
+verified, and whether click/open tracking is on; check both in the Resend
+dashboard. The remaining spam signals are reputation-shaped rather than
+authentication-shaped: a low-volume domain whose name does not match the
+"LiveQueue" display name, and links to a shared `*.pages.dev` host.
 
 ### 3c. Safe defaults — set only to override
 

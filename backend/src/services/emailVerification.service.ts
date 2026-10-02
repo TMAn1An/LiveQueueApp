@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma';
 import { logger } from '../config/logger';
 import { AppError } from '../utils/AppError';
-import { generateRefreshToken, hashRefreshToken } from '../utils/tokens';
+import { generateEmailLinkToken, hashRefreshToken } from '../utils/tokens';
 import { env } from '../config/env';
 import * as emailService from './email.service';
 
@@ -30,7 +30,7 @@ export interface PendingVerification {
  * the caller can email it once — only the hash is ever persisted.
  */
 export function generateVerificationToken(): { raw: string; hash: string; expiresAt: Date } {
-  const raw = generateRefreshToken();
+  const raw = generateEmailLinkToken();
   return {
     raw,
     hash: hashRefreshToken(raw),
@@ -112,6 +112,23 @@ export async function resendVerificationEmail(staffId: string): Promise<void> {
   }
   if (staff.status !== 'PENDING_EMAIL_VERIFICATION') {
     throw new AppError(409, 'ALREADY_VERIFIED', 'This account is already verified.');
+  }
+
+  // ADR-060: a per-account cooldown on top of the per-IP limiter, so a
+  // repeatedly clicked "Resend" cannot fill an inbox with identical
+  // messages (a pattern spam filters learn from). The last send time is
+  // implied by the stored expiry, which is always send time + the TTL.
+  if (staff.emailVerificationExpiresAt) {
+    const sentAt = staff.emailVerificationExpiresAt.getTime() - VERIFICATION_TOKEN_TTL_MS;
+    const cooldownMs = env.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS * 1000;
+    const waited = Date.now() - sentAt;
+    if (waited < cooldownMs) {
+      throw new AppError(
+        429,
+        'VERIFICATION_RESEND_TOO_SOON',
+        `Please wait ${Math.ceil((cooldownMs - waited) / 1000)} seconds before sending another verification email.`,
+      );
+    }
   }
 
   const token = generateVerificationToken();
