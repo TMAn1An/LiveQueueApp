@@ -4,6 +4,7 @@ import { Button } from './Button';
 import { FieldError } from './FieldError';
 import { InfoHelp } from './InfoHelp';
 import { latinTextError } from '../utils/latinText';
+import { fieldKeyError, withKey, withLabel } from '../utils/formFieldKey';
 import { PermissionGate } from './PermissionGate';
 import { ErrorBanner } from './ErrorBanner';
 import { ApiError } from '../api/client';
@@ -26,8 +27,27 @@ const OPTION_TYPES: FormFieldType[] = ['dropdown', 'radio'];
 const fieldInputClass =
   'h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500';
 
+/**
+ * One row of the builder. Everything that belongs to a field — its label,
+ * key, type, options and whether its key was typed by hand — lives on this
+ * object, so removing the row removes all of it (ADR-065).
+ */
 interface EditableField extends FormFieldInput {
   _localId: string;
+  /** The key was typed by hand (or the field was saved before), so label
+   * edits leave it alone. */
+  keyManual: boolean;
+}
+
+function duplicateKeys(fields: EditableField[]): Set<string> {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const f of fields) {
+    if (!f.key) continue;
+    if (seen.has(f.key)) duplicates.add(f.key);
+    seen.add(f.key);
+  }
+  return duplicates;
 }
 
 function optionsError(field: FormFieldInput): string | null {
@@ -45,6 +65,9 @@ function toEditable(fields: QueueFormField[]): EditableField[] {
     options: f.options,
     sortOrder: f.sortOrder,
     _localId: crypto.randomUUID(),
+    // A saved field keeps its key when its label is reworded: answers already
+    // given, and the repeat-visit rule, may refer to it.
+    keyManual: true,
   }));
 }
 
@@ -63,26 +86,24 @@ export function FormBuilder({ queueId }: { queueId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  function updateField(localId: string, patch: Partial<EditableField>) {
+  function updateField(localId: string, change: (field: EditableField) => EditableField) {
     setDirty(true);
-    setFields((prev) =>
-      prev.map((f) => {
-        if (f._localId !== localId) return f;
-        const updated = { ...f, ...patch };
-        // Suggest automatic key from label if key hasn't been manually typed yet
-        if (patch.label && (!f.key || f.key === f.label.toLowerCase().replace(/[^a-z0-9_]/g, '_'))) {
-          updated.key = patch.label.toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 32);
-        }
-        return updated;
-      }),
-    );
+    setFields((prev) => prev.map((f) => (f._localId === localId ? change(f) : f)));
   }
 
   function addField() {
     setDirty(true);
     setFields((prev) => [
       ...prev,
-      { _localId: crypto.randomUUID(), key: '', label: '', type: 'text', required: false, options: [] },
+      {
+        _localId: crypto.randomUUID(),
+        key: '',
+        label: '',
+        type: 'text',
+        required: false,
+        options: [],
+        keyManual: false,
+      },
     ]);
   }
 
@@ -108,7 +129,8 @@ export function FormBuilder({ queueId }: { queueId: string }) {
     setError(null);
     try {
       await replaceFormFields.mutateAsync(
-        fields.map(({ _localId, ...field }, index) => ({
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        fields.map(({ _localId, keyManual, ...field }, index) => ({
           ...field,
           sortOrder: index,
           options: OPTION_TYPES.includes(field.type) ? field.options : [],
@@ -123,6 +145,13 @@ export function FormBuilder({ queueId }: { queueId: string }) {
   // ADR-056: labels and options are what customers read, so they follow the
   // same English/Latin rule the backend enforces on save.
   const hasTextErrors = fields.some((f) => latinTextError(f.label) || optionsError(f));
+  // ADR-065: every row needs a label and a valid, unique key — a blank label
+  // with a leftover key can never be saved.
+  const duplicates = duplicateKeys(fields);
+  const keyErrors = new Map(fields.map((f) => [f._localId, fieldKeyError(f, duplicates.has(f.key))]));
+  const missingLabel = fields.some((f) => f.label.trim() === '');
+  const hasKeyErrors = [...keyErrors.values()].some(Boolean);
+  const blocked = hasTextErrors || missingLabel || hasKeyErrors;
 
   if (isLoading) return null;
 
@@ -262,7 +291,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                   placeholder="e.g. Full Name, Student ID"
                   aria-label={`Field ${idx + 1} label`}
                   aria-invalid={latinTextError(field.label) ? true : undefined}
-                  onChange={(e) => updateField(field._localId, { label: e.target.value })}
+                  onChange={(e) => updateField(field._localId, (f) => withLabel(f, e.target.value))}
                   className={fieldInputClass}
                 />
                 <FieldError message={latinTextError(field.label)} />
@@ -272,16 +301,18 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                 <div className="mb-1 flex items-center gap-0.5">
                   <label className="block text-xs font-medium text-fg-soft">Key</label>
                   <InfoHelp label="the field key">
-                    A short identifier for this answer — letters, numbers and underscores. Filled in from the label until you change it.
+                    A short identifier for this answer — letters, numbers and underscores. Filled in from the label until you type your own; clearing the label clears it too.
                   </InfoHelp>
                 </div>
                 <input
                   value={field.key}
                   placeholder="e.g. full_name"
                   aria-label={`Field ${idx + 1} key`}
-                  onChange={(e) => updateField(field._localId, { key: e.target.value })}
+                  aria-invalid={keyErrors.get(field._localId) ? true : undefined}
+                  onChange={(e) => updateField(field._localId, (f) => withKey(f, e.target.value))}
                   className={`${fieldInputClass} font-mono`}
                 />
+                <FieldError message={keyErrors.get(field._localId) ?? null} />
               </div>
 
               <div>
@@ -289,7 +320,9 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                 <select
                   value={field.type}
                   aria-label={`Field ${idx + 1} type`}
-                  onChange={(e) => updateField(field._localId, { type: e.target.value as FormFieldType })}
+                  onChange={(e) =>
+                    updateField(field._localId, (f) => ({ ...f, type: e.target.value as FormFieldType }))
+                  }
                   className={fieldInputClass}
                 >
                   {FIELD_TYPES.map((t) => (
@@ -305,7 +338,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                   <input
                     type="checkbox"
                     checked={field.required}
-                    onChange={(e) => updateField(field._localId, { required: e.target.checked })}
+                    onChange={(e) => updateField(field._localId, (f) => ({ ...f, required: e.target.checked }))}
                     className="rounded border-border-strong text-brand-600 focus:ring-brand-500"
                   />
                   Required
@@ -327,12 +360,13 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                   aria-label={`Field ${idx + 1} options`}
                   aria-invalid={optionsError(field) ? true : undefined}
                   onChange={(e) =>
-                    updateField(field._localId, {
+                    updateField(field._localId, (f) => ({
+                      ...f,
                       options: e.target.value
                         .split(',')
                         .map((o) => o.trim())
                         .filter(Boolean),
-                    })
+                    }))
                   }
                   className={fieldInputClass}
                 />
@@ -353,12 +387,15 @@ export function FormBuilder({ queueId }: { queueId: string }) {
             Add Field
           </Button>
           <Button
-            disabled={!dirty || hasTextErrors}
+            disabled={!dirty || blocked}
             loading={replaceFormFields.isPending}
             onClick={() => void handleSave()}
           >
             {replaceFormFields.isPending ? 'Saving…' : 'Save Form'}
           </Button>
+          {dirty && missingLabel && (
+            <span className="text-xs text-muted">Give every field a label, or remove it, to save.</span>
+          )}
         </div>
       </PermissionGate>
     </div>

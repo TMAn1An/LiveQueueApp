@@ -1728,3 +1728,17 @@ Blocking only `status` would not have been enough: an admin could demote a fello
 **Mobile.** Not affected: the app is for people in the queue and has no staff controls.
 
 **Consequences.** A queue needs at least one counter *with someone assigned* to serve; an owner who serves alone assigns themselves. Older dashboards that still send `counterId` keep working when it is their own counter.
+
+## ADR-065: A form field's key follows its label until someone types it, and never outlives the label (2026-10-02)
+
+**Status:** Implemented on `feature/terminology-form-counter-governance`. Dashboard only; the backend's rules (label and key required, key `^[a-zA-Z0-9_]+$`, keys unique) are unchanged.
+
+**What was found.** The builder derived a key from the label only while the key "looked automatic" — by comparing it with the label's untruncated normalisation — and only when the new label was non-empty. So clearing a label left the old key behind (a row with no label and a stale key), a label longer than 32 characters silently flipped the key to "manual", and the save button only checked the Latin-text rule, leaving blank labels, blank keys and duplicate keys to the backend's error.
+
+**Decision.** One key rule in one place, `utils/formFieldKey.ts`: the builder's existing normalisation (lower-case, every character outside `a–z 0–9 _` becomes `_`, 32 characters) applied to the trimmed label — saved labels are already trimmed, so no existing key changes. Each row records whether its key is manual (`keyManual`, part of the row, so removing a row removes it):
+
+- A new row's key follows its label on every edit.
+- Typing in the Key box makes it manual; later label edits leave it alone. Emptying the Key box hands it back to the label.
+- A label that becomes blank clears the key and hands it back to the label, whether or not it was typed — there is never a key without a label.
+- A saved field starts manual: rewording its label keeps its key, because answers already given and the repeat-visit identity rule may refer to it.
+- Save is disabled while any row has a blank label, a blank or invalid key, or a key another row uses, with the reason shown on the row. `keyManual` and the row id are stripped before saving; the request body is unchanged.
