@@ -55,3 +55,20 @@ export interface AuthResult {
   accessToken: string;
   refreshToken: string;
 }
+
+/** ADR-057: a request for the owner to end someone's membership. */
+export type MembershipRequestType = 'SELF_LEAVE' | 'ADMIN_REMOVAL_REQUEST';
+export type MembershipRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+
+export interface MembershipRemovalRequest {
+  id: string;
+  requestType: MembershipRequestType;
+  status: MembershipRequestStatus;
+  reason: string | null;
+  requester: { id: string; name: string; email: string };
+  target: { id: string; name: string; email: string; role: StaffRole };
+  reviewedAt: string | null;
+  reviewedBy: { id: string; name: string | null } | null;
+  reviewNote: string | null;
+  createdAt: string;
+}

@@ -45,3 +45,44 @@ export function useResendInvitation() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['staff'] }),
   });
 }
+
+/** ADR-057: requests visible to the caller — every one for the owner, and
+ * one's own (made by or about them) for anyone else. */
+export function useRemovalRequests(enabled = true) {
+  return useQuery({
+    queryKey: ['removal-requests'],
+    queryFn: async () => (await staffApi.listRemovalRequests()).data,
+    enabled,
+  });
+}
+
+function useRemovalRequestMutation<TInput>(
+  mutationFn: (input: TInput) => Promise<unknown>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['removal-requests'] });
+      // An approval removes someone from the staff list.
+      void queryClient.invalidateQueries({ queryKey: ['staff'] });
+    },
+  });
+}
+
+export function useCreateRemovalRequest() {
+  return useRemovalRequestMutation((input: { targetStaffId: string; reason?: string }) =>
+    staffApi.createRemovalRequest(input),
+  );
+}
+
+export function useReviewRemovalRequest() {
+  return useRemovalRequestMutation(
+    (input: { requestId: string; decision: 'approve' | 'reject'; reviewNote?: string }) =>
+      staffApi.reviewRemovalRequest(input.requestId, input.decision, input.reviewNote),
+  );
+}
+
+export function useCancelRemovalRequest() {
+  return useRemovalRequestMutation((requestId: string) => staffApi.cancelRemovalRequest(requestId));
+}

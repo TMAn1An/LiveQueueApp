@@ -216,3 +216,20 @@ export function broadcastQueueEtaUpdate(
     }
   });
 }
+
+/**
+ * ADR-057: ends every live socket a removed member still holds. Their Staff
+ * row is already gone, so they could not reconnect, but an open connection
+ * would otherwise keep receiving the organization room's events.
+ */
+export function disconnectStaff(staffId: string): void {
+  void guarded(() => {
+    const io = getIO();
+    if (!io) return;
+    for (const socket of io.sockets.sockets.values()) {
+      if (socket.data.auth?.staffId === staffId) {
+        socket.disconnect(true);
+      }
+    }
+  });
+}

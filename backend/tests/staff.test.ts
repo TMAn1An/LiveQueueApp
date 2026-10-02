@@ -467,7 +467,7 @@ describe('DELETE /api/staff/:staffId', () => {
     expect(getRes.status).toBe(404);
   });
 
-  it('rejects deleting the organization owner (spec 7.3)', async () => {
+  it('rejects the owner deleting themselves (spec 7.3; ADR-057 — no one removes themselves)', async () => {
     const ctx = await registerOwner();
 
     const res = await api()
@@ -475,7 +475,7 @@ describe('DELETE /api/staff/:staffId', () => {
       .set('Authorization', `Bearer ${ctx.accessToken}`);
 
     expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('CANNOT_DELETE_OWNER');
+    expect(res.body.error.code).toBe('CANNOT_REMOVE_SELF');
   });
 
   it('rejects an ADMIN (full manage_staff) deleting the OWNER', async () => {

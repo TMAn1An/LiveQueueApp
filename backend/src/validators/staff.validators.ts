@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE } from './latinText';
+import {
+  LATIN_NAME_MESSAGE,
+  LATIN_NAME_PATTERN,
+  LATIN_TEXT_MESSAGE,
+  LATIN_TEXT_PATTERN,
+} from './latinText';
 import { emailSchema, passwordSchema } from './auth.validators';
 
 // OWNER is deliberately excluded — an organization has exactly one owner,
@@ -68,4 +73,36 @@ export const acceptInvitationSchema = {
     token: z.string().trim().min(1, 'An invitation token is required.'),
     password: passwordSchema,
   }),
+};
+
+/** ADR-057: membership-removal requests. The request type is derived by the
+ * server from who is asking about whom, so the client never sends it. */
+const optionalNote = z.string().trim().max(500).regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE).optional();
+
+export const removalRequestIdParams = z.object({
+  requestId: z.string().uuid('requestId must be a valid id.'),
+});
+
+export const createRemovalRequestSchema = {
+  body: z
+    .object({
+      targetStaffId: z.string().uuid('targetStaffId must be a valid id.'),
+      reason: optionalNote,
+    })
+    .strict(),
+};
+
+export const listRemovalRequestsSchema = {
+  query: z.object({
+    status: z.enum(['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED']).optional(),
+  }),
+};
+
+export const reviewRemovalRequestSchema = {
+  params: removalRequestIdParams,
+  body: z.object({ reviewNote: optionalNote }).strict(),
+};
+
+export const removalRequestIdOnlySchema = {
+  params: removalRequestIdParams,
 };

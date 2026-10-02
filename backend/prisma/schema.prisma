@@ -120,11 +120,12 @@ model Organization {
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
 
-  staff          Staff[]
-  queues         Queue[]
-  tokens         Token[]
-  deviceBlocks   OrganizationDeviceBlock[]
-  identityClaims QueueIdentityClaim[]
+  staff           Staff[]
+  queues          Queue[]
+  tokens          Token[]
+  deviceBlocks    OrganizationDeviceBlock[]
+  identityClaims  QueueIdentityClaim[]
+  removalRequests MembershipRemovalRequest[]
 
   @@map("organizations")
 }
@@ -950,4 +951,67 @@ model CustomerEmailVerification {
   @@index([queueId, emailFingerprint])
   @@index([expiresAt])
   @@map("customer_email_verifications")
+}
+
+/// ADR-057: what a membership-removal request asks for. Derived by the server
+/// from who is asking about whom, never chosen by the client.
+enum MembershipRequestType {
+  /// A STAFF or ADMIN member asking to leave the organization.
+  SELF_LEAVE
+  /// An ADMIN asking the owner to remove another ADMIN.
+  ADMIN_REMOVAL_REQUEST
+}
+
+enum MembershipRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  /// Withdrawn by the requester, or made moot because the target left the
+  /// organization by some other route before the owner reviewed it.
+  CANCELLED
+}
+
+/// ADR-057: a request for the owner to end someone's membership. Nobody may
+/// remove themselves directly, and an admin may not directly remove another
+/// admin — those changes go through the owner here.
+///
+/// requester/target/reviewer are snapshot columns with no relation to Staff,
+/// like AuditLog: approving a request deletes the target's Staff row, and the
+/// request must survive as the record of why.
+model MembershipRemovalRequest {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  requestType MembershipRequestType   @map("request_type")
+  status      MembershipRequestStatus @default(PENDING)
+  reason      String?
+
+  requesterId    String @map("requester_id")
+  requesterName  String @map("requester_name")
+  requesterEmail String @map("requester_email")
+
+  targetStaffId String    @map("target_staff_id")
+  targetName    String    @map("target_name")
+  targetEmail   String    @map("target_email")
+  targetRole    StaffRole @map("target_role")
+
+  reviewedAt     DateTime? @map("reviewed_at")
+  reviewedById   String?   @map("reviewed_by_id")
+  reviewedByName String?   @map("reviewed_by_name")
+  reviewNote     String?   @map("review_note")
+
+  /// One pending request per (target, type). A pending row holds the literal
+  /// "PENDING"; closing it moves the slot to the row's own id, so history can
+  /// grow while the unique index below still admits only one open request —
+  /// the ADR-035 claimSlot pattern, instead of a partial index Prisma cannot
+  /// express.
+  activeSlot String @default("PENDING") @map("active_slot")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([targetStaffId, requestType, activeSlot])
+  @@index([organizationId, status, createdAt])
+  @@map("membership_removal_requests")
 }

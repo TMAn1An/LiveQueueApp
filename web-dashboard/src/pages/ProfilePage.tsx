@@ -9,6 +9,8 @@ import { PasswordInput } from '../components/PasswordInput';
 import { PageHeader } from '../components/PageHeader';
 import { ApiError } from '../api/client';
 import { formatDateTime } from '../utils/format';
+import { MyRequests, RemovalRequestDialog } from '../components/MembershipRequests';
+import { useRemovalRequests } from '../hooks/useStaff';
 
 export function ProfilePage() {
   const { staff, organization, permissions, logout } = useAuth();
@@ -73,6 +75,8 @@ export function ProfilePage() {
       </Card>
 
       <ChangePasswordCard />
+
+      <MembershipCard />
 
       <div className="pt-2">
         <Button variant="secondary" onClick={() => void logout()}>
@@ -175,6 +179,56 @@ function ChangePasswordCard() {
           </Button>
         </div>
       </div>
+    </Card>
+  );
+}
+
+/**
+ * ADR-057: leaving the organization. Nobody removes themselves directly, so
+ * staff and admins ask the owner here; the owner is told how the
+ * organization itself is closed instead.
+ */
+function MembershipCard() {
+  const { staff } = useAuth();
+  const { data: requests, isLoading } = useRemovalRequests(staff?.role !== 'OWNER');
+  const [requesting, setRequesting] = useState(false);
+  const [sent, setSent] = useState(false);
+  if (!staff) return null;
+
+  const pendingLeave = (requests ?? []).some(
+    (r) => r.status === 'PENDING' && r.requestType === 'SELF_LEAVE' && r.target.id === staff.id,
+  );
+
+  return (
+    <Card>
+      <SectionHeading
+        level={3}
+        title="Leave Organization"
+        help="Nobody can remove themselves directly. A leave request goes to the organization owner, and you keep your access until they approve it."
+      />
+      {staff.role === 'OWNER' ? (
+        <p className="text-sm text-fg-soft">
+          As the owner you cannot leave the organization. To close it, delete the organization in
+          Organization settings.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {sent && !pendingLeave && (
+            <p className="text-sm font-medium text-fg-soft">Request sent to the owner.</p>
+          )}
+          <MyRequests />
+          {/* Not offered until the requests have loaded, so it never flashes
+              up for someone whose leave request is already pending. */}
+          {!isLoading && !pendingLeave && (
+            <Button variant="outline" onClick={() => setRequesting(true)}>
+              Request to leave
+            </Button>
+          )}
+        </div>
+      )}
+      {requesting && (
+        <RemovalRequestDialog target="self" onClose={() => setRequesting(false)} onSent={() => setSent(true)} />
+      )}
     </Card>
   );
 }

@@ -238,15 +238,6 @@ export async function updateStaff(organizationId: string, staffId: string, input
   return serializeStaff(staff);
 }
 
-/** Spec 7.3: "Owner cannot be deleted by normal staff." */
-export async function deleteStaff(organizationId: string, staffId: string) {
-  const existing = await findStaffScoped(organizationId, staffId);
-  if (existing.role === 'OWNER') {
-    throw new AppError(403, 'CANNOT_DELETE_OWNER', 'The organization owner cannot be deleted.');
-  }
-  await prisma.staff.delete({ where: { id: staffId } });
-}
-
 /** ADR-035 — thin pass-through so the controller keeps talking to one
  * service, while the invitation mechanics live with the rest of their kind. */
 export function resendStaffInvitation(organizationId: string, staffId: string) {
