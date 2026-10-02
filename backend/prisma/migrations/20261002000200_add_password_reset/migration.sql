@@ -25,4 +25,3 @@ CREATE INDEX "password_reset_tokens_staff_id_created_at_idx" ON "password_reset_
 
 -- AddForeignKey
 ALTER TABLE "password_reset_tokens" ADD CONSTRAINT "password_reset_tokens_staff_id_fkey" FOREIGN KEY ("staff_id") REFERENCES "staff"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-

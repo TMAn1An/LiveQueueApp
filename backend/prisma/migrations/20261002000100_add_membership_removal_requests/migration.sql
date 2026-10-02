@@ -41,4 +41,3 @@ CREATE UNIQUE INDEX "membership_removal_requests_target_staff_id_request_type_ac
 
 -- AddForeignKey
 ALTER TABLE "membership_removal_requests" ADD CONSTRAINT "membership_removal_requests_organization_id_fkey" FOREIGN KEY ("organization_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
