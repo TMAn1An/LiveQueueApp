@@ -104,9 +104,24 @@ void main() {
 
     test('falls back to the local label only when a reason arrives without text (ADR-042)', () {
       final token = LiveQueueToken.fromJson(baseJson()..['skipReason'] = {'code': 'NO_RESPONSE', 'text': null});
-      expect(token.skipReasonDisplay, 'No response from customer');
+      expect(token.skipReasonDisplay, 'No response from person');
       final unknown = LiveQueueToken.fromJson(baseJson()..['skipReason'] = {'code': 'OTHER', 'text': ''});
       expect(unknown.skipReasonDisplay, isNull);
+    });
+
+    test('local skip labels use neutral "person" wording; codes are unchanged', () {
+      expect(skipReasonLabel('CUSTOMER_NOT_PRESENT'), 'Person not present');
+      expect(skipReasonLabel('NO_RESPONSE'), 'No response from person');
+      expect(skipReasonLabel('MISSING_REQUIREMENT'), 'Required document/information missing');
+      expect(skipReasonLabel('CUSTOMER_LEFT'), 'Person requested to leave');
+      expect(skipReasonLabel('OTHER'), isNull);
+    });
+
+    test('a reason recorded with the old wording is shown exactly as recorded', () {
+      final token = LiveQueueToken.fromJson(
+        baseJson()..['skipReason'] = {'code': 'CUSTOMER_NOT_PRESENT', 'text': 'Customer not present'},
+      );
+      expect(token.skipReasonDisplay, 'Customer not present');
     });
 
     test('copyWith keeps serviceStartVerificationRequired (ADR-041)', () {
