@@ -79,6 +79,15 @@ export interface Queue {
   activeCounterCount?: number;
 }
 
+/** ADR-064: the counter an owner or admin has assigned the signed-in person to. */
+export interface MyCounter {
+  id: string;
+  name: string;
+  status: CounterStatus;
+  queueId: string;
+  queueName: string;
+}
+
 export interface Counter {
   id: string;
   queueId: string;

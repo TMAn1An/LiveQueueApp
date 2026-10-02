@@ -31,7 +31,7 @@ export async function create(req: Request, res: Response) {
 
 export async function update(req: Request, res: Response) {
   const counter = await counterService.updateCounter(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.counterId as string,
     req.body,
   );
@@ -49,7 +49,7 @@ export async function update(req: Request, res: Response) {
 
 export async function updateStatus(req: Request, res: Response) {
   const counter = await counterService.setCounterStatus(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.counterId as string,
     req.body.status,
   );
@@ -105,6 +105,12 @@ export async function assign(req: Request, res: Response) {
   // Assignment is a counter update — no dedicated event exists for it in the
   // specification's 12-event list (recommended mapping, readiness review §9).
   await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
+}
+
+/** ADR-064: the caller's own counter (null when they hold none). */
+export async function mine(req: Request, res: Response) {
+  const counter = await counterService.getMyCounter(req.auth!);
+  res.status(200).json({ success: true, data: counter });
 }
 
 /**

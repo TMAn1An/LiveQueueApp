@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
+  assignCounterTo,
   createCounter,
   createQueue,
   createRestrictedStaff,
@@ -10,6 +11,7 @@ import {
   setCounterStatus,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
+import { prisma } from '../src/config/prisma';
 
 beforeEach(async () => {
   await resetDb();
@@ -59,6 +61,7 @@ describe('Token tenant isolation', () => {
     const queueA = await createQueue(orgA.accessToken);
     const serviceA = await createService(orgA.accessToken, queueA.id);
     const token = await createToken({ queueId: queueA.id, serviceId: serviceA.id });
+    await createCounter(orgA.accessToken, queueA.id);
 
     const queueB = await createQueue(orgB.accessToken);
     const counterB = await createCounter(orgB.accessToken, queueB.id);
@@ -68,8 +71,10 @@ describe('Token tenant isolation', () => {
       .set('Authorization', `Bearer ${orgA.accessToken}`)
       .send({ counterId: counterB.id });
 
-    expect(res.status).toBe(404);
-    expect(res.body.error.code).toBe('COUNTER_NOT_FOUND');
+    // ADR-064: refused as "not your counter", identically for any foreign id.
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('COUNTER_ACCESS_DENIED');
+    expect((await prisma.token.findUnique({ where: { id: token.id } }))!.status).toBe('WAITING');
   });
 
   it('requires authentication for call/next', async () => {
@@ -91,10 +96,12 @@ describe('Token tenant isolation', () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const service = await createService(ctx.accessToken, queue.id);
-    const counter = await createCounter(ctx.accessToken, queue.id);
+    const counter = await createCounter(ctx.accessToken, queue.id, { assignToCreator: false });
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
     const accountant = await createRestrictedStaff(ctx.organizationId);
+    // ADR-064: at the counter they are assigned to.
+    await assignCounterTo(ctx.accessToken, counter.id, accountant.staffId);
 
     const callRes = await api()
       .post(`/api/tokens/${token.id}/call`)

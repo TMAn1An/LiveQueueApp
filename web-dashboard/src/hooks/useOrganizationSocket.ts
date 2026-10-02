@@ -73,6 +73,9 @@ export function useOrganizationSocket(organizationId: string | null): void {
         case 'counter.status_changed':
           if (envelope.queueId) {
             void queryClient.invalidateQueries({ queryKey: ['counters', envelope.queueId] });
+            // ADR-064: an assignment change is a counter update — the
+            // signed-in person's own counter may have just changed.
+            void queryClient.invalidateQueries({ queryKey: ['counters', 'mine'] });
           }
           void queryClient.invalidateQueries({ queryKey: ['dashboard', 'stats'] });
           break;

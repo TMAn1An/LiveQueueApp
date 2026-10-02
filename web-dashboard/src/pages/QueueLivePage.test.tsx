@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueueLivePage } from './QueueLivePage';
 import { useQueue } from '../hooks/useQueues';
-import { useCounters } from '../hooks/useCounters';
+import { useCounters, useMyCounter } from '../hooks/useCounters';
 import { useLiveQueueTable } from '../hooks/useDashboard';
 import type { Counter, Queue } from '../types/queue';
 import type { LiveQueueTokenRow } from '../types/dashboard';
@@ -15,7 +15,7 @@ vi.mock('../hooks/useQueues');
 vi.mock('../hooks/useCounters');
 vi.mock('../hooks/useDashboard');
 vi.mock('../hooks/useTokenActions', () => ({
-  useCallToken: () => ({ mutate: vi.fn() }),
+  useNextToken: () => ({ mutate: vi.fn(), isPending: false }),
   useStartToken: () => ({ mutate: vi.fn() }),
   useCompleteToken: () => ({ mutate: vi.fn() }),
   useSkipToken: () => ({ mutate: vi.fn() }),
@@ -112,6 +112,9 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(useMyCounter).mockReturnValue({ data: null, isLoading: false } as unknown as ReturnType<
+    typeof useMyCounter
+  >);
   vi.mocked(useQueue).mockReturnValue({
     data: queue(),
     isLoading: false,

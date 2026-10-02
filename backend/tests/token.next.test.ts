@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
   createCounter,
+  createCounterOperator,
   createQueue,
   createService,
   createToken,
@@ -62,6 +63,8 @@ describe('POST /api/queues/:queueId/next', () => {
     const service = await createService(ctx.accessToken, queue.id);
     const counterA = await createCounter(ctx.accessToken, queue.id);
     const counterB = await createCounter(ctx.accessToken, queue.id);
+    // ADR-064: each counter claims through the person assigned to it.
+    const operatorB = await createCounterOperator(ctx.accessToken, ctx.organizationId, counterB.id);
     await setCounterStatus(ctx.accessToken, counterA.id, 'ACTIVE');
     await setCounterStatus(ctx.accessToken, counterB.id, 'ACTIVE');
     await createToken({ queueId: queue.id, serviceId: service.id });
@@ -69,7 +72,7 @@ describe('POST /api/queues/:queueId/next', () => {
 
     const [resA, resB] = await Promise.all([
       next(ctx.accessToken, queue.id, counterA.id),
-      next(ctx.accessToken, queue.id, counterB.id),
+      next(operatorB.accessToken, queue.id, counterB.id),
     ]);
 
     expect(resA.status).toBe(200);
@@ -147,13 +150,16 @@ describe('POST /api/queues/:queueId/next', () => {
     const orgB = await registerOwner({ organizationName: 'Org B' });
     const queueA = await createQueue(orgA.accessToken);
     await createService(orgA.accessToken, queueA.id);
+    await createCounter(orgA.accessToken, queueA.id);
     const queueB = await createQueue(orgB.accessToken);
     const counterB = await createCounter(orgB.accessToken, queueB.id);
 
     const res = await next(orgA.accessToken, queueA.id, counterB.id);
 
-    expect(res.status).toBe(404);
-    expect(res.body.error.code).toBe('COUNTER_NOT_FOUND');
+    // ADR-064: any counter other than the caller's own is refused the same
+    // way, so a foreign id reveals nothing about whether it exists.
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('COUNTER_ACCESS_DENIED');
   });
 
   it("rejects a queue id belonging to another organization", async () => {

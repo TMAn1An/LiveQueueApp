@@ -14,15 +14,6 @@ function invalidateLiveData(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
 }
 
-export function useCallToken() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ tokenId, counterId }: { tokenId: string; counterId: string }) =>
-      tokenApi.callToken(tokenId, counterId),
-    onSuccess: () => invalidateLiveData(queryClient),
-  });
-}
-
 export function useStartToken() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -60,8 +51,7 @@ export function useSkipToken() {
 export function useNextToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ queueId, counterId }: { queueId: string; counterId: string }) =>
-      tokenApi.nextToken(queueId, counterId),
+    mutationFn: (queueId: string) => tokenApi.nextToken(queueId),
     onSuccess: () => invalidateLiveData(queryClient),
   });
 }

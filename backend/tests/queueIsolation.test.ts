@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
+  assignCounterTo,
   createCounter,
+  createCounterOperator,
   createQueue,
   createService,
   createStaffWithRole,
@@ -35,7 +37,9 @@ async function twoQueues() {
   const serviceB = await createService(ctx.accessToken, queueB.id);
   const counterA = await createCounter(ctx.accessToken, queueA.id, { name: 'A1' });
   const counterB = await createCounter(ctx.accessToken, queueB.id, { name: 'B1' });
-  return { ctx, queueA, queueB, serviceA, serviceB, counterA, counterB };
+  // ADR-064: the owner stands at A1; B1 is run by its own staff member.
+  const operatorB = await createCounterOperator(ctx.accessToken, ctx.organizationId, counterB.id);
+  return { ctx, queueA, queueB, serviceA, serviceB, counterA, counterB, operatorB };
 }
 
 function liveLine(accessToken: string, queueId?: string) {
@@ -140,10 +144,21 @@ describe('first-come-first-served runs per queue', () => {
     await setCounterStatus(org.ctx.accessToken, org.counterB.id, 'ACTIVE');
     const tokenA = await createToken({ queueId: org.queueA.id, serviceId: org.serviceA.id });
 
-    const res = await api()
+    // ADR-064: naming another counter is refused outright…
+    const spoofed = await api()
       .post(`/api/tokens/${tokenA.id}/call`)
       .set('Authorization', `Bearer ${org.ctx.accessToken}`)
       .send({ counterId: org.counterB.id });
+    expect(spoofed.status).toBe(403);
+    expect(spoofed.body.error.code).toBe('COUNTER_ACCESS_DENIED');
+
+    // …and someone whose own counter is queue B's cannot call queue A's line.
+    await assignCounterTo(org.ctx.accessToken, org.counterA.id, null);
+    await assignCounterTo(org.ctx.accessToken, org.counterB.id, org.ctx.staffId);
+    const res = await api()
+      .post(`/api/tokens/${tokenA.id}/call`)
+      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .send({});
 
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('COUNTER_QUEUE_MISMATCH');
@@ -439,8 +454,11 @@ describe('only owners and admins move staff between counters', () => {
     expect(res.status).toBe(403);
   });
 
-  it('leaves a staff member’s operational actions untouched', async () => {
+  it('leaves a staff member’s operational actions at their own counter untouched', async () => {
     const org = await setup();
+    // ADR-064: they operate the counter an owner or admin put them on.
+    await assignCounterTo(org.ctx.accessToken, org.counterA.id, null);
+    await assignCounterTo(org.ctx.accessToken, org.counterA.id, org.operator.staffId);
     await setCounterStatus(org.ctx.accessToken, org.counterA.id, 'ACTIVE');
     const token = await createToken({ queueId: org.queueA.id, serviceId: org.serviceA.id });
 

@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { AssignableStaff, Counter, CounterStatus } from '../types/queue';
+import type { AssignableStaff, Counter, CounterStatus, MyCounter } from '../types/queue';
 
 export function listCounters(queueId: string) {
   return apiFetch<Counter[]>(`/api/queues/${queueId}/counters`);
@@ -32,4 +32,9 @@ export function listAssignableStaff(counterId: string) {
 
 export function deleteCounter(counterId: string) {
   return apiFetch<void>(`/api/counters/${counterId}`, { method: 'DELETE' });
+}
+
+/** ADR-064: the signed-in person's own counter — the only one they serve at. */
+export function getMyCounter() {
+  return apiFetch<MyCounter | null>('/api/counters/mine');
 }

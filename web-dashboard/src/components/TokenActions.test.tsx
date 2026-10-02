@@ -2,9 +2,8 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TokenActions } from './TokenActions';
-import { useCounters } from '../hooks/useCounters';
+import { useMyCounter } from '../hooks/useCounters';
 import {
-  useCallToken,
   useCompleteToken,
   useSetRequiredDuration,
   useSkipToken,
@@ -12,13 +11,17 @@ import {
 } from '../hooks/useTokenActions';
 import { ApiError } from '../api/client';
 
+// ADR-064: OWNER/ADMIN (manage_staff) supervise every counter; STAFF act
+// only at their own. Tests default to a supervisor and switch per test.
+let supervises = true;
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({
+    hasPermission: (permission: string) => permission !== 'manage_staff' || supervises,
+  }),
 }));
 vi.mock('../hooks/useCounters');
 vi.mock('../hooks/useTokenActions');
 
-const callMutate = vi.fn();
 const startMutate = vi.fn();
 const completeMutate = vi.fn();
 const skipMutate = vi.fn();
@@ -26,13 +29,8 @@ const setRequiredDurationMutate = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(useCounters).mockReturnValue({
-    data: [
-      { id: 'c1', queueId: 'q1', name: 'Counter 1', status: 'ACTIVE', staffId: null, createdAt: '', updatedAt: '' },
-      { id: 'c2', queueId: 'q1', name: 'Counter 2', status: 'OFFLINE', staffId: null, createdAt: '', updatedAt: '' },
-    ],
-  } as unknown as ReturnType<typeof useCounters>);
-  vi.mocked(useCallToken).mockReturnValue({ mutate: callMutate } as unknown as ReturnType<typeof useCallToken>);
+  supervises = true;
+  vi.mocked(useMyCounter).mockReturnValue({ data: null } as unknown as ReturnType<typeof useMyCounter>);
   vi.mocked(useStartToken).mockReturnValue({ mutate: startMutate } as unknown as ReturnType<typeof useStartToken>);
   vi.mocked(useCompleteToken).mockReturnValue({
     mutate: completeMutate,
@@ -45,9 +43,9 @@ beforeEach(() => {
 });
 
 describe('TokenActions — state-gated buttons (mirrors the backend state machine)', () => {
-  it('WAITING shows Call and Skip, not Start or Complete', () => {
+  it('WAITING shows Skip, not Start or Complete — and no per-row Call (ADR-064)', () => {
     render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" />);
-    expect(screen.getByText('Call')).toBeInTheDocument();
+    expect(screen.queryByText('Call')).not.toBeInTheDocument();
     expect(screen.getByText('Skip')).toBeInTheDocument();
     expect(screen.queryByText('Start')).not.toBeInTheDocument();
     expect(screen.queryByText('Complete')).not.toBeInTheDocument();
@@ -89,52 +87,20 @@ describe('TokenActions — state-gated buttons (mirrors the backend state machin
     expect(screen.queryByText('Skip')).not.toBeInTheDocument();
   });
 
-  it('clicking Call reveals a counter picker, and selecting a counter calls callToken with its id', async () => {
-    const user = userEvent.setup();
-    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" />);
-
-    await user.click(screen.getByText('Call'));
-    const select = screen.getByRole('combobox');
-    await user.selectOptions(select, 'c1');
-
-    expect(callMutate).toHaveBeenCalledWith({ tokenId: 't1', counterId: 'c1' }, expect.anything());
-  });
-
-  it('a refused Call (e.g. an earlier customer is waiting) is shown to staff, never swallowed', async () => {
-    const user = userEvent.setup();
-    const message = 'An earlier customer is still waiting. The earliest eligible customer must be called first.';
-    callMutate.mockImplementationOnce((_vars, options: { onError: (err: unknown) => void }) =>
-      options.onError(new ApiError(409, 'FCFS_VIOLATION', message)),
+  it('offers no way to pick a counter or a staff member for a person (ADR-064)', () => {
+    render(
+      <TokenActions
+        tokenId="t1"
+        queueId="q1"
+        status="WAITING"
+        position={1}
+        actionEligibility={{ eligible: true, reason: null }}
+      />,
     );
-    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" />);
-
-    await user.click(screen.getByText('Call'));
-    await user.selectOptions(screen.getByRole('combobox'), 'c1');
-
-    expect(screen.getByRole('alert')).toHaveTextContent(message);
-  });
-
-  it('a Call that never reached the server says so', async () => {
-    const user = userEvent.setup();
-    callMutate.mockImplementationOnce((_vars, options: { onError: (err: unknown) => void }) =>
-      options.onError(new TypeError('Failed to fetch')),
-    );
-    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" />);
-
-    await user.click(screen.getByText('Call'));
-    await user.selectOptions(screen.getByRole('combobox'), 'c1');
-
-    expect(screen.getByRole('alert')).toHaveTextContent(/Could not reach the server/);
-  });
-
-  it('the counter picker only offers ACTIVE counters, not OFFLINE ones', async () => {
-    const user = userEvent.setup();
-    render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" />);
-
-    await user.click(screen.getByText('Call'));
-
-    expect(screen.getByRole('option', { name: 'Counter 1' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Counter 2' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByText(/select counter/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/assign/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Call' })).not.toBeInTheDocument();
   });
 
   it('clicking Skip asks for a reason instead of skipping (ADR-042)', async () => {
@@ -443,9 +409,9 @@ describe('TokenActions — Adjust Time (V2 Checkpoint 4)', () => {
 });
 
 describe('TokenActions — strict FCFS locking (V2 Checkpoint 3)', () => {
-  it('a WAITING token at position 1 shows Call, not Locked', () => {
+  it('a WAITING token at position 1 is not Locked', () => {
     render(<TokenActions tokenId="t1" queueId="q1" status="WAITING" position={1} />);
-    expect(screen.getByText('Call')).toBeInTheDocument();
+    expect(screen.getByText('Skip')).toBeInTheDocument();
     expect(screen.queryByText('Locked')).not.toBeInTheDocument();
   });
 
@@ -461,7 +427,7 @@ describe('TokenActions — strict FCFS locking (V2 Checkpoint 3)', () => {
 });
 
 describe('TokenActions — Skip unlocks exactly with Call', () => {
-  it('offers both actions on an eligible waiting row', () => {
+  it('offers Skip on an eligible waiting row', () => {
     render(
       <TokenActions
         tokenId="t1"
@@ -472,7 +438,6 @@ describe('TokenActions — Skip unlocks exactly with Call', () => {
       />,
     );
 
-    expect(screen.getByText('Call')).toBeInTheDocument();
     expect(screen.getByText('Skip')).toBeInTheDocument();
   });
 
@@ -534,6 +499,48 @@ describe('TokenActions — Skip unlocks exactly with Call', () => {
 
   it('still allows skipping a customer already at a counter', () => {
     render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
+    expect(screen.getByText('Skip')).toBeInTheDocument();
+  });
+});
+
+describe('TokenActions — STAFF act only at their own counter (ADR-064)', () => {
+  const ownCounter = { id: 'c1', name: 'Counter 1', status: 'ACTIVE', queueId: 'q1', queueName: 'Q' };
+
+  it('shows no actions for a person being served at another counter', () => {
+    supervises = false;
+    vi.mocked(useMyCounter).mockReturnValue({ data: ownCounter } as unknown as ReturnType<typeof useMyCounter>);
+    render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" counterId="c2" />);
+    expect(screen.getByText('At another counter')).toBeInTheDocument();
+    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
+    expect(screen.queryByText('Skip')).not.toBeInTheDocument();
+    expect(screen.queryByText('Adjust Time')).not.toBeInTheDocument();
+  });
+
+  it('shows the actions for the person at their own counter', () => {
+    supervises = false;
+    vi.mocked(useMyCounter).mockReturnValue({ data: ownCounter } as unknown as ReturnType<typeof useMyCounter>);
+    render(<TokenActions tokenId="t1" queueId="q1" status="IN_PROGRESS" counterId="c1" />);
+    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(screen.getByText('Skip')).toBeInTheDocument();
+  });
+
+  it('an unassigned staff member gets no actions at all', () => {
+    supervises = false;
+    render(
+      <TokenActions
+        tokenId="t1"
+        queueId="q1"
+        status="WAITING"
+        position={1}
+        actionEligibility={{ eligible: true, reason: null }}
+      />,
+    );
+    expect(screen.queryByText('Skip')).not.toBeInTheDocument();
+  });
+
+  it('owner and admin may resolve a person at any counter', () => {
+    render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" counterId="c9" />);
+    expect(screen.queryByText('At another counter')).not.toBeInTheDocument();
     expect(screen.getByText('Skip')).toBeInTheDocument();
   });
 });

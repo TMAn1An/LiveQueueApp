@@ -14,6 +14,16 @@ import {
 
 const router = Router();
 
+// ADR-064: only OWNER and ADMIN decide who stands at which counter.
+const COUNTER_ASSIGNMENT_DENIAL = {
+  code: 'COUNTER_ASSIGNMENT_FORBIDDEN',
+  message: 'Only the organization owner or an admin can manage counter assignments.',
+};
+
+// ADR-064: the signed-in person's own counter — the only one they may claim
+// from. Any role; the answer is always about the caller.
+router.get('/mine', authenticate, requireVerified, counterController.mine);
+
 // Direct counter-id operations verify ownership through the parent queue
 // (counter → queue → organizationId) inside the service layer, not here.
 router.put(
@@ -24,11 +34,14 @@ router.put(
   validate(updateCounterSchema),
   counterController.update,
 );
+// Deleting a counter also ends its assignment, so it is a staffing decision
+// as well (ADR-064) — OWNER and ADMIN only.
 router.delete(
   '/:counterId',
   authenticate,
   requireVerified,
   requirePermission('manage_counters'),
+  requirePermission('manage_staff', COUNTER_ASSIGNMENT_DENIAL),
   validate(counterIdOnlySchema),
   counterController.remove,
 );
@@ -48,7 +61,7 @@ router.get(
   '/:counterId/available-staff',
   authenticate,
   requireVerified,
-  requirePermission('manage_staff'),
+  requirePermission('manage_staff', COUNTER_ASSIGNMENT_DENIAL),
   validate(assignableStaffSchema),
   counterController.assignableStaff,
 );
@@ -56,7 +69,7 @@ router.patch(
   '/:counterId/assign',
   authenticate,
   requireVerified,
-  requirePermission('manage_staff'),
+  requirePermission('manage_staff', COUNTER_ASSIGNMENT_DENIAL),
   validate(assignCounterSchema),
   counterController.assign,
 );

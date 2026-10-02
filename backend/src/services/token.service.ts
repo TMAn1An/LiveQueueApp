@@ -19,7 +19,12 @@ import {
   resolveSkipReason,
   type SkipReasonInput,
 } from '../utils/skipReason';
-import { findCounterScoped } from './counter.service';
+import {
+  assertMayActOnToken,
+  assertStillAssigned,
+  requireClaimCounter,
+  type CounterActor,
+} from './counterAccess.service';
 import { requireOwnedQueue } from '../utils/tenantScope';
 import { registerDevice } from './device.service';
 import {
@@ -1062,12 +1067,18 @@ export async function getTokenStatus(tokenId: string) {
  * Only WAITING -> CALLED. Recall (the former SKIPPED -> CALLED path) has
  * been removed — SKIPPED is now terminal (see tokenStateMachine.ts).
  */
-export async function callToken(organizationId: string, tokenId: string, counterId: string) {
-  const token = await findTokenScoped(organizationId, tokenId);
-  const counter = await findCounterScoped(organizationId, counterId);
+export async function callToken(
+  actor: CounterActor,
+  tokenId: string,
+  requestedCounterId?: string | null,
+) {
+  const token = await findTokenScoped(actor.organizationId, tokenId);
+  // ADR-064: the counter is the caller's own, never one named by the client.
+  const counter = await requireClaimCounter(actor, requestedCounterId);
+  const counterId = counter.id;
 
   if (counter.queueId !== token.queueId) {
-    throw new AppError(409, 'COUNTER_QUEUE_MISMATCH', "Counter does not belong to the token's queue.");
+    throw new AppError(409, 'COUNTER_QUEUE_MISMATCH', 'Your counter serves a different queue.');
   }
 
   if (token.status !== 'WAITING') {
@@ -1087,12 +1098,13 @@ export async function callToken(organizationId: string, tokenId: string, counter
   }
 
   return prisma.$transaction(async (tx) => {
-    const counterRows = await tx.$queryRaw<{ id: string; status: string }[]>`
-      SELECT id, status FROM counters WHERE id = ${counterId} FOR UPDATE
+    const counterRows = await tx.$queryRaw<{ id: string; status: string; staff_id: string | null }[]>`
+      SELECT id, status, staff_id FROM counters WHERE id = ${counterId} FOR UPDATE
     `;
     const lockedCounter = counterRows[0];
+    assertStillAssigned(actor, lockedCounter?.staff_id ?? null);
     if (!lockedCounter || lockedCounter.status !== 'ACTIVE') {
-      throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is not active.');
+      throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Your counter is not active.');
     }
 
     // V2 Checkpoint 3 (ADR-025): strict FCFS — a manually chosen tokenId
@@ -1227,13 +1239,16 @@ export async function getWaitingTokenActionEligibility(
     return { eligible: false, reason: 'EARLIER_WAITING' };
   }
 
-  // "Free" means active and not already serving a CALLED/IN_PROGRESS token —
-  // the same occupancy rule callToken's busy-check applies to one counter.
+  // "Free" means active, staffed, and not already serving a CALLED/IN_PROGRESS
+  // token — the same occupancy rule callToken's busy-check applies to one
+  // counter. ADR-064: an unassigned counter cannot claim anyone, so it is
+  // not capacity.
   const freeCounterRows = await client.$queryRaw<{ exists: boolean }[]>`
     SELECT EXISTS (
       SELECT 1 FROM counters c
       WHERE c.queue_id = ${token.queueId}
         AND c.status = 'ACTIVE'
+        AND c.staff_id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM tokens t
           WHERE t.counter_id = c.id
@@ -1257,6 +1272,7 @@ export async function hasFreeActiveCounter(queueId: string): Promise<boolean> {
       SELECT 1 FROM counters c
       WHERE c.queue_id = ${queueId}
         AND c.status = 'ACTIVE'
+        AND c.staff_id IS NOT NULL
         AND NOT EXISTS (
           SELECT 1 FROM tokens t
           WHERE t.counter_id = c.id
@@ -1320,7 +1336,7 @@ type TimestampField = 'completedAt' | 'skippedAt';
  * token.controller.ts `skip` (approved Phase 4 decision 4).
  */
 async function transitionToken(
-  organizationId: string,
+  actor: CounterActor,
   tokenId: string,
   targetStatus: TokenStatus,
   timestampField: TimestampField,
@@ -1329,8 +1345,9 @@ async function transitionToken(
    * skip reason or completion note exists exactly when its status does. */
   terminalNote: Prisma.TokenUpdateManyMutationInput = {},
 ): Promise<{ token: SafeToken; previousStatus: TokenStatus }> {
-  const token = await findTokenScoped(organizationId, tokenId);
+  const token = await findTokenScoped(actor.organizationId, tokenId);
   assertValidTransition(token.status, targetStatus);
+  await assertMayActOnToken(actor, token);
   const previousStatus = token.status;
 
   // The guard and the compare-and-swap share one transaction so an
@@ -1366,10 +1383,10 @@ async function transitionToken(
  * only allows this from IN_PROGRESS, so a queue that requires the
  * service-start code (ADR-041) can still never be completed without it.
  */
-export const completeToken = (organizationId: string, tokenId: string, feedback?: string) => {
+export const completeToken = (actor: CounterActor, tokenId: string, feedback?: string) => {
   const completionFeedback = resolveCompletionFeedback(feedback);
   return transitionToken(
-    organizationId,
+    actor,
     tokenId,
     'COMPLETED',
     'completedAt',
@@ -1394,10 +1411,10 @@ export const completeToken = (organizationId: string, tokenId: string, feedback?
  * anything else, and stored with the status in one write. SKIPPED is
  * terminal, so nothing can later overwrite the reason.
  */
-export const skipToken = (organizationId: string, tokenId: string, reason: SkipReasonInput = {}) => {
+export const skipToken = (actor: CounterActor, tokenId: string, reason: SkipReasonInput = {}) => {
   const resolved = resolveSkipReason(reason);
   return transitionToken(
-    organizationId,
+    actor,
     tokenId,
     'SKIPPED',
     'skippedAt',
@@ -1444,12 +1461,13 @@ export const skipToken = (organizationId: string, tokenId: string, reason: SkipR
  * setting was turned off is ignored and cleared, never demanded.
  */
 export async function startToken(
-  organizationId: string,
+  actor: CounterActor,
   tokenId: string,
   verificationCode: string | undefined,
 ) {
-  const token = await findTokenScoped(organizationId, tokenId);
+  const token = await findTokenScoped(actor.organizationId, tokenId);
   assertValidTransition(token.status, 'IN_PROGRESS');
+  await assertMayActOnToken(actor, token);
 
   const queue = await prisma.queue.findUniqueOrThrow({
     where: { id: token.queueId },
@@ -1787,21 +1805,28 @@ export async function reissueServiceStartVerificationCode(tokenId: string, devic
  * 11): archival stops new intake but must not strand tokens already in the
  * queue.
  */
-export async function nextToken(organizationId: string, queueId: string, counterId: string) {
-  await requireOwnedQueue(organizationId, queueId);
-  const counter = await findCounterScoped(organizationId, counterId);
+export async function nextToken(
+  actor: CounterActor,
+  queueId: string,
+  requestedCounterId?: string | null,
+) {
+  await requireOwnedQueue(actor.organizationId, queueId);
+  // ADR-064: the counter is the caller's own, never one named by the client.
+  const counter = await requireClaimCounter(actor, requestedCounterId);
+  const counterId = counter.id;
 
   if (counter.queueId !== queueId) {
-    throw new AppError(409, 'COUNTER_QUEUE_MISMATCH', 'Counter does not belong to this queue.');
+    throw new AppError(409, 'COUNTER_QUEUE_MISMATCH', 'Your counter serves a different queue.');
   }
 
   return prisma.$transaction(async (tx) => {
-    const counterRows = await tx.$queryRaw<{ id: string; status: string }[]>`
-      SELECT id, status FROM counters WHERE id = ${counterId} FOR UPDATE
+    const counterRows = await tx.$queryRaw<{ id: string; status: string; staff_id: string | null }[]>`
+      SELECT id, status, staff_id FROM counters WHERE id = ${counterId} FOR UPDATE
     `;
     const lockedCounter = counterRows[0];
+    assertStillAssigned(actor, lockedCounter?.staff_id ?? null);
     if (!lockedCounter || lockedCounter.status !== 'ACTIVE') {
-      throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is not active.');
+      throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Your counter is not active.');
     }
 
     const busy = await tx.token.findFirst({
@@ -1897,11 +1922,12 @@ function serviceStartCodeFields(tokenId: string, requiresCode: boolean) {
  * doesn't go through assertValidTransition/transitionToken.
  */
 export async function setRequiredDuration(
-  organizationId: string,
+  actor: CounterActor,
   tokenId: string,
   requiredDurationMinutes: number,
 ) {
-  const token = await findTokenScoped(organizationId, tokenId);
+  const token = await findTokenScoped(actor.organizationId, tokenId);
+  await assertMayActOnToken(actor, token);
 
   if (token.status !== 'CALLED' && token.status !== 'IN_PROGRESS') {
     throw new AppError(

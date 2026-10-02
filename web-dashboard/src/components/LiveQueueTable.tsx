@@ -120,6 +120,7 @@ export function LiveQueueTable({
                       position={row.position}
                       actionEligibility={row.actionEligibility}
                       requiresVerificationCode={row.queue.requireServiceStartOtp}
+                      counterId={row.counter?.id ?? null}
                     />
                   </td>
                 </tr>

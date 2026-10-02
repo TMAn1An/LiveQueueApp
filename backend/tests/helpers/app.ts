@@ -202,21 +202,72 @@ export interface CounterResponse {
   [key: string]: unknown;
 }
 
+/**
+ * ADR-064: a counter serves only through the person assigned to it, and a
+ * claim (call/next) is always made at the caller's own counter. So that the
+ * many tests which simply "create a counter, then call at it" keep reading
+ * that way, this helper assigns a new counter to its creator when the
+ * creator holds no counter yet — through the real assign endpoint, so it is
+ * subject to the real rules. Pass `assignToCreator: false` for a counter that
+ * starts unassigned; a second counter is never auto-assigned (a person holds
+ * at most one), use `assignCounterTo` / `createCounterOperator` for that.
+ */
 export async function createCounter(
   accessToken: string,
   queueId: string,
-  overrides: Record<string, unknown> = {},
+  overrides: Record<string, unknown> & { assignToCreator?: boolean } = {},
 ): Promise<CounterResponse> {
+  const { assignToCreator = true, ...body } = overrides;
   const res = await api()
     .post(`/api/queues/${queueId}/counters`)
     .set('Authorization', `Bearer ${accessToken}`)
-    .send({ name: overrides.name ?? `Counter ${Math.random().toString(36).slice(2, 8)}`, ...overrides });
+    .send({ name: body.name ?? `Counter ${Math.random().toString(36).slice(2, 8)}`, ...body });
 
   if (res.status !== 201) {
     throw new Error(`createCounter failed: ${res.status} ${JSON.stringify(res.body)}`);
   }
 
+  if (!assignToCreator) {
+    return res.body.data;
+  }
+  const mine = await api().get('/api/counters/mine').set('Authorization', `Bearer ${accessToken}`);
+  const me = await api().get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`);
+  const role = me.body?.data?.staff?.role ?? me.body?.data?.role;
+  const staffId = me.body?.data?.staff?.id ?? me.body?.data?.id;
+  if (mine.status !== 200 || mine.body.data !== null || role === 'STAFF' || !staffId) {
+    return res.body.data;
+  }
+  return assignCounterTo(accessToken, res.body.data.id as string, staffId as string);
+}
+
+/** Assigns (or, with null, unassigns) a counter through the real endpoint. */
+export async function assignCounterTo(
+  accessToken: string,
+  counterId: string,
+  staffId: string | null,
+): Promise<CounterResponse> {
+  const res = await api()
+    .patch(`/api/counters/${counterId}/assign`)
+    .set('Authorization', `Bearer ${accessToken}`)
+    .send({ staffId });
+  if (res.status !== 200) {
+    throw new Error(`assignCounterTo failed: ${res.status} ${JSON.stringify(res.body)}`);
+  }
   return res.body.data;
+}
+
+/**
+ * A STAFF member assigned to the given counter — the person who operates it.
+ * For tests that need more than one counter serving at once.
+ */
+export async function createCounterOperator(
+  ownerAccessToken: string,
+  organizationId: string,
+  counterId: string,
+): Promise<RestrictedStaffContext> {
+  const operator = await createStaffWithRole(organizationId, 'STAFF');
+  await assignCounterTo(ownerAccessToken, counterId, operator.staffId);
+  return operator;
 }
 
 export async function setCounterStatus(accessToken: string, counterId: string, status: string) {

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
   createCounter,
+  createCounterOperator,
   createQueue,
   createService,
   createToken,
@@ -56,6 +57,8 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const service = await createService(ctx.accessToken, queue.id);
     const counterA = await createCounter(ctx.accessToken, queue.id);
     const counterB = await createCounter(ctx.accessToken, queue.id);
+    // ADR-064: each counter serves through its own assigned person.
+    const operatorB = await createCounterOperator(ctx.accessToken, ctx.organizationId, counterB.id);
     await setCounterStatus(ctx.accessToken, counterA.id, 'ACTIVE');
     await setCounterStatus(ctx.accessToken, counterB.id, 'ACTIVE');
     const a001 = await createToken({ queueId: queue.id, serviceId: service.id });
@@ -65,7 +68,7 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const first = await call(ctx.accessToken, a001.id, counterA.id);
     expect(first.status).toBe(200);
 
-    const second = await call(ctx.accessToken, a002.id, counterB.id);
+    const second = await call(operatorB.accessToken, a002.id, counterB.id);
     expect(second.status).toBe(200);
 
     expect((await prisma.token.findUnique({ where: { id: a003.id } }))!.status).toBe('WAITING');
@@ -77,6 +80,8 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const service = await createService(ctx.accessToken, queue.id);
     const counterA = await createCounter(ctx.accessToken, queue.id);
     const counterB = await createCounter(ctx.accessToken, queue.id);
+    // ADR-064: each counter serves through its own assigned person.
+    const operatorB = await createCounterOperator(ctx.accessToken, ctx.organizationId, counterB.id);
     await setCounterStatus(ctx.accessToken, counterA.id, 'ACTIVE');
     await setCounterStatus(ctx.accessToken, counterB.id, 'ACTIVE');
     const a001 = await createToken({ queueId: queue.id, serviceId: service.id });
@@ -85,7 +90,7 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const a004 = await createToken({ queueId: queue.id, serviceId: service.id });
 
     await call(ctx.accessToken, a001.id, counterA.id);
-    await call(ctx.accessToken, a002.id, counterB.id);
+    await call(operatorB.accessToken, a002.id, counterB.id);
 
     const a004TooEarly = await call(ctx.accessToken, a004.id, counterA.id);
     expect(a004TooEarly.status).toBe(409);
@@ -124,13 +129,15 @@ describe('POST /api/tokens/:tokenId/call — strict FCFS', () => {
     const service = await createService(ctx.accessToken, queue.id);
     const counterA = await createCounter(ctx.accessToken, queue.id);
     const counterB = await createCounter(ctx.accessToken, queue.id);
+    // ADR-064: each counter serves through its own assigned person.
+    const operatorB = await createCounterOperator(ctx.accessToken, ctx.organizationId, counterB.id);
     await setCounterStatus(ctx.accessToken, counterA.id, 'ACTIVE');
     await setCounterStatus(ctx.accessToken, counterB.id, 'ACTIVE');
     const a001 = await createToken({ queueId: queue.id, serviceId: service.id });
 
     const [resA, resB] = await Promise.all([
       call(ctx.accessToken, a001.id, counterA.id),
-      call(ctx.accessToken, a001.id, counterB.id),
+      call(operatorB.accessToken, a001.id, counterB.id),
     ]);
 
     const statuses = [resA.status, resB.status].sort();

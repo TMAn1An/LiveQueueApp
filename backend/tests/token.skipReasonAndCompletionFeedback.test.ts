@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
+  assignCounterTo,
   createCounter,
   createQueue,
   createService,
@@ -262,7 +263,13 @@ describe('ADR-042 — skip requires a reason', () => {
       404,
     );
 
+    // ADR-064: STAFF skip only in the queue their own counter serves.
     const staff = await createStaffWithRole(org.organizationId, 'STAFF');
+    const unassigned = await skip(staff.accessToken, token.id, { reasonCode: 'NO_RESPONSE' });
+    expect(unassigned.status).toBe(403);
+    expect(unassigned.body.error.code).toBe('STAFF_NOT_ASSIGNED_TO_COUNTER');
+    await assignCounterTo(org.accessToken, org.counter.id, null);
+    await assignCounterTo(org.accessToken, org.counter.id, staff.staffId);
     expect((await skip(staff.accessToken, token.id, { reasonCode: 'NO_RESPONSE' })).status).toBe(
       200,
     );

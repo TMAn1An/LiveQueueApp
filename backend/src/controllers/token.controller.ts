@@ -32,7 +32,7 @@ export async function getStatus(req: Request, res: Response) {
 
 export async function call(req: Request, res: Response) {
   const token = await tokenService.callToken(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.tokenId as string,
     req.body.counterId,
   );
@@ -42,7 +42,7 @@ export async function call(req: Request, res: Response) {
     action: 'token_called',
     entityType: 'token',
     entityId: token.id,
-    metadata: { counterId: req.body.counterId },
+    metadata: { counterId: token.counterId },
     ipAddress: req.ip,
   });
   await realtime.emitTokenCalled(token.id);
@@ -60,7 +60,7 @@ export async function start(req: Request, res: Response) {
   // (ADR-041, see startToken) — the transition itself is unaudited exactly
   // as before, unchanged.
   const { token } = await tokenService.startToken(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.tokenId as string,
     req.body.verificationCode,
   );
@@ -128,7 +128,7 @@ export async function reissueVerificationCode(req: Request, res: Response) {
 
 export async function complete(req: Request, res: Response) {
   const { token } = await tokenService.completeToken(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.tokenId as string,
     req.body.feedback,
   );
@@ -152,7 +152,7 @@ export async function complete(req: Request, res: Response) {
 
 export async function skip(req: Request, res: Response) {
   const { token, previousStatus } = await tokenService.skipToken(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.tokenId as string,
     req.body,
   );
@@ -179,7 +179,7 @@ export async function skip(req: Request, res: Response) {
 
 export async function next(req: Request, res: Response) {
   const token = await tokenService.nextToken(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.queueId as string,
     req.body.counterId,
   );
@@ -192,7 +192,7 @@ export async function next(req: Request, res: Response) {
     action: 'token_called',
     entityType: 'token',
     entityId: token.id,
-    metadata: { counterId: req.body.counterId, via: 'next' },
+    metadata: { counterId: token.counterId, via: 'next' },
     ipAddress: req.ip,
   });
   await realtime.emitTokenCalled(token.id);
@@ -209,7 +209,7 @@ export async function next(req: Request, res: Response) {
  */
 export async function setRequiredDuration(req: Request, res: Response) {
   const token = await tokenService.setRequiredDuration(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.tokenId as string,
     req.body.requiredDurationMinutes,
   );

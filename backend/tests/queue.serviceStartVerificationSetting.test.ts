@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   api,
+  assignCounterTo,
   createCounter,
   createQueue,
   createService,
@@ -161,10 +162,14 @@ describe('ADR-041 â€” a queue that does not use the code', () => {
     expect(res.body.data.serviceStartOtpCipher).toBeUndefined();
   });
 
-  it('lets STAFF (operate_tokens) start directly â€” permissions unchanged', async () => {
+  it('lets STAFF (operate_tokens) start directly at their own counter — permissions unchanged', async () => {
     const org = await setupOrgQueue({ requireServiceStartOtp: false });
     const staff = await createStaffWithRole(org.organizationId, 'STAFF');
     const token = await calledToken(org);
+    // ADR-064: STAFF act on the person at the counter they are assigned to.
+    expect((await startWithoutCode(staff.accessToken, token.id)).status).toBe(403);
+    await assignCounterTo(org.accessToken, org.counter.id, null);
+    await assignCounterTo(org.accessToken, org.counter.id, staff.staffId);
     const res = await startWithoutCode(staff.accessToken, token.id);
     expect(res.status).toBe(200);
   });

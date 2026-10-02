@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
-import { useCounters } from '../hooks/useCounters';
+import { useMyCounter } from '../hooks/useCounters';
+import { useAuth } from '../context/AuthContext';
 import {
-  useCallToken,
   useCompleteToken,
   useSetRequiredDuration,
   useStartToken,
@@ -40,6 +40,13 @@ import type { WaitingActionEligibility } from '../types/dashboard';
  * active customer's required duration, which the backend then uses to
  * recompute every WAITING token's ETA in the queue.
  *
+ * ADR-064: there is no per-row Call and no counter or staff picker. People
+ * are claimed only through "Serve next" (ServeNextPanel), which takes the
+ * next eligible person for the signed-in person at their own counter. A
+ * person already at a counter is acted on by whoever stands there; STAFF see
+ * no actions for someone at another counter, while OWNER and ADMIN may
+ * resolve any of them. The backend enforces all of this regardless.
+ *
  * ADR-041: `requiresVerificationCode` is the queue's service-start setting.
  * When false, Start starts service in one click and no code input exists.
  * Defaults to true, so a caller that does not pass it can never quietly
@@ -52,9 +59,12 @@ export function TokenActions({
   position,
   actionEligibility,
   requiresVerificationCode = true,
+  counterId = null,
 }: {
   tokenId: string;
   queueId: string;
+  /** The counter this person is at, once claimed. */
+  counterId?: string | null;
   status: TokenStatus;
   position?: number | null;
   actionEligibility?: WaitingActionEligibility | null;
@@ -77,7 +87,6 @@ export function TokenActions({
       : eligibility.reason === 'NO_AVAILABLE_COUNTER'
         ? 'Waiting for an available counter.'
         : 'Earlier customers must be handled first.';
-  const [pickingCounter, setPickingCounter] = useState(false);
   const [adjustingDuration, setAdjustingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('');
   const [durationError, setDurationError] = useState<string | null>(null);
@@ -86,15 +95,19 @@ export function TokenActions({
   const [startingService, setStartingService] = useState(false);
   const [verificationCodeInput, setVerificationCodeInput] = useState('');
   const [startError, setStartError] = useState<string | null>(null);
-  const { data: counters } = useCounters(pickingCounter ? queueId : undefined);
-  const callToken = useCallToken();
+  const { hasPermission } = useAuth();
+  const { data: myCounter } = useMyCounter();
+  // OWNER and ADMIN supervise every counter; STAFF act only at their own.
+  const supervises = hasPermission('manage_staff');
+  const mayActHere = counterId
+    ? supervises || myCounter?.id === counterId
+    : supervises || myCounter?.queueId === queueId;
   const startToken = useStartToken();
   const completeToken = useCompleteToken();
   const setRequiredDuration = useSetRequiredDuration();
   const [skipping, setSkipping] = useState(false);
   const [completingWithFeedback, setCompletingWithFeedback] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
-  const [callError, setCallError] = useState<string | null>(null);
 
   function handleComplete() {
     setCompleteError(null);
@@ -152,161 +165,129 @@ export function TokenActions({
     );
   }
 
-  const activeCounters = (counters ?? []).filter((c) => c.status === 'ACTIVE');
-
   return (
     <PermissionGate permission="operate_tokens">
       <div className="flex flex-wrap items-center gap-1">
-        {status === 'WAITING' && !pickingCounter && isFcfsEligible && (
-          <Button variant="primary" size="lg" onClick={() => setPickingCounter(true)}>
-            Call
-          </Button>
-        )}
         {status === 'WAITING' && !isFcfsEligible && (
           <Button variant="secondary" disabled title={lockedTitle}>
             {eligibility.reason === 'SESSION_NOT_STARTED' ? 'Scheduled' : 'Locked'}
           </Button>
         )}
-        {status === 'WAITING' && pickingCounter && (
-          <select
-            autoFocus
-            className="h-9 rounded-md border border-border-strong px-3 text-sm"
-            defaultValue=""
-            onBlur={() => setPickingCounter(false)}
-            onChange={(e) => {
-              if (e.target.value) {
-                setCallError(null);
-                // The backend's refusal (earlier customer waiting, counter
-                // busy or inactive, session not started) is written for
-                // staff — shown as-is rather than failing silently.
-                callToken.mutate(
-                  { tokenId, counterId: e.target.value },
-                  { onError: (err) => setCallError(actionErrorMessage(err)) },
-                );
-              }
-              setPickingCounter(false);
-            }}
-            disabled={callToken.isPending}
-          >
-            <option value="" disabled>
-              Select counter…
-            </option>
-            {activeCounters.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+        {!mayActHere && status !== 'WAITING' && (
+          <span className="text-xs font-medium text-muted">At another counter</span>
         )}
-        {status === 'CALLED' && !requiresVerificationCode && (
-          <Button variant="primary" size="lg" loading={startToken.isPending} onClick={handleDirectStart}>
-            {startToken.isPending ? 'Starting…' : 'Start'}
-          </Button>
-        )}
-        {status === 'CALLED' && requiresVerificationCode && !startingService && (
-          <Button
-            variant="primary"
-            size="lg"
-            onClick={() => {
-              setStartError(null);
-              setStartingService(true);
-            }}
-          >
-            Start
-          </Button>
-        )}
-        {status === 'CALLED' && requiresVerificationCode && startingService && (
-          <form onSubmit={handleStartSubmit} className="flex items-center gap-1">
-            <input
-              autoFocus
-              type="text"
-              inputMode="numeric"
-              placeholder="Verification code"
-              value={verificationCodeInput}
-              onChange={(e) => setVerificationCodeInput(e.target.value)}
-              className="w-36 h-9 rounded-md border border-border-strong px-3 text-sm"
-            />
-            <Button type="submit" variant="primary" size="lg" loading={startToken.isPending}>
-              {startToken.isPending ? 'Starting…' : 'Confirm'}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setStartingService(false);
-                setStartError(null);
-                setVerificationCodeInput('');
-              }}
-            >
-              Cancel
-            </Button>
-          </form>
-        )}
-        {/* ADR-042: Complete stays one click. Feedback is the separate,
-            optional path — never a step added in front of Complete. */}
-        {status === 'IN_PROGRESS' && (
-          <Button variant="primary" size="lg" loading={completeToken.isPending} onClick={handleComplete}>
-            {completeToken.isPending ? 'Completing…' : 'Complete'}
-          </Button>
-        )}
-        {status === 'IN_PROGRESS' && (
-          <Button variant="secondary" size="lg" onClick={() => setCompletingWithFeedback(true)}>
-            Feedback
-          </Button>
-        )}
-        {(status === 'CALLED' || status === 'IN_PROGRESS') && !adjustingDuration && (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setDurationError(null);
-              setAdjustingDuration(true);
-            }}
-          >
-            Adjust Time
-          </Button>
-        )}
-        {(status === 'CALLED' || status === 'IN_PROGRESS') && adjustingDuration && (
-          <form onSubmit={handleDurationSubmit} className="flex items-center gap-1">
-            <input
-              autoFocus
-              type="number"
-              min={1}
-              step={1}
-              placeholder="Minutes"
-              value={durationInput}
-              onChange={(e) => setDurationInput(e.target.value)}
-              className="w-20 h-9 rounded-md border border-border-strong px-3 text-sm"
-            />
-            <Button type="submit" variant="primary" loading={setRequiredDuration.isPending}>
-              {setRequiredDuration.isPending ? 'Updating…' : 'Set'}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => {
-                setAdjustingDuration(false);
-                setDurationError(null);
-              }}
-            >
-              Cancel
-            </Button>
-          </form>
-        )}
-        {/* A waiting customer may only be skipped while they could also be
-            called; once at a counter, Skip is always available. The single
-            "Locked" chip above already explains a locked waiting row, so no
-            second disabled button is rendered beside it. */}
-        {/* ADR-042: Skip asks why before anything happens — the reason is
-            what the customer will read. */}
-        {((status === 'WAITING' && isFcfsEligible) ||
-          status === 'CALLED' ||
-          status === 'IN_PROGRESS') && (
-          <Button variant="outline" size="lg" onClick={() => setSkipping(true)}>
-            Skip
-          </Button>
+        {mayActHere && (
+          <>
+            {status === 'CALLED' && !requiresVerificationCode && (
+              <Button variant="primary" size="lg" loading={startToken.isPending} onClick={handleDirectStart}>
+                {startToken.isPending ? 'Starting…' : 'Start'}
+              </Button>
+            )}
+            {status === 'CALLED' && requiresVerificationCode && !startingService && (
+              <Button
+                variant="primary"
+                size="lg"
+                onClick={() => {
+                  setStartError(null);
+                  setStartingService(true);
+                }}
+              >
+                Start
+              </Button>
+            )}
+            {status === 'CALLED' && requiresVerificationCode && startingService && (
+              <form onSubmit={handleStartSubmit} className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Verification code"
+                  value={verificationCodeInput}
+                  onChange={(e) => setVerificationCodeInput(e.target.value)}
+                  className="w-36 h-9 rounded-md border border-border-strong px-3 text-sm"
+                />
+                <Button type="submit" variant="primary" size="lg" loading={startToken.isPending}>
+                  {startToken.isPending ? 'Starting…' : 'Confirm'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setStartingService(false);
+                    setStartError(null);
+                    setVerificationCodeInput('');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </form>
+            )}
+            {/* ADR-042: Complete stays one click. Feedback is the separate,
+                optional path — never a step added in front of Complete. */}
+            {status === 'IN_PROGRESS' && (
+              <Button variant="primary" size="lg" loading={completeToken.isPending} onClick={handleComplete}>
+                {completeToken.isPending ? 'Completing…' : 'Complete'}
+              </Button>
+            )}
+            {status === 'IN_PROGRESS' && (
+              <Button variant="secondary" size="lg" onClick={() => setCompletingWithFeedback(true)}>
+                Feedback
+              </Button>
+            )}
+            {(status === 'CALLED' || status === 'IN_PROGRESS') && !adjustingDuration && (
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setDurationError(null);
+                  setAdjustingDuration(true);
+                }}
+              >
+                Adjust Time
+              </Button>
+            )}
+            {(status === 'CALLED' || status === 'IN_PROGRESS') && adjustingDuration && (
+              <form onSubmit={handleDurationSubmit} className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  type="number"
+                  min={1}
+                  step={1}
+                  placeholder="Minutes"
+                  value={durationInput}
+                  onChange={(e) => setDurationInput(e.target.value)}
+                  className="w-20 h-9 rounded-md border border-border-strong px-3 text-sm"
+                />
+                <Button type="submit" variant="primary" loading={setRequiredDuration.isPending}>
+                  {setRequiredDuration.isPending ? 'Updating…' : 'Set'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setAdjustingDuration(false);
+                    setDurationError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </form>
+            )}
+            {/* A waiting customer may only be skipped while they could also be
+                called; once at a counter, Skip is always available. The single
+                "Locked" chip above already explains a locked waiting row, so no
+                second disabled button is rendered beside it. */}
+            {/* ADR-042: Skip asks why before anything happens — the reason is
+                what the customer will read. */}
+            {((status === 'WAITING' && isFcfsEligible) ||
+              status === 'CALLED' ||
+              status === 'IN_PROGRESS') && (
+              <Button variant="outline" size="lg" onClick={() => setSkipping(true)}>
+                Skip
+              </Button>
+            )}
+          </>
         )}
       </div>
-      {callError && <ErrorBanner message={callError} />}
       {skipping && <SkipTokenDialog tokenId={tokenId} onClose={() => setSkipping(false)} />}
       {completingWithFeedback && (
         <CompleteWithFeedbackDialog tokenId={tokenId} onClose={() => setCompletingWithFeedback(false)} />

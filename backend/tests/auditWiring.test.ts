@@ -187,7 +187,7 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
   it('counter create/update/status changes each create exactly one counter_changed audit event', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    const counter = await createCounter(ctx.accessToken, queue.id);
+    const counter = await createCounter(ctx.accessToken, queue.id, { assignToCreator: false });
 
     await api()
       .put(`/api/counters/${counter.id}`)

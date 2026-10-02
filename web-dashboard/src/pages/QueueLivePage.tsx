@@ -8,6 +8,7 @@ import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
 import { LiveQueueTable } from '../components/LiveQueueTable';
+import { ServeNextPanel } from '../components/ServeNextPanel';
 
 /**
  * Operational Live Queue View (ADR-036).
@@ -93,6 +94,9 @@ export function QueueLivePage() {
           </div>
         </div>
       )}
+
+      {/* ADR-064: the only way to take someone from the line. */}
+      <ServeNextPanel queueId={queue.id} />
 
       {/* Waiting Line & Active Tokens Table */}
       <Card>

@@ -10,8 +10,20 @@ export function useCounters(queueId: string | undefined) {
   });
 }
 
+/**
+ * ADR-064: the signed-in person's own counter — the one they claim people
+ * at. Null when an owner or admin has not assigned them one.
+ */
+export function useMyCounter() {
+  return useQuery({
+    queryKey: ['counters', 'mine'],
+    queryFn: async () => (await counterApi.getMyCounter()).data,
+  });
+}
+
 function invalidateCounters(queryClient: ReturnType<typeof useQueryClient>, queueId: string) {
   void queryClient.invalidateQueries({ queryKey: ['counters', queueId] });
+  void queryClient.invalidateQueries({ queryKey: ['counters', 'mine'] });
   void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
 }
 

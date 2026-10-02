@@ -3,6 +3,7 @@ import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { AppError } from '../utils/AppError';
 import { assertQueueMutable, requireOwnedQueue } from '../utils/tenantScope';
+import { assertMayOperateCounter, findAssignedCounter, type CounterActor } from './counterAccess.service';
 import type { createCounterSchema, updateCounterSchema } from '../validators/counter.validators';
 
 type CreateCounterInput = z.infer<typeof createCounterSchema.body>;
@@ -45,22 +46,25 @@ export async function createCounter(
 }
 
 export async function updateCounter(
-  organizationId: string,
+  actor: CounterActor,
   counterId: string,
   input: UpdateCounterInput,
 ) {
-  const counter = await findCounterScoped(organizationId, counterId);
+  const counter = await findCounterScoped(actor.organizationId, counterId);
   assertQueueMutable(counter.queue);
+  assertMayOperateCounter(actor, counter);
   return prisma.counter.update({ where: { id: counterId }, data: input });
 }
 
 export async function setCounterStatus(
-  organizationId: string,
+  actor: CounterActor,
   counterId: string,
   status: CounterStatus,
 ) {
-  const counter = await findCounterScoped(organizationId, counterId);
+  const counter = await findCounterScoped(actor.organizationId, counterId);
   assertQueueMutable(counter.queue);
+  // ADR-064: STAFF open, pause or close only the counter they stand at.
+  assertMayOperateCounter(actor, counter);
   return prisma.counter.update({ where: { id: counterId }, data: { status } });
 }
 
@@ -71,6 +75,21 @@ export async function deleteCounter(organizationId: string, counterId: string) {
   assertQueueMutable(counter.queue);
   await prisma.counter.delete({ where: { id: counterId } });
   return { queueId: counter.queueId };
+}
+
+/** ADR-064: the caller's own counter with its queue's name, or null. */
+export async function getMyCounter(actor: CounterActor) {
+  const counter = await findAssignedCounter(actor);
+  if (!counter) {
+    return null;
+  }
+  return {
+    id: counter.id,
+    name: counter.name,
+    status: counter.status,
+    queueId: counter.queueId,
+    queueName: counter.queue.name,
+  };
 }
 
 /**

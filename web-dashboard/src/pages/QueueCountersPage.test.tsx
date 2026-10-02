@@ -20,7 +20,10 @@ import { ApiError } from '../api/client';
  * ordinary STAFF do not hold — so the tests need to be able to play both. */
 let grantedPermissions: string[] = [];
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: (p: string) => grantedPermissions.includes(p) }),
+  useAuth: () => ({
+    hasPermission: (p: string) => grantedPermissions.includes(p),
+    staff: { id: 'me' },
+  }),
 }));
 vi.mock('../hooks/useQueues');
 vi.mock('../hooks/useCounters');
@@ -193,12 +196,77 @@ describe('QueueCountersPage — who may assign staff', () => {
 
   it('hides it from an ordinary staff member, and keeps their other controls', () => {
     grantedPermissions = ['manage_counters', 'operate_tokens'];
+    vi.mocked(useCounters).mockReturnValue({
+      data: [{ id: 'c1', queueId: 'q1', name: 'Counter 1', status: 'ACTIVE', staffId: 'me' }],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useCounters>);
 
     renderPage();
 
     expect(screen.queryByLabelText('Assigned staff')).not.toBeInTheDocument();
     // Still able to run their own counter.
     expect(screen.getByLabelText('Counter status')).toBeInTheDocument();
+  });
+
+  // ADR-064: STAFF see which counter is theirs, operate only that one, and
+  // have no way to change who stands where.
+  it('marks a staff member’s own counter and gives them controls for it alone', () => {
+    grantedPermissions = ['manage_counters', 'operate_tokens'];
+    vi.mocked(useCounters).mockReturnValue({
+      data: [
+        { id: 'c1', queueId: 'q1', name: 'Counter 1', status: 'ACTIVE', staffId: 'me' },
+        { id: 'c2', queueId: 'q1', name: 'Counter 2', status: 'ACTIVE', staffId: 'staff-1' },
+        { id: 'c3', queueId: 'q1', name: 'Counter 3', status: 'OFFLINE', staffId: null },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useCounters>);
+
+    renderPage();
+
+    const rows = screen.getAllByRole('row').slice(1);
+    expect(within(rows[0]!).getByText('Your counter')).toBeInTheDocument();
+    expect(within(rows[0]!).getByLabelText('Counter status')).toBeInTheDocument();
+    expect(within(rows[1]!).queryByLabelText('Counter status')).not.toBeInTheDocument();
+    expect(within(rows[2]!).queryByLabelText('Counter status')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('Counter status')).toHaveLength(1);
+    expect(screen.queryByLabelText('Assigned staff')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
+  it('owner/admin get status, assignment and delete controls on every counter', () => {
+    vi.mocked(useCounters).mockReturnValue({
+      data: [
+        { id: 'c1', queueId: 'q1', name: 'Counter 1', status: 'ACTIVE', staffId: 'staff-1' },
+        { id: 'c2', queueId: 'q1', name: 'Counter 2', status: 'ACTIVE', staffId: null },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useCounters>);
+
+    renderPage();
+
+    expect(screen.getAllByLabelText('Assigned staff')).toHaveLength(2);
+    expect(screen.getAllByLabelText('Counter status')).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Delete' })).toHaveLength(2);
+  });
+
+  it('owner/admin change and clear an assignment through the same control', async () => {
+    vi.mocked(useCounters).mockReturnValue({
+      data: [{ id: 'c1', queueId: 'q1', name: 'Counter 1', status: 'ACTIVE', staffId: 'staff-1' }],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useCounters>);
+    vi.mocked(useAssignableStaff).mockReturnValue({
+      data: [
+        { id: 'staff-1', name: 'Jane' },
+        { id: 'staff-2', name: 'Rahim' },
+      ],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useAssignableStaff>);
+
+    renderPage();
+    await userEvent.selectOptions(screen.getByLabelText('Assigned staff'), 'staff-2');
+    expect(assignMutate).toHaveBeenLastCalledWith({ counterId: 'c1', staffId: 'staff-2' }, expect.anything());
+    await userEvent.selectOptions(screen.getByLabelText('Assigned staff'), '');
+    expect(assignMutate).toHaveBeenLastCalledWith({ counterId: 'c1', staffId: null }, expect.anything());
   });
 
   it('does not even ask who is available when it cannot assign', () => {

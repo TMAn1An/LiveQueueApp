@@ -2,8 +2,10 @@ import { apiFetch } from './client';
 import type { StaffToken } from '../types/token';
 import type { SkipReasonCode } from '../types/terminalNotes';
 
-export function callToken(tokenId: string, counterId: string) {
-  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/call`, { method: 'POST', body: { counterId } });
+/** ADR-064: the backend claims at the caller's own counter — no counter or
+ * staff member is ever named by the dashboard. */
+export function callToken(tokenId: string) {
+  return apiFetch<StaffToken>(`/api/tokens/${tokenId}/call`, { method: 'POST', body: {} });
 }
 
 // V2 Checkpoint 7 (ADR-029): CALLED -> IN_PROGRESS takes the customer-told
@@ -32,8 +34,10 @@ export function skipToken(tokenId: string, reasonCode: SkipReasonCode, reasonTex
   });
 }
 
-export function nextToken(queueId: string, counterId: string) {
-  return apiFetch<StaffToken>(`/api/queues/${queueId}/next`, { method: 'POST', body: { counterId } });
+/** ADR-064: "Serve next" — the next eligible person, for the caller, at the
+ * caller's own counter. */
+export function nextToken(queueId: string) {
+  return apiFetch<StaffToken>(`/api/queues/${queueId}/next`, { method: 'POST', body: {} });
 }
 
 // V2 Checkpoint 4 (ADR-026): staff override of an active customer's

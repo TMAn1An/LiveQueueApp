@@ -118,18 +118,23 @@ export const completeTokenSchema = {
     .default({}),
 };
 
+// ADR-064: the counter is derived from the signed-in staff member's own
+// assignment. A counterId may still be sent (older dashboards did) but is
+// only checked against that assignment — it never chooses the counter.
+const claimBody = z
+  .object({
+    counterId: z.string().uuid('counterId must be a valid id.').optional(),
+  })
+  .default({});
+
 export const callTokenSchema = {
   params: tokenIdParams,
-  body: z.object({
-    counterId: z.string().uuid('counterId must be a valid id.'),
-  }),
+  body: claimBody,
 };
 
 export const nextTokenSchema = {
   params: queueIdParams,
-  body: z.object({
-    counterId: z.string().uuid('counterId must be a valid id.'),
-  }),
+  body: claimBody,
 };
 
 // V2 Checkpoint 4: staff override of an active customer's required

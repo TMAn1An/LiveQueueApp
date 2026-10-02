@@ -1700,3 +1700,31 @@ Blocking only `status` would not have been enough: an admin could demote a fello
 **Queue Details, after a join.** `QueueDetailsScreen(queueId)` is read-only and loads the public queue configuration fresh by id — it cannot rely on the join flow's state, because a token may be reopened from Home or after a restart long after that state is gone, and a queue's status and hours change. It shows the same summary plus a status word and the services offered. A failed load says the token is unaffected and offers a retry.
 
 **Unchanged.** Service selection rules (a single service is offered, not pre-selected; one-per-visit queues swap; an empty queue says so), the form, email verification, idempotent token creation, and every backend check. Back from the service screen returns to wherever scanning started, as the scanner is replaced rather than stacked.
+
+## ADR-064: Counter assignment is a staffing decision; serving is a self-claim at your own counter (2026-10-02)
+
+**Status:** Implemented on `feature/terminology-form-counter-governance`. Backend and dashboard; no schema change.
+
+**What existed.** `Counter.staffId` (unique, so one counter per person) already recorded who stands at a counter, and ADR-036 had already put `PATCH /api/counters/:id/assign` behind `manage_staff` (OWNER/ADMIN). But nothing used that assignment when serving:
+
+- `POST /api/tokens/:id/call` and `POST /api/queues/:id/next` took a `counterId` from the request and accepted **any** counter in the organization, from any role with `operate_tokens` — including STAFF and including counters assigned to someone else or to nobody.
+- The dashboard's per-row **Call** opened a "Select counter…" dropdown of every active counter. Choosing a counter chose whose desk the person was sent to: a person-to-staff dispatch, available to every staff member.
+- STAFF (who hold `manage_counters`) could change the status of, rename, or **delete** any counter; deleting one silently ended a colleague's assignment.
+- Start, complete, skip and "adjust time" worked on a person at any counter.
+
+**Decision.**
+
+1. *One source of truth.* "Which counter may this person operate?" is answered only by `Counter.staffId` (`services/counterAccess.service.ts`). No new table or concept.
+2. *Assignment.* Only OWNER and ADMIN assign, change or clear it, and only they may delete a counter (which also clears it). A refusal is `403 COUNTER_ASSIGNMENT_FORBIDDEN`. A person holds one counter, so "change counter" stays release-then-assign (`409 STAFF_ALREADY_ASSIGNED` otherwise, unchanged).
+3. *Claiming is self-claim, for every role.* Call and Serve next derive the counter from the authenticated actor. A `counterId` in the request is optional, kept only for older clients, and must equal the caller's own counter (`403 COUNTER_ACCESS_DENIED`); any other field (e.g. `staffId`) is not part of the contract and is stripped. No counter → `403 STAFF_NOT_ASSIGNED_TO_COUNTER`; a counter in another queue → `409 COUNTER_QUEUE_MISMATCH` (existing). OWNER and ADMIN are bound by this too: an owner may assign themselves to a counter and serve from it, but cannot claim at someone else's — that would be choosing which staff member serves a person.
+4. *Strict FCFS is unchanged and still decides who.* Serve next takes the earliest eligible WAITING token (`ORDER BY sequence_number … FOR UPDATE SKIP LOCKED`); Call on a specific token is accepted only when it is that person (`409 FCFS_VIOLATION`, existing — the requested `PERSON_NOT_NEXT_ELIGIBLE` is this code). An empty line is `404 NO_ELIGIBLE_TOKENS` (existing — the requested `NEXT_PERSON_NOT_AVAILABLE`). Session and service eligibility rules are untouched.
+5. *Atomicity.* The claim runs in one transaction that locks the caller's counter row `FOR UPDATE`, re-checks that `staff_id` is still the caller (so a concurrent reassignment cannot leave a claim bound to someone who has left the desk), checks it is ACTIVE and not already serving, then writes the token with a compare-and-swap on its status. Two claims for the same person: one wins, the other gets `TOKEN_STATE_CHANGED` (Call) or the next person / `NO_ELIGIBLE_TOKENS` (Serve next). A double click on one counter: the counter lock serialises them and the second sees the counter busy. No read-check-write window is introduced.
+6. *After the claim.* STAFF may start, complete, skip or adjust time only for a person at their own counter, and may skip the person at the front of the line only in the queue their counter serves. OWNER and ADMIN may resolve a person at any counter — supervision of a claim already made, so a person is never stranded when whoever called them is unassigned; it is not a dispatch, and no path sends a waiting person to a chosen staff member.
+7. *Counter status and name.* STAFF open, pause, close or rename only their own counter (`403 COUNTER_ACCESS_DENIED`). Creating a counter is unchanged.
+8. *Capacity.* An ACTIVE counter with nobody assigned can no longer claim anyone, so the "is any counter free?" half of the Call/Skip eligibility rule now also requires `staff_id IS NOT NULL`. The ETA simulation is unchanged.
+
+**Dashboard.** The per-row Call and its counter dropdown are removed. The Live Queue page has a **Your counter** panel: the signed-in person's counter, its status, and one **Serve next** button that sends only the queue id. Unassigned people are told who assigns counters; a counter in another queue links there. Rows for a person at another counter show "At another counter" to STAFF instead of actions. The Counters page marks "Your counter", gives STAFF controls on that row only, and shows assignment and Delete only to OWNER/ADMIN. `GET /api/counters/mine` returns the caller's own counter (any role).
+
+**Mobile.** Not affected: the app is for people in the queue and has no staff controls.
+
+**Consequences.** A queue needs at least one counter *with someone assigned* to serve; an owner who serves alone assigns themselves. Older dashboards that still send `counterId` keep working when it is their own counter.
