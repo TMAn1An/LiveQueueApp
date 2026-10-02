@@ -3,9 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/models/live_queue_token.dart';
 import 'package:mobile_app/providers/notification_center_provider.dart';
 import 'package:mobile_app/services/notification_center_storage_service.dart';
+import 'package:mobile_app/theme/app_colors.dart';
+import 'package:mobile_app/theme/app_theme.dart';
 import 'package:mobile_app/widgets/notification_bell.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../support/contrast.dart';
 
 LiveQueueToken _token() => LiveQueueToken.fromJson({
       'id': 'token-1',
@@ -24,10 +28,13 @@ LiveQueueToken _token() => LiveQueueToken.fromJson({
       'skippedAt': null,
     });
 
-Widget _bellUnder(NotificationCenterProvider provider) {
+Widget _bellUnder(NotificationCenterProvider provider, {ThemeData? theme}) {
   return ChangeNotifierProvider<NotificationCenterProvider>.value(
     value: provider,
-    child: const MaterialApp(home: Scaffold(appBar: null, body: NotificationBell())),
+    child: MaterialApp(
+      theme: theme,
+      home: const Scaffold(appBar: null, body: NotificationBell()),
+    ),
   );
 }
 
@@ -84,4 +91,28 @@ void main() {
 
     expect(find.text('9+'), findsOneWidget);
   });
+
+  final themes = <String, ThemeData>{
+    'light': AppTheme.light,
+    'dark': brandDarkTheme(AppColors.brandBlue),
+  };
+  for (final MapEntry(key: name, value: theme) in themes.entries) {
+    testWidgets('badge count is readable on its badge in the $name theme', (tester) async {
+      final provider = NotificationCenterProvider(storage: NotificationCenterStorageService());
+      await provider.load();
+      provider.recordJoin(_token(), queueName: 'Pharmacy');
+
+      await tester.pumpWidget(_bellUnder(provider, theme: theme));
+
+      final textColor = tester.widget<Text>(find.text('1')).style!.color!;
+      final badge = tester.widget<Container>(
+        find.ancestor(of: find.text('1'), matching: find.byType(Container)).first,
+      );
+      final badgeColor = (badge.decoration! as BoxDecoration).color!;
+
+      expect(textColor, theme.colorScheme.onError);
+      expect(badgeColor, theme.colorScheme.error);
+      expect(contrastRatio(textColor, badgeColor), greaterThanOrEqualTo(wcagAaNormalText));
+    });
+  }
 }

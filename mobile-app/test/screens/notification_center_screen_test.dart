@@ -32,8 +32,12 @@ import 'package:mobile_app/services/notification_service.dart';
 import 'package:mobile_app/services/preferences_storage_service.dart';
 import 'package:mobile_app/services/socket_service.dart';
 import 'package:mobile_app/services/token_api_service.dart';
+import 'package:mobile_app/theme/app_colors.dart';
+import 'package:mobile_app/theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../support/contrast.dart';
 
 LiveQueueToken _token({required String id, required String serial, String status = 'WAITING'}) =>
     LiveQueueToken.fromJson({
@@ -85,6 +89,7 @@ Widget _appUnder({
   required NotificationCenterProvider notificationCenter,
   required ActiveTokenProvider activeToken,
   required ApiClient apiClient,
+  ThemeData? theme,
 }) {
   return MultiProvider(
     providers: [
@@ -98,7 +103,7 @@ Widget _appUnder({
         ),
       ),
     ],
-    child: const MaterialApp(home: NotificationCenterScreen()),
+    child: MaterialApp(theme: theme, home: const NotificationCenterScreen()),
   );
 }
 
@@ -256,6 +261,66 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
   });
+
+  // "Mark all read" was once hard-coded white and vanished on the light app
+  // bar. Its color must come from the theme and read on the bar in any theme.
+  final themes = <String, ThemeData>{
+    'light': AppTheme.light,
+    'dark': brandDarkTheme(AppColors.brandBlue),
+  };
+  for (final MapEntry(key: name, value: theme) in themes.entries) {
+    group('Mark all read in the $name theme', () {
+      Future<NotificationCenterProvider> pumpWithUnread(WidgetTester tester) async {
+        final apiClient = ApiClient(baseUrl: 'http://localhost:4000');
+        final notificationCenter =
+            NotificationCenterProvider(storage: NotificationCenterStorageService());
+        await notificationCenter.load();
+        notificationCenter.recordJoin(_token(id: 'token-a', serial: 'A002'), queueName: 'Pharmacy');
+        final activeToken = ActiveTokenProvider(
+          tokenRepository:
+              TokenRepository(apiService: TokenApiService(apiClient), socketService: SocketService()),
+          storage: ActiveTokenStorageService(),
+        );
+        await tester.pumpWidget(_appUnder(
+          notificationCenter: notificationCenter,
+          activeToken: activeToken,
+          apiClient: apiClient,
+          theme: theme,
+        ));
+        return notificationCenter;
+      }
+
+      testWidgets('uses the theme color and is readable on the app bar', (tester) async {
+        await pumpWithUnread(tester);
+
+        final label = tester.widget<RichText>(find.descendant(
+          of: find.widgetWithText(TextButton, 'Mark all read'),
+          matching: find.byType(RichText),
+        ));
+        final textColor = label.text.style!.color!;
+        final appBarColor = tester
+            .widget<Material>(
+              find.descendant(of: find.byType(AppBar), matching: find.byType(Material)).first,
+            )
+            .color!;
+
+        expect(textColor, theme.colorScheme.primary);
+        expect(textColor, isNot(Colors.white));
+        expect(contrastRatio(textColor, appBarColor), greaterThanOrEqualTo(wcagAaNormalText));
+      });
+
+      testWidgets('tapping it still marks everything read', (tester) async {
+        final notificationCenter = await pumpWithUnread(tester);
+        expect(notificationCenter.unreadCount, 1);
+
+        await tester.tap(find.text('Mark all read'));
+        await tester.pump();
+
+        expect(notificationCenter.unreadCount, 0);
+        expect(find.text('Mark all read'), findsNothing);
+      });
+    });
+  }
 }
 
 Map<String, dynamic> _tokenJsonFor(String id, String serial) => {

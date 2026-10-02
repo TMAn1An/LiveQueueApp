@@ -21,9 +21,11 @@ class NotificationCenterScreen extends StatelessWidget {
         title: const Text('Notifications'),
         actions: [
           if (provider.unreadCount > 0)
+            // No color override: the theme's TextButton color (primary) is
+            // designed to read on the app bar's surface in light and dark.
             TextButton(
               onPressed: () => context.read<NotificationCenterProvider>().markAllRead(),
-              child: const Text('Mark all read', style: TextStyle(color: Colors.white)),
+              child: const Text('Mark all read'),
             ),
         ],
       ),

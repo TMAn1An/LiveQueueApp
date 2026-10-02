@@ -41,7 +41,11 @@ class NotificationBell extends StatelessWidget {
                 child: Text(
                   unread > 9 ? '9+' : '$unread',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white, fontSize: 10, height: 1.2),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onError,
+                    fontSize: 10,
+                    height: 1.2,
+                  ),
                 ),
               ),
             ),
