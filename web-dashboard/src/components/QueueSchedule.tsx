@@ -336,7 +336,7 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
         onChange={(next) => void toggleEnabled(next)}
         disabled={!canEdit || updateQueue.isPending}
         label="Restrict this queue to a weekly schedule"
-        description="Off: customers may join at any time, exactly as today."
+        help="Off: customers may join at any time, exactly as today."
       />
 
       {queue.scheduleEnabled && (
@@ -354,7 +354,7 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
                 value={dailyCapacity}
                 onChange={(e) => setDailyCapacity(e.target.value)}
                 disabled={!canEdit}
-                className="w-32 rounded-md border border-border-strong px-2 py-1.5 text-sm"
+                className="h-9 w-32 rounded-md border border-border-strong px-3 text-sm"
               />
             </div>
             {canEdit && dailyCapacityDirty && (
@@ -374,7 +374,7 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
             onChange={(next) => void toggleVisible(next)}
             disabled={!canEdit || updateQueue.isPending}
             label="Show today's hours to customers"
-            description="Off: the app still explains why a join failed, just not the full schedule."
+            help="Off: the app still explains why a join failed, just not the full schedule."
           />
 
           <div>

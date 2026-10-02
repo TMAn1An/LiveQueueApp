@@ -32,6 +32,9 @@
   --color-brand-700: #0a4179;
   --color-brand-800: #0b3560;
   --color-brand-900: #0c2b4b;
+  /* Used by several dark-mode tints (dark:bg-brand-950/60); without it
+     those classes silently fell back to the light brand-50 fill. */
+  --color-brand-950: #071c33;
 
   --color-accent-50: #edfaf7;
   --color-accent-100: #d2f2ec;

@@ -21,7 +21,9 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel = 'Delete',
+  confirmingLabel = 'Deleting…',
   cancelLabel = 'Cancel',
+  tone = 'danger',
   confirming = false,
   onConfirm,
   onCancel,
@@ -29,7 +31,13 @@ export function ConfirmDialog({
   title: string;
   message: string;
   confirmLabel?: string;
+  /** Shown on the confirm button while `confirming`. */
+  confirmingLabel?: string;
   cancelLabel?: string;
+  /** `danger` (the default) for anything that deletes or removes; `primary`
+   * for a weighty but non-destructive decision, such as turning on a
+   * setting that can never be turned off again. */
+  tone?: 'danger' | 'primary';
   /** True while the caller's own mutation is in flight. */
   confirming?: boolean;
   onConfirm: () => void;
@@ -42,8 +50,8 @@ export function ConfirmDialog({
         <Button variant="ghost" onClick={onCancel} disabled={confirming}>
           {cancelLabel}
         </Button>
-        <Button variant="danger" loading={confirming} onClick={onConfirm}>
-          {confirming ? 'Deleting…' : confirmLabel}
+        <Button variant={tone} loading={confirming} onClick={onConfirm}>
+          {confirming ? confirmingLabel : confirmLabel}
         </Button>
       </div>
     </Modal>

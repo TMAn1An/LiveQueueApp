@@ -35,9 +35,10 @@ export function ReportsPage() {
         actions={
           <PermissionGate permission="export_reports">
             <Button
-              variant="secondary"
+              size="lg"
+              variant="outline"
               onClick={() => exportReport.mutate(query)}
-              disabled={exportReport.isPending}
+              loading={exportReport.isPending}
             >
               <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                 <path fillRule="evenodd" d="M4.5 2A1.5 1.5 0 003 3.5v13A1.5 1.5 0 004.5 18h11a1.5 1.5 0 001.5-1.5V7.621a1.5 1.5 0 00-.44-1.06l-4.12-4.122A1.5 1.5 0 0011.378 2H4.5zm4.75 6.75a.75.75 0 011.5 0v3.69l1.22-1.22a.75.75 0 111.06 1.06l-2.5 2.5a.75.75 0 01-1.06 0l-2.5-2.5a.75.75 0 111.06-1.06l1.22 1.22V8.75z" clipRule="evenodd" />
