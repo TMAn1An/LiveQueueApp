@@ -49,6 +49,19 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     return;
   }
 
+  // ADR-058: a password reset signs the account out everywhere, including
+  // access tokens that have not expired yet. `iat` is in whole seconds, so a
+  // token minted in the same second as the reset (the fresh login that
+  // follows it) is still accepted.
+  if (
+    staff.accessRevokedAt &&
+    typeof payload.iat === 'number' &&
+    payload.iat < Math.floor(staff.accessRevokedAt.getTime() / 1000)
+  ) {
+    next(new AppError(401, 'SESSION_REVOKED', 'Please sign in again.'));
+    return;
+  }
+
   if (staff.organization.status !== 'ACTIVE') {
     next(new AppError(403, 'ORGANIZATION_SUSPENDED', 'Organization is not active.'));
     return;

@@ -149,6 +149,11 @@ export async function createQueue(
     .send({
       name: overrides.name ?? `Queue ${Math.random().toString(36).slice(2, 8)}`,
       tokenPrefix: overrides.tokenPrefix ?? 'A',
+      // The API now defaults this to false (ADR-055), but most suites exercise
+      // the ADR-029 code flow, so fixtures keep it on unless a test says
+      // otherwise. The API default itself is asserted in
+      // queue.creationSettingsImmutable.test.ts.
+      requireServiceStartOtp: true,
       ...overrides,
     });
 

@@ -10,9 +10,17 @@ export const AUDIT_ACTIONS = [
   'login',
   'logout',
   'password_changed',
+  // ADR-058: a forgot-password link was redeemed.
+  'password_reset',
   'email_verified',
   'staff_created',
   'staff_updated',
+  // ADR-057: membership removal and the owner-reviewed request workflow.
+  'staff_removed',
+  'membership_request_created',
+  'membership_request_approved',
+  'membership_request_rejected',
+  'membership_request_cancelled',
   'queue_created',
   'queue_updated',
   'queue_deleted_or_archived',

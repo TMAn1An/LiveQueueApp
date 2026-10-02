@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import * as authApi from '../api/auth.api';
 import { useDebouncedValue } from './useDebouncedValue';
+import { LATIN_NAME_PATTERN } from '../utils/latinText';
 
 export type NameAvailability = 'idle' | 'checking' | 'available' | 'taken' | 'unknown';
 
@@ -20,7 +21,10 @@ export function useOrganizationNameAvailability(name: string, currentName?: stri
   const key = organizationNameKey(name);
   const debouncedKey = useDebouncedValue(key, 300);
   const isOwnName = currentName != null && key === organizationNameKey(currentName);
-  const enabled = debouncedKey.length >= 2 && !isOwnName;
+  // ADR-056: a name the backend would refuse anyway is not looked up; the
+  // form shows the script error instead of an availability result.
+  const latin = LATIN_NAME_PATTERN.test(name);
+  const enabled = debouncedKey.length >= 2 && !isOwnName && latin;
 
   const query = useQuery({
     queryKey: ['organization-name-availability', debouncedKey],
@@ -30,7 +34,7 @@ export function useOrganizationNameAvailability(name: string, currentName?: stri
     retry: false,
   });
 
-  if (key.length < 2) return 'idle';
+  if (key.length < 2 || !latin) return 'idle';
   if (isOwnName) return 'available';
   if (key !== debouncedKey || query.isFetching) return 'checking';
   if (query.isError) return 'unknown';

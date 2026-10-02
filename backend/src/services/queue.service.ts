@@ -2,7 +2,6 @@ import type { Queue, QueueService, QueueStatus } from '@prisma/client';
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { resolveQueueTimezone, resolveRepeatPolicy } from './queueIdentityPolicy.service';
-import { issueServiceStartCodesForCalledTokens } from './token.service';
 import { requireScheduleTimezone } from './queueSchedule.service';
 import { AppError } from '../utils/AppError';
 import { assertQueueMutable } from '../utils/tenantScope';
@@ -125,6 +124,37 @@ export async function createQueue(organizationId: string, input: CreateQueueInpu
   return serializeQueue(queue);
 }
 
+/**
+ * ADR-055: multiple-service support and the service-start verification code
+ * are chosen when a queue is created and never change afterwards, in either
+ * direction. Both alter what customers and staff are entitled to do mid-visit,
+ * so neither may shift under a queue that is already operating.
+ *
+ * A request repeating the stored value is a harmless no-op (a client sending
+ * its whole settings form back); only an actual change is refused, with a
+ * stable code so a crafted request learns exactly why.
+ */
+const CREATION_ONLY_SETTINGS = {
+  allowMultipleServices: 'Multiple-service support',
+  requireServiceStartOtp: 'Service-start verification',
+} as const;
+
+function assertCreationSettingsUnchanged(
+  existing: Pick<Queue, keyof typeof CREATION_ONLY_SETTINGS>,
+  input: Partial<Record<keyof typeof CREATION_ONLY_SETTINGS, boolean>>,
+): void {
+  for (const key of Object.keys(CREATION_ONLY_SETTINGS) as (keyof typeof CREATION_ONLY_SETTINGS)[]) {
+    if (input[key] !== undefined && input[key] !== existing[key]) {
+      throw new AppError(
+        409,
+        'QUEUE_SETTING_IMMUTABLE',
+        `${CREATION_ONLY_SETTINGS[key]} is fixed when a queue is created and cannot be changed.`,
+        { field: key },
+      );
+    }
+  }
+}
+
 export async function updateQueue(
   organizationId: string,
   queueId: string,
@@ -132,6 +162,7 @@ export async function updateQueue(
 ) {
   const existing = await findQueueOrThrow(organizationId, queueId);
   assertQueueMutable(existing);
+  assertCreationSettingsUnchanged(existing, input);
 
   const organization = await prisma.organization.findUniqueOrThrow({
     where: { id: organizationId },
@@ -179,13 +210,6 @@ export async function updateQueue(
     nextScheduleEnabled,
   );
 
-  // ADR-041: switching the service-start code ON must not strand a customer
-  // already at a counter without one, so their codes are issued in the same
-  // transaction as the change. Switching it OFF needs nothing here — the
-  // start path reads the current setting and ignores any code left behind.
-  const enablingServiceStartCode =
-    input.requireServiceStartOtp === true && !existing.requireServiceStartOtp;
-
   // Phase 4: every session window is evaluated on the queue's own clock, so
   // scheduling cannot be turned on (or stay on, if this same request also
   // clears the timezone) without a real one resolved.
@@ -193,23 +217,21 @@ export async function updateQueue(
     requireScheduleTimezone(effectiveTimezone);
   }
 
-  const queue = await prisma.$transaction(async (tx) => {
-    const updated = await tx.queue.update({
-      where: { id: queueId },
-      data: {
-        ...input,
-        timezone: nextTimezone,
-        // The wall-clock cutoff is a policy input, not a column — resolveRepeatPolicy
-        // turns it into the absolute instant stored below.
-        repeatRestrictionUntilLocal: undefined,
-        ...policy,
-      },
-      include: { services: true },
-    });
-    if (enablingServiceStartCode) {
-      await issueServiceStartCodesForCalledTokens(tx, queueId);
-    }
-    return updated;
+  const queue = await prisma.queue.update({
+    where: { id: queueId },
+    data: {
+      ...input,
+      // ADR-055: fixed at creation. An unchanged value is accepted above as
+      // a no-op, and is never written back.
+      allowMultipleServices: undefined,
+      requireServiceStartOtp: undefined,
+      timezone: nextTimezone,
+      // The wall-clock cutoff is a policy input, not a column — resolveRepeatPolicy
+      // turns it into the absolute instant stored below.
+      repeatRestrictionUntilLocal: undefined,
+      ...policy,
+    },
+    include: { services: true },
   });
 
   return serializeQueue(queue);

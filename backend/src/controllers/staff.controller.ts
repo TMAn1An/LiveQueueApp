@@ -1,6 +1,8 @@
 import type { Request, Response } from 'express';
 import * as staffService from '../services/staff.service';
 import * as auditService from '../services/audit.service';
+import * as membershipService from '../services/membership.service';
+import * as realtime from '../realtime/emit';
 
 export async function list(req: Request, res: Response) {
   const { page, pageSize, search } = req.query as unknown as {
@@ -37,6 +39,7 @@ export async function update(req: Request, res: Response) {
     req.auth!.organizationId,
     req.params.staffId as string,
     req.body,
+    { staffId: req.auth!.staffId, role: req.auth!.role },
   );
   res.status(200).json({ success: true, data: staff });
   await auditService.recordAuditEventSafely({
@@ -51,9 +54,118 @@ export async function update(req: Request, res: Response) {
   });
 }
 
+function membershipActor(req: Request): membershipService.MembershipActor {
+  return {
+    staffId: req.auth!.staffId,
+    organizationId: req.auth!.organizationId,
+    role: req.auth!.role,
+  };
+}
+
+/** ADR-057: direct removal, under the owner/admin matrix. */
 export async function remove(req: Request, res: Response) {
-  await staffService.deleteStaff(req.auth!.organizationId, req.params.staffId as string);
+  const removed = await membershipService.removeMember(
+    membershipActor(req),
+    req.params.staffId as string,
+  );
   res.status(204).send();
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'staff_removed',
+    entityType: 'staff',
+    entityId: removed.id,
+    metadata: { email: removed.email, role: removed.role },
+    ipAddress: req.ip,
+  });
+  realtime.disconnectStaff(removed.id);
+}
+
+export async function listRemovalRequests(req: Request, res: Response) {
+  const { status } = req.query as { status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' };
+  const data = await membershipService.listRemovalRequests(membershipActor(req), status);
+  res.status(200).json({ success: true, data });
+}
+
+export async function createRemovalRequest(req: Request, res: Response) {
+  const request = await membershipService.createRemovalRequest(membershipActor(req), req.body);
+  res.status(201).json({ success: true, data: request });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'membership_request_created',
+    entityType: 'membership_removal_request',
+    entityId: request.id,
+    metadata: { requestType: request.requestType, targetStaffId: request.target.id },
+    ipAddress: req.ip,
+  });
+}
+
+export async function approveRemovalRequest(req: Request, res: Response) {
+  const result = await membershipService.approveRemovalRequest(
+    membershipActor(req),
+    req.params.requestId as string,
+    req.body.reviewNote,
+  );
+  res.status(200).json({ success: true, data: result.request });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'membership_request_approved',
+    entityType: 'membership_removal_request',
+    entityId: result.request.id,
+    metadata: {
+      requestType: result.request.requestType,
+      targetStaffId: result.request.target.id,
+      outcome: result.request.status,
+    },
+    ipAddress: req.ip,
+  });
+  if (result.removed) {
+    await auditService.recordAuditEventSafely({
+      actor: auditService.actorFromAuth(req.auth!),
+      action: 'staff_removed',
+      entityType: 'staff',
+      entityId: result.removed.id,
+      metadata: {
+        email: result.removed.email,
+        role: result.removed.role,
+        removalRequestId: result.request.id,
+      },
+      ipAddress: req.ip,
+    });
+    realtime.disconnectStaff(result.removed.id);
+  }
+}
+
+export async function rejectRemovalRequest(req: Request, res: Response) {
+  const request = await membershipService.rejectRemovalRequest(
+    membershipActor(req),
+    req.params.requestId as string,
+    req.body.reviewNote,
+  );
+  res.status(200).json({ success: true, data: request });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'membership_request_rejected',
+    entityType: 'membership_removal_request',
+    entityId: request.id,
+    metadata: { requestType: request.requestType, targetStaffId: request.target.id },
+    ipAddress: req.ip,
+  });
+}
+
+export async function cancelRemovalRequest(req: Request, res: Response) {
+  const request = await membershipService.cancelRemovalRequest(
+    membershipActor(req),
+    req.params.requestId as string,
+  );
+  res.status(200).json({ success: true, data: request });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'membership_request_cancelled',
+    entityType: 'membership_removal_request',
+    entityId: request.id,
+    metadata: { requestType: request.requestType },
+    ipAddress: req.ip,
+  });
 }
 
 /**

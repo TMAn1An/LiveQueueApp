@@ -4,11 +4,11 @@ import { useQueues } from '../hooks/useQueues';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/Card';
 import { InfoHelp } from '../components/InfoHelp';
-import { Button } from '../components/Button';
+import { ButtonLink } from '../components/Button';
+import { CreateQueueButton } from '../components/CreateQueueModal';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
 import { PageHeader } from '../components/PageHeader';
-import { PermissionGate } from '../components/PermissionGate';
 import { formatMinutes } from '../utils/format';
 import type { Queue } from '../types/queue';
 
@@ -87,24 +87,19 @@ function QueueSummaryCard({ queue }: { queue: Queue }) {
       {/* Three buttons do not fit one row at this card's width, so the layout
           is deliberate rather than left to wrap: the main action on top, the
           two secondary ones sharing the row beneath. One size throughout, and
-          Manage Counters is a real button, not a faint text link. */}
+          Manage Counters is a real button, not a faint text link. The counter
+          count is already in the stats above, so the label does not repeat it. */}
       <div className="mt-5 space-y-2 border-t border-border pt-4">
-        <Link to={`/queues/${queue.id}/live`} className="block">
-          <Button variant="primary" size="md" className="w-full">
-            Open Queue
-          </Button>
-        </Link>
+        <ButtonLink to={`/queues/${queue.id}/live`} variant="primary" className="w-full">
+          Open Queue
+        </ButtonLink>
         <div className="flex gap-2">
-          <Link to={`/queues/${queue.id}/counters`} className="min-w-0 flex-1">
-            <Button variant="secondary" size="md" className="w-full">
-              Manage Counters ({totalCounters})
-            </Button>
-          </Link>
-          <Link to={`/queues/${queue.id}`}>
-            <Button variant="outline" size="md">
-              Settings
-            </Button>
-          </Link>
+          <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" className="min-w-0 flex-1">
+            Manage Counters
+          </ButtonLink>
+          <ButtonLink to={`/queues/${queue.id}`} variant="outline">
+            Settings
+          </ButtonLink>
         </div>
       </div>
     </div>
@@ -112,7 +107,7 @@ function QueueSummaryCard({ queue }: { queue: Queue }) {
 }
 
 export function DashboardPage() {
-  const { staff, organization } = useAuth();
+  const { staff, organization, hasPermission } = useAuth();
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: queues, isLoading: queuesLoading } = useQueues();
 
@@ -126,23 +121,10 @@ export function DashboardPage() {
         title={getGreeting(staff?.name)}
         description={`Here is what needs your attention today across ${organization?.name ?? 'your organization'}.`}
         helpLabel="this overview"
-        actions={
-          <div className="flex items-center gap-2.5">
-            <Link to="/queues">
-              <Button variant="outline">View All Queues</Button>
-            </Link>
-            <PermissionGate permission="manage_queues">
-              <Link to="/queues">
-                <Button variant="primary">
-                  <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                    <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
-                  </svg>
-                  Create Queue
-                </Button>
-              </Link>
-            </PermissionGate>
-          </div>
-        }
+        // ADR-059: one Create Queue action that opens the real form. The old
+        // "View All Queues" twin of the "Manage all queues" link below (and
+        // the sidebar) is gone — three routes to one page was noise.
+        actions={<CreateQueueButton />}
       />
 
       {/* Urgent Alert Banner if any queue has customers waiting with 0 counters open */}
@@ -248,9 +230,9 @@ export function DashboardPage() {
               Your active queues. Open one to call tokens, or go to its counters and settings.
             </InfoHelp>
           </div>
-          <Link to="/queues" className="text-xs font-semibold text-brand-fg hover:underline">
-            Manage all queues →
-          </Link>
+          <ButtonLink to="/queues" variant="outline">
+            Manage all queues
+          </ButtonLink>
         </div>
 
         {queuesLoading ? (
@@ -269,15 +251,17 @@ export function DashboardPage() {
             <p className="mx-auto mt-2 max-w-md text-sm text-muted">
               LiveQueue gives your organization digital tokens, live counter assignment, and instant QR entry for arriving customers.
             </p>
+            {/* ADR-059: the same real Create Queue action as the header, only
+                for someone who may create queues. Everyone else is told who
+                can, instead of being shown a button that cannot work. */}
             <div className="mt-6 flex justify-center">
-              <Link to="/queues">
-                <Button size="lg" variant="primary">
-                  <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                    <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
-                  </svg>
-                  Create Queue
-                </Button>
-              </Link>
+              {hasPermission('manage_queues') ? (
+                <CreateQueueButton />
+              ) : (
+                <p className="text-sm font-medium text-fg-soft">
+                  An owner or admin creates queues. Once one exists, it appears here.
+                </p>
+              )}
             </div>
 
             {/* 4-Step Visual Roadmap */}

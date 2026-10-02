@@ -39,8 +39,9 @@ export interface CreateQueueInput {
   /** ADR-049. SESSION is refused by the backend while the schedule is off. */
   repeatRestrictionScope?: RepeatRestrictionScope;
   timezone?: string | null;
+  /** ADR-055: creation-only. The backend defaults it to true. */
   allowMultipleServices?: boolean;
-  /** ADR-041. The backend defaults a new queue to true when omitted. */
+  /** ADR-055: creation-only, and off unless the creator turns it on. */
   requireServiceStartOtp?: boolean;
   status?: QueueStatus;
   /** Phase 4. Omitted on create — a brand-new queue always starts
@@ -54,7 +55,12 @@ export function createQueue(input: CreateQueueInput) {
   return apiFetch<Queue>('/api/queues', { method: 'POST', body: input });
 }
 
-export type UpdateQueueInput = Omit<CreateQueueInput, 'status' | 'startingNumber'>;
+/** ADR-055: the two creation-only settings are not part of an update at
+ * all — the backend refuses a change with QUEUE_SETTING_IMMUTABLE. */
+export type UpdateQueueInput = Omit<
+  CreateQueueInput,
+  'status' | 'startingNumber' | 'allowMultipleServices' | 'requireServiceStartOtp'
+>;
 
 export function updateQueue(queueId: string, input: Partial<UpdateQueueInput>) {
   return apiFetch<Queue>(`/api/queues/${queueId}`, { method: 'PUT', body: input });

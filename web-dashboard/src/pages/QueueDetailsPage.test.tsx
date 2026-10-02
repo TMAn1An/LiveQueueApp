@@ -106,3 +106,71 @@ describe('QueueDetailsPage — navigation', () => {
     );
   });
 });
+
+// ADR-059: one shared, bordered tab bar; ADR-055: the creation-only
+// settings are shown read-only and locked, with no toggle anywhere.
+describe('QueueDetailsPage — settings tabs and locked creation settings', () => {
+  const TABS = [
+    'General & Timezone',
+    'Services & Verification',
+    'Customer Form',
+    'Schedule & Capacity',
+    'Repeat Visits',
+    'QR Code & Entry',
+    'View All',
+  ];
+
+  function renderWithTab(tab?: string, overrides: Partial<Queue> = {}) {
+    vi.mocked(useQueue).mockReturnValue({
+      data: mockQueue(overrides),
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueue>);
+    return render(
+      <MemoryRouter initialEntries={[`/queues/queue-42${tab ? `?tab=${tab}` : ''}`]}>
+        <Routes>
+          <Route path="/queues/:queueId" element={<QueueDetailsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it('renders every tab as a bordered, full-size control at a readable size', () => {
+    renderWithTab();
+    const nav = screen.getByRole('navigation', { name: 'Queue settings sections' });
+    for (const label of TABS) {
+      const tab = screen.getByRole('button', { name: label });
+      expect(nav).toContainElement(tab);
+      expect(tab.className).toContain('border');
+      expect(tab.className).toContain('h-10');
+      expect(tab.className).toContain('text-sm');
+      expect(tab.className).not.toContain('text-xs');
+    }
+  });
+
+  it('marks the current tab with aria-current and a check mark, not colour alone', () => {
+    renderWithTab('repeat');
+    const active = screen.getByRole('button', { name: 'Repeat Visits' });
+    expect(active).toHaveAttribute('aria-current', 'page');
+    expect(active.querySelector('svg')).not.toBeNull();
+    expect(active.className).toContain('bg-brand-600');
+    const inactive = screen.getByRole('button', { name: 'Customer Form' });
+    expect(inactive).not.toHaveAttribute('aria-current');
+    expect(inactive.className).toContain('bg-surface');
+  });
+
+  it('shows both creation-only settings locked, with no switch to flip', () => {
+    renderWithTab('services', { requireServiceStartOtp: false, allowMultipleServices: true });
+    expect(screen.getByText('Fixed at Creation')).toBeInTheDocument();
+    expect(screen.getByText('Not required')).toBeInTheDocument();
+    expect(screen.getByText('Allowed')).toBeInTheDocument();
+    expect(screen.getAllByText('Locked')).toHaveLength(2);
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+
+  it('shows an existing queue’s stored values as they are', () => {
+    renderWithTab('services', { requireServiceStartOtp: true, allowMultipleServices: false });
+    expect(screen.getByText('Required')).toBeInTheDocument();
+    expect(screen.getByText('One per visit')).toBeInTheDocument();
+  });
+});

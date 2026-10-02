@@ -5,6 +5,8 @@ import { SectionHeading } from './SectionHeading';
 import { Button } from './Button';
 import { ErrorBanner } from './ErrorBanner';
 import { PermissionGate } from './PermissionGate';
+import { InfoHelp } from './InfoHelp';
+import { latinNameError, latinTextError } from '../utils/latinText';
 import { actionErrorMessage } from '../utils/actionError';
 import type { Queue } from '../types/queue';
 
@@ -13,11 +15,10 @@ const inputClass =
 
 /**
  * The queue's own details. What is shown and what can be edited are the
- * same set of fields, in the same order — the view used to show token prefix
- * / base time / reminder while Edit offered name / description / multiple
- * services, so nothing on screen was editable and nothing editable was on
- * screen. Form version is the one read-only field: it changes by itself when
- * the customer form is edited.
+ * same set of fields, in the same order. Form version is the one read-only
+ * field: it changes by itself when the customer form is edited. Multiple
+ * services is not here: it is fixed at creation (ADR-055) and shown, locked,
+ * with service-start verification under Services & Verification.
  */
 export function QueueDetailsCard({ queue }: { queue: Queue }) {
   const updateQueue = useUpdateQueue(queue.id);
@@ -28,7 +29,6 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
   const [tokenPrefix, setTokenPrefix] = useState(queue.tokenPrefix);
   const [baseTime, setBaseTime] = useState(String(queue.baseTimeMinutes));
   const [reminder, setReminder] = useState(String(queue.defaultNotificationMinutes));
-  const [allowMultipleServices, setAllowMultipleServices] = useState(queue.allowMultipleServices);
 
   function startEditing() {
     setName(queue.name);
@@ -36,14 +36,17 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
     setTokenPrefix(queue.tokenPrefix);
     setBaseTime(String(queue.baseTimeMinutes));
     setReminder(String(queue.defaultNotificationMinutes));
-    setAllowMultipleServices(queue.allowMultipleServices);
     setError(null);
     setEditing(true);
   }
 
   const baseTimeValue = Number(baseTime);
   const reminderValue = Number(reminder);
+  const nameError = latinNameError(name);
+  const prefixError = latinNameError(tokenPrefix);
+  const descriptionError = latinTextError(description);
   const invalid =
+    Boolean(nameError || prefixError || descriptionError) ||
     !name.trim() ||
     !tokenPrefix.trim() ||
     !Number.isInteger(baseTimeValue) ||
@@ -60,7 +63,6 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
         tokenPrefix: tokenPrefix.trim(),
         baseTimeMinutes: baseTimeValue,
         defaultNotificationMinutes: reminderValue,
-        allowMultipleServices,
       },
       {
         onSuccess: () => setEditing(false),
@@ -90,19 +92,26 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
         <div className="space-y-4">
           <ErrorBanner message={error} />
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name" htmlFor="queue-name">
-              <input id="queue-name" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+            <Field label="Name" htmlFor="queue-name" error={nameError}>
+              <input
+                id="queue-name"
+                value={name}
+                aria-invalid={nameError ? true : undefined}
+                onChange={(e) => setName(e.target.value)}
+                className={inputClass}
+              />
             </Field>
-            <Field label="Token prefix" htmlFor="queue-prefix" hint="Used for new tokens only, e.g. A → A001.">
+            <Field label="Token prefix" htmlFor="queue-prefix" help="Used for new tokens only, e.g. A → A001." error={prefixError}>
               <input
                 id="queue-prefix"
                 value={tokenPrefix}
                 maxLength={10}
+                aria-invalid={prefixError ? true : undefined}
                 onChange={(e) => setTokenPrefix(e.target.value)}
                 className={inputClass}
               />
             </Field>
-            <Field label="Base time (minutes)" htmlFor="queue-base-time" hint="Default service length used for wait estimates.">
+            <Field label="Base time (minutes)" htmlFor="queue-base-time" help="Default service length used for wait estimates.">
               <input
                 id="queue-base-time"
                 type="number"
@@ -112,7 +121,7 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
                 className={inputClass}
               />
             </Field>
-            <Field label="Reminder (minutes before turn)" htmlFor="queue-reminder" hint="Default for customers who turn on reminders.">
+            <Field label="Reminder (minutes before turn)" htmlFor="queue-reminder" help="Default for customers who turn on reminders.">
               <input
                 id="queue-reminder"
                 type="number"
@@ -122,9 +131,10 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
                 className={inputClass}
               />
             </Field>
-            <Field label="Description" htmlFor="queue-description" className="sm:col-span-2">
+            <Field label="Description" htmlFor="queue-description" className="sm:col-span-2" error={descriptionError}>
               <textarea
                 id="queue-description"
+                aria-invalid={descriptionError ? true : undefined}
                 rows={2}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
@@ -132,18 +142,6 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
               />
             </Field>
           </div>
-          <label className="flex max-w-md cursor-pointer items-start gap-2.5 rounded-lg border border-border bg-subtle/50 p-3 text-sm">
-            <input
-              type="checkbox"
-              checked={allowMultipleServices}
-              onChange={(e) => setAllowMultipleServices(e.target.checked)}
-              className="mt-0.5 rounded border-border-strong text-brand-600 focus:ring-brand-500"
-            />
-            <span>
-              <span className="block font-medium text-fg-soft">Allow multiple services</span>
-              <span className="block text-xs text-muted">Customers can select more than one service when joining.</span>
-            </span>
-          </label>
           <div className="flex gap-2 border-t border-border pt-3">
             <Button loading={updateQueue.isPending} disabled={invalid} onClick={save}>
               {updateQueue.isPending ? 'Saving…' : 'Save'}
@@ -159,8 +157,7 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
           <Detail label="Token prefix" value={queue.tokenPrefix} />
           <Detail label="Base time" value={`${queue.baseTimeMinutes} min`} />
           <Detail label="Reminder" value={`${queue.defaultNotificationMinutes} min before`} />
-          <Detail label="Multiple services" value={queue.allowMultipleServices ? 'Allowed' : 'One per visit'} />
-          <Detail label="Form version" value={`v${queue.formVersion}`} hint="Changes when the customer form is edited" />
+          <Detail label="Form version" value={`v${queue.formVersion}`} help="Changes by itself whenever the customer form is edited." />
           <div className="col-span-full rounded-lg bg-subtle/50 p-3">
             <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Description</dt>
             <dd className="mt-1 text-sm text-fg-soft">{queue.description || '—'}</dd>
@@ -174,35 +171,48 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
 function Field({
   label,
   htmlFor,
-  hint,
+  help,
+  error,
   className = '',
   children,
 }: {
   label: string;
   htmlFor: string;
-  hint?: string;
+  /** Background explanation, behind an ⓘ (ADR-053). */
+  help?: string;
+  /** A validation error — always on the page, never behind an icon. */
+  error?: string | null;
   className?: string;
   children: ReactNode;
 }) {
   return (
     <div className={className}>
-      <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor={htmlFor}>
-        {label}
-      </label>
+      <div className="mb-1 flex items-center gap-0.5">
+        <label className="block text-xs font-medium text-fg-soft" htmlFor={htmlFor}>
+          {label}
+        </label>
+        {help && <InfoHelp label={label}>{help}</InfoHelp>}
+      </div>
       {children}
-      {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
+      {error && (
+        <p role="alert" className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
 
-function Detail({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Detail({ label, value, help }: { label: string; value: string; help?: string }) {
   return (
     <div className="rounded-lg bg-subtle/50 p-3">
-      <dt className="text-xs font-semibold uppercase tracking-wider text-faint">{label}</dt>
+      <dt className="flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wider text-faint">
+        {label}
+        {help && <InfoHelp label={label}>{help}</InfoHelp>}
+      </dt>
       <dd className="mt-1 truncate text-base font-bold text-fg" title={value}>
         {value}
       </dd>
-      {hint && <p className="mt-0.5 text-[11px] text-muted">{hint}</p>}
     </div>
   );
 }

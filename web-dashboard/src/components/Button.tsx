@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes } from 'react';
+import { Link, type LinkProps } from 'react-router-dom';
 
-type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
 
 /**
  * One button system for the whole dashboard: every action reads from this
@@ -12,7 +13,7 @@ type Variant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger';
  * of theming may blur it. Logging out is *not* destructive — it uses
  * `ghost`, not `danger`.
  */
-const VARIANT_CLASSES: Record<Variant, string> = {
+const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary:
     'bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow active:bg-brand-800 disabled:bg-brand-300 disabled:shadow-none dark:bg-brand-500 dark:hover:bg-brand-400 dark:active:bg-brand-600 dark:disabled:bg-brand-800 dark:disabled:text-white/60',
   secondary:
@@ -34,7 +35,7 @@ const VARIANT_CLASSES: Record<Variant, string> = {
 const BASE_CLASSES =
   'inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:shadow-none';
 
-type Size = 'md' | 'lg';
+export type ButtonSize = 'md' | 'lg';
 
 /**
  * V2 Dashboard Visual Hierarchy pass: `md` (the pre-existing, unstyled-by-
@@ -45,14 +46,27 @@ type Size = 'md' | 'lg';
  * never the default, so a page can't drift toward "everything is large"
  * just by omitting the prop.
  */
-const SIZE_CLASSES: Record<Size, string> = {
+const SIZE_CLASSES: Record<ButtonSize, string> = {
   md: 'h-9 px-3 text-sm',
   lg: 'h-11 px-4 text-base',
 };
 
+/**
+ * The complete class list for a button of this variant and size. Shared by
+ * Button and ButtonLink so a navigation action and a click action in the
+ * same row are pixel-identical (ADR-059).
+ */
+function buttonClassName(
+  variant: ButtonVariant = 'primary',
+  size: ButtonSize = 'md',
+  extra = '',
+): string {
+  return `${BASE_CLASSES} ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${extra}`.trim();
+}
+
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: Variant;
-  size?: Size;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
   /** Shows a spinner and blocks further clicks while an action is in
    * flight. The caller still supplies the wording ("Signing in…"), since
    * only it knows what is happening. */
@@ -73,13 +87,29 @@ export function Button({
       type="button"
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={`${BASE_CLASSES} ${SIZE_CLASSES[size]} ${VARIANT_CLASSES[variant]} ${className}`}
+      className={buttonClassName(variant, size, className)}
       {...props}
     >
       {loading && <ButtonSpinner />}
       {children}
     </button>
   );
+}
+
+/**
+ * ADR-059: a navigation action that looks exactly like a Button. Replaces
+ * the old `<Link><Button/></Link>` pattern, which nested a button inside a
+ * link (two focus stops, invalid HTML) and put an inline anchor box around
+ * the button — the 1–2px height and baseline drift between neighbouring
+ * actions came from that wrapper, not from the buttons themselves.
+ */
+export function ButtonLink({
+  variant = 'primary',
+  size = 'md',
+  className = '',
+  ...props
+}: LinkProps & { variant?: ButtonVariant; size?: ButtonSize }) {
+  return <Link className={buttonClassName(variant, size, className)} {...props} />;
 }
 
 function ButtonSpinner() {

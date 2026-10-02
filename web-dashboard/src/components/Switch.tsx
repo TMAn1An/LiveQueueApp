@@ -1,3 +1,6 @@
+import type { ReactNode } from 'react';
+import { InfoHelp } from './InfoHelp';
+
 /**
  * An on/off setting that takes effect as a whole — rendered as a real
  * switch (role="switch", aria-checked) so assistive technology announces
@@ -10,6 +13,7 @@ export function Switch({
   onChange,
   label,
   description,
+  help,
   disabled = false,
 }: {
   id: string;
@@ -17,6 +21,9 @@ export function Switch({
   onChange: (next: boolean) => void;
   label: string;
   description?: string;
+  /** Background explanation, shown behind an "ⓘ" beside the label rather
+   * than permanently under it (ADR-053). */
+  help?: ReactNode;
   disabled?: boolean;
 }) {
   const descriptionId = description ? `${id}-description` : undefined;
@@ -42,9 +49,12 @@ export function Switch({
         />
       </button>
       <span>
-        <label htmlFor={id} className="block font-medium text-fg-soft">
-          {label}
-        </label>
+        <span className="flex items-center gap-0.5">
+          <label htmlFor={id} className="block font-medium text-fg-soft">
+            {label}
+          </label>
+          {help && <InfoHelp label={label}>{help}</InfoHelp>}
+        </span>
         {description && (
           <span id={descriptionId} className="block text-xs text-muted">
             {description}

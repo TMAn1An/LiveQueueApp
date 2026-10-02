@@ -53,3 +53,21 @@ describe('Button size', () => {
     expect(screen.getByRole('button', { name: 'Primary' }).className).not.toContain('border-transparent');
   });
 });
+
+// ADR-059: a navigation action renders as a link with exactly the button's
+// classes — no button nested in a link, no inline wrapper changing its height.
+describe('ButtonLink', () => {
+  it('is a single link with the same classes as a Button of the same variant and size', async () => {
+    const { MemoryRouter } = await import('react-router-dom');
+    const { ButtonLink } = await import('./Button');
+    render(
+      <MemoryRouter>
+        <Button variant="secondary" size="lg">Act</Button>
+        <ButtonLink to="/go" variant="secondary" size="lg">Go</ButtonLink>
+      </MemoryRouter>,
+    );
+    const link = screen.getByRole('link', { name: 'Go' });
+    expect(link.querySelector('button')).toBeNull();
+    expect(link.className).toBe(screen.getByRole('button', { name: 'Act' }).className);
+  });
+});

@@ -120,11 +120,12 @@ model Organization {
   createdAt             DateTime           @default(now()) @map("created_at")
   updatedAt             DateTime           @updatedAt @map("updated_at")
 
-  staff          Staff[]
-  queues         Queue[]
-  tokens         Token[]
-  deviceBlocks   OrganizationDeviceBlock[]
-  identityClaims QueueIdentityClaim[]
+  staff           Staff[]
+  queues          Queue[]
+  tokens          Token[]
+  deviceBlocks    OrganizationDeviceBlock[]
+  identityClaims  QueueIdentityClaim[]
+  removalRequests MembershipRemovalRequest[]
 
   @@map("organizations")
 }
@@ -169,11 +170,19 @@ model Staff {
   /// (every owner, and every staff member created before ADR-035).
   invitationSentAt    DateTime? @map("invitation_sent_at")
 
+  /// ADR-058: access tokens issued before this instant are refused, even
+  /// though their 15-minute JWT lifetime has not run out. Set by a password
+  /// reset, which also revokes every refresh session, so "sign out
+  /// everywhere" takes effect at once rather than when the last access token
+  /// expires. Null for every account that has never reset its password.
+  accessRevokedAt DateTime? @map("access_revoked_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  sessions Session[]
-  counters Counter[]
+  sessions            Session[]
+  counters            Counter[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([organizationId])
   @@map("staff")
@@ -230,16 +239,16 @@ model Queue {
   /// V2 Checkpoint 6: when false, a token in this queue may select exactly
   /// one service (validated backend-side in createToken, never trusting the
   /// UI). Defaults true, preserving V2 Checkpoint 5's multi-service
-  /// selection unchanged for every existing queue.
+  /// selection unchanged for every existing queue. ADR-055: fixed at
+  /// creation — updateQueue refuses any later change.
   allowMultipleServices      Boolean     @default(true) @map("allow_multiple_services")
   /// ADR-041: whether staff must enter the customer's service-start
   /// verification code (ADR-029) before CALLED -> IN_PROGRESS. Named for
   /// that one code on purpose — LiveQueue also has customer email
   /// verification, account verification and staff invitations, none of which
-  /// this governs. Defaults true so every existing queue keeps the verified
-  /// flow unchanged. The queue's *current* value decides at start time; it is
-  /// never snapshotted onto tokens.
-  requireServiceStartOtp     Boolean     @default(true) @map("require_service_start_otp")
+  /// this governs. ADR-055: chosen once at creation (default off) and fixed
+  /// for the queue's lifetime; existing queues keep the value they had.
+  requireServiceStartOtp     Boolean     @default(false) @map("require_service_start_otp")
 
   /// How often one customer may use this queue, when allowRepeatVisits is
   /// false. Null on a restricted queue means the identity policy has not
@@ -950,4 +959,84 @@ model CustomerEmailVerification {
   @@index([queueId, emailFingerprint])
   @@index([expiresAt])
   @@map("customer_email_verifications")
+}
+
+/// ADR-057: what a membership-removal request asks for. Derived by the server
+/// from who is asking about whom, never chosen by the client.
+enum MembershipRequestType {
+  /// A STAFF or ADMIN member asking to leave the organization.
+  SELF_LEAVE
+  /// An ADMIN asking the owner to remove another ADMIN.
+  ADMIN_REMOVAL_REQUEST
+}
+
+enum MembershipRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  /// Withdrawn by the requester, or made moot because the target left the
+  /// organization by some other route before the owner reviewed it.
+  CANCELLED
+}
+
+/// ADR-057: a request for the owner to end someone's membership. Nobody may
+/// remove themselves directly, and an admin may not directly remove another
+/// admin — those changes go through the owner here.
+///
+/// requester/target/reviewer are snapshot columns with no relation to Staff,
+/// like AuditLog: approving a request deletes the target's Staff row, and the
+/// request must survive as the record of why.
+model MembershipRemovalRequest {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  requestType MembershipRequestType   @map("request_type")
+  status      MembershipRequestStatus @default(PENDING)
+  reason      String?
+
+  requesterId    String @map("requester_id")
+  requesterName  String @map("requester_name")
+  requesterEmail String @map("requester_email")
+
+  targetStaffId String    @map("target_staff_id")
+  targetName    String    @map("target_name")
+  targetEmail   String    @map("target_email")
+  targetRole    StaffRole @map("target_role")
+
+  reviewedAt     DateTime? @map("reviewed_at")
+  reviewedById   String?   @map("reviewed_by_id")
+  reviewedByName String?   @map("reviewed_by_name")
+  reviewNote     String?   @map("review_note")
+
+  /// One pending request per (target, type). A pending row holds the literal
+  /// "PENDING"; closing it moves the slot to the row's own id, so history can
+  /// grow while the unique index below still admits only one open request —
+  /// the ADR-035 claimSlot pattern, instead of a partial index Prisma cannot
+  /// express.
+  activeSlot String @default("PENDING") @map("active_slot")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([targetStaffId, requestType, activeSlot])
+  @@index([organizationId, status, createdAt])
+  @@map("membership_removal_requests")
+}
+
+/// ADR-058: a "forgot password" link. Only the SHA-256 hash of the emailed
+/// value is stored, like Session.refreshTokenHash. Single use (usedAt), short
+/// lived (expiresAt), and every other outstanding link for the account is
+/// deleted when one is redeemed or a newer one is issued.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  staffId   String    @map("staff_id")
+  staff     Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([staffId, createdAt])
+  @@map("password_reset_tokens")
 }

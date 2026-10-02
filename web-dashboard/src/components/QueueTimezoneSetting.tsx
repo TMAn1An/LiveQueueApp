@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useUpdateQueue } from '../hooks/useQueues';
 import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
+import { InfoHelp } from '../components/InfoHelp';
 import { PermissionGate } from '../components/PermissionGate';
 import { ApiError } from '../api/client';
 import { browserTimezone, supportedTimezones, timezoneOptions } from '../utils/timezone';
@@ -67,10 +68,12 @@ export function QueueTimezoneSetting({
           </div>
         ) : (
           <div>
-            <p className="text-fg-soft">No timezone set.</p>
-            <p className="text-xs text-muted">
-              Needed only for a monthly or yearly repeat limit, a fixed cutoff date, and showing
-              queue-local times to customers.
+            <p className="inline-flex items-center text-fg-soft">
+              No timezone set.
+              <InfoHelp label="when a timezone is needed">
+                Needed only for a monthly or yearly repeat limit, a fixed cutoff date, and showing
+                queue-local times to customers.
+              </InfoHelp>
             </p>
           </div>
         )}
@@ -109,15 +112,20 @@ export function QueueTimezoneSetting({
     <div className="space-y-3 text-sm">
       <ErrorBanner message={error} />
       <div>
-        <label className="mb-1 block text-xs text-muted" htmlFor="queue-timezone">
-          This queue runs in
-        </label>
+        <div className="mb-1 flex items-center gap-0.5">
+          <label className="block text-xs text-muted" htmlFor="queue-timezone">
+            This queue runs in
+          </label>
+          <InfoHelp label="the queue timezone">
+            Leave this on your organization’s timezone unless this queue is somewhere else.
+          </InfoHelp>
+        </div>
         {zones ? (
           <select
             id="queue-timezone"
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
+            className="w-full h-9 rounded-md border border-border-strong px-3 text-sm"
           >
             <option value="">Use my organization’s timezone</option>
             {timezoneOptions(zones, queue.timezone, organizationTimezone, deviceZone).map((zone) => (
@@ -132,12 +140,9 @@ export function QueueTimezoneSetting({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             placeholder="Asia/Dhaka"
-            className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
+            className="w-full h-9 rounded-md border border-border-strong px-3 text-sm"
           />
         )}
-        <p className="mt-1 text-xs text-muted">
-          Leave this on your organization’s timezone unless this queue is somewhere else.
-        </p>
         {deviceZone && value !== deviceZone && (
           <button
             type="button"

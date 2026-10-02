@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   useCreateStaff,
   useDeleteStaff,
+  useRemovalRequests,
   useResendInvitation,
   useStaffList,
   useUpdateStaff,
@@ -16,6 +17,11 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { PageHeader } from '../components/PageHeader';
 import { actionErrorMessage } from '../utils/actionError';
 import { PermissionGate } from '../components/PermissionGate';
+import { MyRequests, OwnerRequestInbox, RemovalRequestDialog } from '../components/MembershipRequests';
+import { FieldError } from '../components/FieldError';
+import { InfoHelp } from '../components/InfoHelp';
+import { useAuth } from '../context/AuthContext';
+import { latinNameError } from '../utils/latinText';
 import { Pagination } from '../components/Pagination';
 import { SearchInput } from '../components/SearchInput';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
@@ -36,11 +42,12 @@ function CreateStaffModal({
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<Exclude<StaffRole, 'OWNER'>>('ADMIN');
   const [error, setError] = useState<string | null>(null);
+  const nameError = latinNameError(name);
 
   async function handleSubmit() {
     setError(null);
     try {
-      const created = await createStaff.mutateAsync({ name, email, role });
+      const created = await createStaff.mutateAsync({ name: name.trim(), email, role });
       onInvited({ name, emailSent: created.data.invitationEmailSent });
       onClose();
     } catch (err) {
@@ -61,19 +68,27 @@ function CreateStaffModal({
               id="staff-name"
               value={name}
               placeholder="e.g. John Doe"
+              aria-invalid={nameError ? true : undefined}
               onChange={(e) => setName(e.target.value)}
-              className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+              className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
             />
+            <FieldError message={nameError} />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="staff-role">
-              Role
-            </label>
+            <div className="mb-1 flex items-center gap-0.5">
+              <label className="block text-xs font-medium text-fg-soft" htmlFor="staff-role">
+                Role
+              </label>
+              <InfoHelp label="roles">
+                Permissions come entirely from the role and cannot be customized. Admins manage
+                queues and staff; staff operate counters and tokens.
+              </InfoHelp>
+            </div>
             <select
               id="staff-role"
               value={role}
               onChange={(e) => setRole(e.target.value as Exclude<StaffRole, 'OWNER'>)}
-              className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+              className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
             >
               {MANAGEABLE_ROLES.map((r) => (
                 <option key={r} value={r}>
@@ -94,13 +109,12 @@ function CreateStaffModal({
             value={email}
             placeholder="colleague@example.com"
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-md border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg focus:border-brand-500"
+            className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
           />
         </div>
 
-        <p className="rounded-lg bg-subtle p-3 text-xs text-muted">
-          We'll email them a link to set their own password and sign in. Permissions are determined
-          entirely by the selected role and cannot be customized.
+        <p className="text-xs text-muted">
+          We'll email them a link to set their own password and sign in.
         </p>
 
         <div className="flex justify-end gap-2 border-t border-border pt-3">
@@ -109,7 +123,7 @@ function CreateStaffModal({
           </Button>
           <Button
             loading={createStaff.isPending}
-            disabled={!name || !email || createStaff.isPending}
+            disabled={!name.trim() || !email || Boolean(nameError)}
             onClick={() => void handleSubmit()}
           >
             {createStaff.isPending ? 'Sending invitation…' : 'Send invitation'}
@@ -120,21 +134,69 @@ function CreateStaffModal({
   );
 }
 
-function StaffRow({ staff }: { staff: Staff }) {
+/**
+ * ADR-057: what the signed-in person may do to this row. Mirrors
+ * membership.service.ts on the backend, which decides regardless.
+ */
+function rowActions(actor: Staff | null, target: Staff) {
+  const isSelf = actor?.id === target.id;
+  const isOwnerActor = actor?.role === 'OWNER';
+  const isAdminActor = actor?.role === 'ADMIN';
+  return {
+    isSelf,
+    // Nobody removes themselves, and nobody removes the owner.
+    canRemove:
+      !isSelf &&
+      target.role !== 'OWNER' &&
+      (isOwnerActor || (isAdminActor && target.role === 'STAFF')),
+    // An admin asks the owner about another admin.
+    canRequestRemoval: !isSelf && isAdminActor && target.role === 'ADMIN',
+    // An admin's own leave request lives on their own row.
+    canRequestLeave: isSelf && isAdminActor,
+    // Invitations: never on the owner or yourself.
+    canManage: target.role !== 'OWNER' && !isSelf,
+    // ADR-061: suspension follows removal — the owner suspends admins and
+    // staff, an admin only staff, nobody themselves or the owner.
+    canSuspend:
+      !isSelf &&
+      target.role !== 'OWNER' &&
+      (isOwnerActor || (isAdminActor && target.role === 'STAFF')),
+  };
+}
+
+function StaffRow({ staff, pendingAbout }: { staff: Staff; pendingAbout: boolean }) {
+  const { staff: actor } = useAuth();
   const updateStaff = useUpdateStaff();
   const deleteStaff = useDeleteStaff();
   const resendInvitation = useResendInvitation();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmingSuspend, setConfirmingSuspend] = useState(false);
+  const [requesting, setRequesting] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
-  const [resendNote, setResendNote] = useState<string | null>(null);
+  const [rowNote, setRowNote] = useState<string | null>(null);
+  const actions = rowActions(actor, staff);
+
+  function setStatus(status: 'ACTIVE' | 'SUSPENDED') {
+    setRowError(null);
+    updateStaff.mutate(
+      { staffId: staff.id, input: { status } },
+      {
+        onSuccess: () => setConfirmingSuspend(false),
+        onError: (err) => {
+          setConfirmingSuspend(false);
+          setRowError(actionErrorMessage(err));
+        },
+      },
+    );
+  }
 
   async function handleResend() {
-    setResendNote(null);
+    setRowNote(null);
     try {
       const result = await resendInvitation.mutateAsync(staff.id);
-      setResendNote(result.data.emailSent ? 'Invitation sent.' : 'Could not send the email.');
+      setRowNote(result.data.emailSent ? 'Invitation sent.' : 'Could not send the email.');
     } catch (err) {
-      setResendNote(err instanceof ApiError ? err.message : 'Could not send the invitation.');
+      setRowNote(err instanceof ApiError ? err.message : 'Could not send the invitation.');
     }
   }
 
@@ -148,6 +210,7 @@ function StaffRow({ staff }: { staff: Staff }) {
             {initial}
           </div>
           <span className="font-semibold text-fg">{staff.name}</span>
+          {actions.isSelf && <span className="text-xs font-medium text-muted">(you)</span>}
         </div>
       </td>
       <td className="py-3 pr-4 text-sm text-fg-soft">{staff.email}</td>
@@ -163,62 +226,91 @@ function StaffRow({ staff }: { staff: Staff }) {
         </span>
       </td>
       <td className="py-3 pr-4">
-        {staff.invitationPending ? (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
-            Invitation pending
-          </span>
-        ) : (
-          <StatusBadge status={staff.status} size="sm" />
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {staff.invitationPending ? (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+              Invitation pending
+            </span>
+          ) : (
+            <StatusBadge status={staff.status} size="sm" />
+          )}
+          {pendingAbout && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200">
+              Removal requested
+            </span>
+          )}
+        </div>
       </td>
       <td className="py-3 pr-4">
-        <PermissionGate permission="manage_staff">
-          {staff.role !== 'OWNER' && (
-            <div className="flex flex-wrap items-center gap-2">
-              {staff.invitationPending && (
-                <>
-                  <Button
-                    variant="secondary"
-                    loading={resendInvitation.isPending}
-                    disabled={resendInvitation.isPending}
-                    onClick={() => void handleResend()}
-                  >
-                    {resendInvitation.isPending ? 'Sending…' : 'Resend invite'}
-                  </Button>
-                  {resendNote && <span className="text-xs text-muted">{resendNote}</span>}
-                </>
-              )}
-              <Button
-                variant="secondary"
-                loading={updateStaff.isPending}
-                onClick={() => {
-                  setRowError(null);
-                  updateStaff.mutate(
-                    {
-                      staffId: staff.id,
-                      input: { status: staff.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE' },
-                    },
-                    { onError: (err) => setRowError(actionErrorMessage(err)) },
-                  );
-                }}
-              >
-                {updateStaff.isPending
-                  ? 'Updating…'
-                  : staff.status === 'ACTIVE'
-                    ? 'Suspend'
-                    : 'Reactivate'}
-              </Button>
-              <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
-                Delete
-              </Button>
-            </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {actions.canManage && staff.invitationPending && (
+            <Button
+              variant="secondary"
+              loading={resendInvitation.isPending}
+              onClick={() => void handleResend()}
+            >
+              {resendInvitation.isPending ? 'Sending…' : 'Resend invite'}
+            </Button>
           )}
-        </PermissionGate>
+          {actions.canSuspend && (
+            <Button
+              variant="secondary"
+              loading={updateStaff.isPending}
+              onClick={() => {
+                // Suspending is confirmed first; reactivating is not.
+                if (staff.status === 'ACTIVE') setConfirmingSuspend(true);
+                else setStatus('ACTIVE');
+              }}
+            >
+              {updateStaff.isPending
+                ? 'Updating…'
+                : staff.status === 'ACTIVE'
+                  ? 'Suspend'
+                  : 'Reactivate'}
+            </Button>
+          )}
+          {actions.canRequestRemoval && !pendingAbout && (
+            <Button variant="outline" onClick={() => setRequesting(true)}>
+              Request removal
+            </Button>
+          )}
+          {actions.canRequestLeave && !pendingAbout && (
+            <Button variant="outline" onClick={() => setRequesting(true)}>
+              Request to leave
+            </Button>
+          )}
+          {actions.canRemove && (
+            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+              Remove
+            </Button>
+          )}
+        </div>
+        {rowNote && <p className="mt-1 text-xs text-muted">{rowNote}</p>}
         {rowError && <div className="mt-2"><ErrorBanner message={rowError} /></div>}
+        {requesting && (
+          <RemovalRequestDialog
+            target={actions.isSelf ? 'self' : { id: staff.id, name: staff.name }}
+            onClose={() => setRequesting(false)}
+            onSent={() => setRowNote('Request sent to the owner.')}
+          />
+        )}
+        {confirmingSuspend && (
+          <ConfirmDialog
+            title={`Suspend ${staff.name}?`}
+            message="They will be signed out and cannot sign in until they are reactivated."
+            confirmLabel="Suspend"
+            confirmingLabel="Suspending…"
+            confirming={updateStaff.isPending}
+            onConfirm={() => setStatus('SUSPENDED')}
+            onCancel={() => setConfirmingSuspend(false)}
+          />
+        )}
         {confirmingDelete && (
           <ConfirmDialog
-            title={`Remove staff member "${staff.name}"?`}
-            message="They will immediately lose access to the dashboard. This cannot be undone."
+            title={`Remove ${staff.name}?`}
+            message="They will be removed from the organization and signed out on every device immediately. This cannot be undone."
+            confirmLabel="Remove"
+            confirmingLabel="Removing…"
             confirming={deleteStaff.isPending}
             onConfirm={() =>
               deleteStaff.mutate(staff.id, {
@@ -242,6 +334,12 @@ export function StaffPage() {
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: result, isLoading, isFetching } = useStaffList(page, 20, debouncedSearch);
+  const { staff: actor } = useAuth();
+  const isOwner = actor?.role === 'OWNER';
+  const { data: requests } = useRemovalRequests();
+  const pendingTargets = new Set(
+    (requests ?? []).filter((r) => r.status === 'PENDING').map((r) => r.target.id),
+  );
   const [showCreate, setShowCreate] = useState(false);
   const [inviteNotice, setInviteNotice] = useState<{ name: string; emailSent: boolean } | null>(null);
 
@@ -281,6 +379,8 @@ export function StaffPage() {
         </div>
       )}
 
+      {isOwner ? <OwnerRequestInbox /> : <MyRequests />}
+
       <div className="max-w-md">
         <SearchInput
           value={search}
@@ -317,7 +417,7 @@ export function StaffPage() {
               </thead>
               <tbody>
                 {result.data.map((s) => (
-                  <StaffRow key={s.id} staff={s} />
+                  <StaffRow key={s.id} staff={s} pendingAbout={pendingTargets.has(s.id)} />
                 ))}
               </tbody>
             </table>

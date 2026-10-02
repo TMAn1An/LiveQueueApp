@@ -1,4 +1,10 @@
 import { z } from 'zod';
+import {
+  LATIN_NAME_PATTERN,
+  LATIN_NAME_MESSAGE,
+  LATIN_TEXT_PATTERN,
+  LATIN_TEXT_MESSAGE,
+} from './latinText';
 
 /**
  * The repeat-visit identity policy (ADR-034). Every field is optional here
@@ -64,19 +70,36 @@ const scheduleFields = {
 
 export const createQueueSchema = {
   body: z.object({
-    name: z.string().trim().min(1, 'Queue name is required.').max(120),
-    description: z.string().trim().max(1000).optional(),
-    clientTerminology: z.string().trim().max(60).optional(),
+    name: z
+      .string()
+      .trim()
+      .min(1, 'Queue name is required.')
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE),
+    description: z
+      .string()
+      .trim()
+      .max(1000)
+      .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE)
+      .optional(),
+    clientTerminology: z
+      .string()
+      .trim()
+      .max(60)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
     tokenPrefix: z.string().trim().min(1, 'Token prefix is required.').max(10),
     startingNumber: z.number().int().positive().default(1),
     baseTimeMinutes: z.number().int().positive().default(5),
     defaultNotificationMinutes: z.number().int().positive().default(10),
     status: queueStatus.default('ACTIVE'),
     allowRepeatVisits: z.boolean().default(true),
+    // ADR-055: both are decided here, once, and are fixed for the queue's
+    // lifetime — updateQueue refuses any later change.
     allowMultipleServices: z.boolean().default(true),
-    // ADR-041: the service-start verification code. On unless the creator
-    // explicitly turns it off.
-    requireServiceStartOtp: z.boolean().default(true),
+    // The service-start verification code is off unless the creator turns it
+    // on (ADR-055 reverses ADR-041's on-by-default).
+    requireServiceStartOtp: z.boolean().default(false),
     ...repeatPolicyFields,
   }),
 };
@@ -84,14 +107,32 @@ export const createQueueSchema = {
 export const updateQueueSchema = {
   params: queueIdParams,
   body: z.object({
-    name: z.string().trim().min(1).max(120).optional(),
-    description: z.string().trim().max(1000).optional(),
-    clientTerminology: z.string().trim().max(60).optional(),
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
+    description: z
+      .string()
+      .trim()
+      .max(1000)
+      .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE)
+      .optional(),
+    clientTerminology: z
+      .string()
+      .trim()
+      .max(60)
+      .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+      .optional(),
     tokenPrefix: z.string().trim().min(1).max(10).optional(),
     startingNumber: z.number().int().positive().optional(),
     baseTimeMinutes: z.number().int().positive().optional(),
     defaultNotificationMinutes: z.number().int().positive().optional(),
     allowRepeatVisits: z.boolean().optional(),
+    // ADR-055: accepted only so a change can be refused with a clear
+    // QUEUE_SETTING_IMMUTABLE instead of being silently dropped by the parser.
     allowMultipleServices: z.boolean().optional(),
     requireServiceStartOtp: z.boolean().optional(),
     ...repeatPolicyFields,

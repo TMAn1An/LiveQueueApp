@@ -241,16 +241,13 @@ export function AppLayout() {
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-block text-xs text-muted">
-              {staff?.name} <span className="text-faint">· {staff?.role}</span>
+            <span className="hidden sm:inline-block text-sm text-fg-soft">
+              {staff?.name} <span className="text-muted">· {staff?.role}</span>
             </span>
-            <Button
-              variant="ghost"
-              size="md"
-              className="text-xs"
-              onClick={() => void logout()}
-            >
-              <LogoutIcon className="h-3.5 w-3.5" />
+            {/* ADR-059: a real, readable button — it used to be shrunk to
+                text-xs with a ghost style and read as a faint text link. */}
+            <Button variant="outline" aria-label="Log out" onClick={() => void logout()}>
+              <LogoutIcon className="h-4 w-4" />
               <span className="hidden sm:inline">Log out</span>
             </Button>
           </div>

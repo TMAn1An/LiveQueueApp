@@ -159,7 +159,7 @@ describe('QueuesPage — search', () => {
 
     fireEvent.change(input, { target: { value: 'nothing-matches-this' } });
     expect(screen.getByText('No queues match your search.')).toBeInTheDocument();
-    expect(screen.queryByText('No queues found.')).not.toBeInTheDocument();
+    expect(screen.queryByText('No queues yet.')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Clear search'));
     expect(screen.getByText('Front Desk')).toBeInTheDocument();
@@ -207,10 +207,11 @@ describe('QueuesPage — explicit Open Queue / Settings actions', () => {
   });
 });
 
-// ADR-041: the creator decides whether the new queue requires the
-// service-start verification code — on unless they turn it off.
-describe('QueuesPage — Create Queue service-start verification toggle', () => {
-  function openCreateModal(mutateAsync = vi.fn().mockResolvedValue({})) {
+// ADR-055: both creation-only settings are chosen here, say they are
+// permanent, and verification starts off — turning it on needs an explicit
+// confirmation first.
+describe('QueuesPage — Create Queue creation-only settings', () => {
+  function openCreateModal(mutateAsync = vi.fn().mockResolvedValue({ data: mockQueue() })) {
     vi.mocked(useCreateQueue).mockReturnValue({
       mutateAsync,
       isPending: false,
@@ -219,49 +220,120 @@ describe('QueuesPage — Create Queue service-start verification toggle', () => 
       typeof useQueues
     >);
     renderPage();
-    fireEvent.click(screen.getByRole('button', { name: 'Create Queue' }));
+    // The header and the empty state both offer it; either opens the form.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Create Queue' })[0]!);
     return mutateAsync;
   }
 
-  // The modal's name label is not tied to its input, so it is found as the
-  // label's own sibling rather than by accessible name.
-  function queueNameInput() {
-    return screen.getByText('Queue name').nextElementSibling as HTMLInputElement;
-  }
+  const verificationSwitch = () =>
+    screen.getByRole('switch', { name: 'Service-start verification code' });
 
-  it('shows the toggle, enabled by default', () => {
+  it('starts with verification off and multiple services on, both marked permanent', () => {
     openCreateModal();
-    const toggle = screen.getByRole('switch', { name: 'Service-start verification code' });
-    expect(toggle).toHaveAttribute('aria-checked', 'true');
-    expect(
-      screen.getByText('Require the customer verification code before staff can start service.'),
-    ).toBeInTheDocument();
+    expect(verificationSwitch()).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: 'Allow multiple services' })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+    expect(screen.getAllByText(/cannot be changed after the queue is created/i)).toHaveLength(2);
   });
 
-  it('sends requireServiceStartOtp: true when left on', async () => {
+  it('sends requireServiceStartOtp: false when left off', async () => {
     const mutateAsync = openCreateModal();
-    fireEvent.change(queueNameInput(), { target: { value: 'Pharmacy' } });
+    fireEvent.change(screen.getByLabelText('Queue name'), { target: { value: 'Pharmacy' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
+    await vi.waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'Pharmacy', requireServiceStartOtp: false, allowMultipleServices: true }),
+      ),
+    );
+  });
+
+  it('asks for confirmation before turning verification on; Cancel leaves it off', () => {
+    openCreateModal();
+    fireEvent.click(verificationSwitch());
+
+    expect(
+      screen.getByText(
+        'Service-start verification will be permanently enabled for this queue. This setting cannot be changed after the queue is created.',
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(verificationSwitch()).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('turns verification on only after "Enable permanently", keeping what was typed', async () => {
+    const mutateAsync = openCreateModal();
+    fireEvent.change(screen.getByLabelText('Queue name'), { target: { value: 'Pharmacy' } });
+    fireEvent.click(verificationSwitch());
+    fireEvent.click(screen.getByRole('button', { name: 'Enable permanently' }));
+
+    expect(verificationSwitch()).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('Queue name')).toHaveValue('Pharmacy');
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await vi.waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ requireServiceStartOtp: true })),
     );
   });
 
-  it('lets the creator turn it off before creating', async () => {
+  it('lets the creator choose one service per visit', async () => {
     const mutateAsync = openCreateModal();
-    fireEvent.change(queueNameInput(), { target: { value: 'Pharmacy' } });
-    const toggle = screen.getByRole('switch', { name: 'Service-start verification code' });
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-checked', 'false');
-
+    fireEvent.change(screen.getByLabelText('Queue name'), { target: { value: 'Pharmacy' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Allow multiple services' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-
     await vi.waitFor(() =>
-      expect(mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'Pharmacy', requireServiceStartOtp: false }),
-      ),
+      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ allowMultipleServices: false })),
     );
+  });
+
+  it('flags a non-Latin queue name immediately and blocks Create (ADR-056)', () => {
+    const mutateAsync = openCreateModal();
+    fireEvent.change(screen.getByLabelText('Queue name'), { target: { value: 'ফার্মেসি' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(/English letters/i);
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+});
+
+// ADR-059: every Create Queue action opens the real form, and someone who
+// may not create queues sees none at all.
+describe('QueuesPage — Create Queue actions', () => {
+  it('the header action opens the create form instead of navigating', () => {
+    vi.mocked(useCreateQueue).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<
+      typeof useCreateQueue
+    >);
+    vi.mocked(useQueues).mockReturnValue({ data: [mockQueue()], isLoading: false } as unknown as ReturnType<
+      typeof useQueues
+    >);
+    renderPage();
+    expect(screen.getAllByRole('button', { name: 'Create Queue' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Create Queue' }));
+    expect(screen.getByRole('dialog', { name: 'Create Queue' })).toBeInTheDocument();
+  });
+
+  it('the empty state offers the same action', () => {
+    vi.mocked(useCreateQueue).mockReturnValue({ mutateAsync: vi.fn(), isPending: false } as unknown as ReturnType<
+      typeof useCreateQueue
+    >);
+    vi.mocked(useQueues).mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<
+      typeof useQueues
+    >);
+    renderPage();
+    const buttons = screen.getAllByRole('button', { name: 'Create Queue' });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[1]!);
+    expect(screen.getByRole('dialog', { name: 'Create Queue' })).toBeInTheDocument();
+  });
+
+  it('STAFF (no manage_queues) sees no Create Queue action anywhere', () => {
+    mockHasPermission.mockReturnValue(false);
+    vi.mocked(useQueues).mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<
+      typeof useQueues
+    >);
+    renderPage();
+    expect(screen.queryByRole('button', { name: 'Create Queue' })).not.toBeInTheDocument();
+    expect(screen.getByText('No queues yet.')).toBeInTheDocument();
   });
 });
 

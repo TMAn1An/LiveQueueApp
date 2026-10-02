@@ -240,6 +240,18 @@ describe('rate limiting (Phase 7)', () => {
     });
   });
 
+  describe('password reset request rate limiter (ADR-058)', () => {
+    it('answers generically under the limit and returns 429 once it is exceeded', async () => {
+      const send = () =>
+        api().post('/api/auth/password-reset/request').send({ email: 'someone@example.com' });
+      expect((await send()).status).toBe(200);
+      expect((await send()).status).toBe(200);
+      const limited = await send();
+      expect(limited.status).toBe(429);
+      expect(limited.body.error.code).toBe('RATE_LIMITED');
+    });
+  });
+
   describe('existing auth rate limiter (unchanged)', () => {
     it('still enforces its original 20/15min limit and returns 429 in the standard format', async () => {
       let last;

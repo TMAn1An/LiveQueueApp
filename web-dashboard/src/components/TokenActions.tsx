@@ -170,7 +170,7 @@ export function TokenActions({
         {status === 'WAITING' && pickingCounter && (
           <select
             autoFocus
-            className="rounded-md border border-border-strong px-2 py-1 text-sm"
+            className="h-9 rounded-md border border-border-strong px-3 text-sm"
             defaultValue=""
             onBlur={() => setPickingCounter(false)}
             onChange={(e) => {
@@ -224,7 +224,7 @@ export function TokenActions({
               placeholder="Verification code"
               value={verificationCodeInput}
               onChange={(e) => setVerificationCodeInput(e.target.value)}
-              className="w-36 rounded-md border border-border-strong px-2 py-1 text-sm"
+              className="w-36 h-9 rounded-md border border-border-strong px-3 text-sm"
             />
             <Button type="submit" variant="primary" size="lg" loading={startToken.isPending}>
               {startToken.isPending ? 'Starting…' : 'Confirm'}
@@ -275,7 +275,7 @@ export function TokenActions({
               placeholder="Minutes"
               value={durationInput}
               onChange={(e) => setDurationInput(e.target.value)}
-              className="w-20 rounded-md border border-border-strong px-2 py-1 text-sm"
+              className="w-20 h-9 rounded-md border border-border-strong px-3 text-sm"
             />
             <Button type="submit" variant="primary" loading={setRequiredDuration.isPending}>
               {setRequiredDuration.isPending ? 'Updating…' : 'Set'}

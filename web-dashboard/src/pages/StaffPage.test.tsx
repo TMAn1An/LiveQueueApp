@@ -3,16 +3,23 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StaffPage } from './StaffPage';
 import {
+  useCancelRemovalRequest,
+  useCreateRemovalRequest,
   useCreateStaff,
   useDeleteStaff,
+  useRemovalRequests,
   useResendInvitation,
+  useReviewRemovalRequest,
   useStaffList,
   useUpdateStaff,
 } from '../hooks/useStaff';
-import type { Staff } from '../types/auth';
+import type { MembershipRemovalRequest, Staff, StaffRole } from '../types/auth';
 
+// ADR-057: what a row offers depends on who is looking. Each test sets the
+// signed-in actor; the default is the owner.
+const actor = vi.hoisted(() => ({ current: { id: 'owner1', role: 'OWNER' as string } }));
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: () => true }),
+  useAuth: () => ({ hasPermission: () => true, staff: actor.current }),
 }));
 vi.mock('../hooks/useStaff');
 vi.mock('../hooks/useDebouncedValue', () => ({ useDebouncedValue: (value: string) => value }));
@@ -42,8 +49,37 @@ function mockList(rows: Staff[]) {
   } as unknown as ReturnType<typeof useStaffList>);
 }
 
+const reviewMutateAsync = vi.fn();
+const createRequestMutateAsync = vi.fn();
+
+function mockRequests(rows: MembershipRemovalRequest[]) {
+  vi.mocked(useRemovalRequests).mockReturnValue({
+    data: rows,
+  } as unknown as ReturnType<typeof useRemovalRequests>);
+}
+
+function setActor(id: string, role: StaffRole) {
+  actor.current = { id, role };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  setActor('owner1', 'OWNER');
+  mockRequests([]);
+  reviewMutateAsync.mockResolvedValue({});
+  createRequestMutateAsync.mockResolvedValue({});
+  vi.mocked(useReviewRemovalRequest).mockReturnValue({
+    mutateAsync: reviewMutateAsync,
+    isPending: false,
+  } as unknown as ReturnType<typeof useReviewRemovalRequest>);
+  vi.mocked(useCreateRemovalRequest).mockReturnValue({
+    mutateAsync: createRequestMutateAsync,
+    isPending: false,
+  } as unknown as ReturnType<typeof useCreateRemovalRequest>);
+  vi.mocked(useCancelRemovalRequest).mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  } as unknown as ReturnType<typeof useCancelRemovalRequest>);
   createMutateAsync.mockResolvedValue({ data: { id: 's2', invitationEmailSent: true } });
   resendMutateAsync.mockResolvedValue({ data: { emailSent: true } });
   vi.mocked(useCreateStaff).mockReturnValue({
@@ -131,9 +167,10 @@ describe('StaffPage — invitations', () => {
 
 // V2 Product Completion checkpoint, Part B: removing a staff member must
 // ask first, through the shared ConfirmDialog rather than the page's own
-// ad-hoc inline "Confirm"/"Cancel" it used to show.
-describe('StaffPage — delete confirmation', () => {
-  it('does not call the delete mutation until Delete is clicked and confirmed', async () => {
+// ad-hoc inline "Confirm"/"Cancel" it used to show. ADR-057 renamed the
+// action Remove.
+describe('StaffPage — remove confirmation', () => {
+  it('does not call the delete mutation until Remove is clicked and confirmed', async () => {
     const mutate = vi.fn();
     vi.mocked(useDeleteStaff).mockReturnValue({
       mutate,
@@ -142,14 +179,15 @@ describe('StaffPage — delete confirmation', () => {
     mockList([staff({ id: 's1', name: 'Jane Doe', role: 'STAFF' })]);
     render(<StaffPage />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
 
-    expect(screen.getByText('Remove staff member "Jane Doe"?')).toBeInTheDocument();
+    expect(screen.getByText('Remove Jane Doe?')).toBeInTheDocument();
+    expect(screen.getByText(/signed out on every device/i)).toBeInTheDocument();
     expect(mutate).not.toHaveBeenCalled();
 
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    expect(screen.queryByText('Remove staff member "Jane Doe"?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remove Jane Doe?')).not.toBeInTheDocument();
     expect(mutate).not.toHaveBeenCalled();
   });
 
@@ -162,10 +200,154 @@ describe('StaffPage — delete confirmation', () => {
     mockList([staff({ id: 's1', name: 'Jane Doe', role: 'STAFF' })]);
     render(<StaffPage />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
-    await userEvent.click(deleteButtons[deleteButtons.length - 1]);
+    await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    const removeButtons = screen.getAllByRole('button', { name: 'Remove' });
+    await userEvent.click(removeButtons[removeButtons.length - 1]);
 
     expect(mutate).toHaveBeenCalledWith('s1', expect.anything());
+  });
+});
+
+function member(id: string, role: StaffRole, name = `${role} ${id}`): Staff {
+  return staff({ id, role, name, email: `${id}@example.com` });
+}
+
+const buttonsIn = (name: string) =>
+  screen
+    .getByText(name)
+    .closest('tr')!
+    .querySelectorAll('button');
+const labels = (name: string) => Array.from(buttonsIn(name)).map((b) => b.textContent?.trim());
+
+describe('StaffPage — ADR-057 role-aware membership actions', () => {
+  const rows = [
+    member('owner1', 'OWNER', 'Olivia Owner'),
+    member('admin1', 'ADMIN', 'Adam Admin'),
+    member('admin2', 'ADMIN', 'Aisha Admin'),
+    member('staff1', 'STAFF', 'Sami Staff'),
+  ];
+
+  it('owner: Remove on admins and staff, never on themselves', () => {
+    mockList(rows);
+    render(<StaffPage />);
+    expect(labels('Olivia Owner')).not.toContain('Remove');
+    expect(labels('Olivia Owner')).not.toContain('Request to leave');
+    expect(labels('Adam Admin')).toContain('Remove');
+    expect(labels('Sami Staff')).toContain('Remove');
+  });
+
+  it('admin: Remove on staff, Request removal on another admin, Request to leave on self', () => {
+    setActor('admin1', 'ADMIN');
+    mockList(rows);
+    render(<StaffPage />);
+    expect(labels('Sami Staff')).toContain('Remove');
+    expect(labels('Aisha Admin')).toEqual(expect.arrayContaining(['Request removal']));
+    expect(labels('Aisha Admin')).not.toContain('Remove');
+    expect(labels('Adam Admin')).toEqual(['Request to leave']);
+    expect(labels('Olivia Owner')).toEqual([]);
+  });
+
+  it('admin: a removal request says the owner must approve, and sends the target id', async () => {
+    setActor('admin1', 'ADMIN');
+    mockList(rows);
+    render(<StaffPage />);
+    const requestButton = Array.from(buttonsIn('Aisha Admin')).find(
+      (b) => b.textContent === 'Request removal',
+    )!;
+    await userEvent.click(requestButton);
+    expect(screen.getByText(/Nothing changes until the owner approves/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Send to owner' }));
+    expect(createRequestMutateAsync).toHaveBeenCalledWith({ targetStaffId: 'admin2', reason: undefined });
+  });
+
+  it('owner: pending requests can be rejected, or approved after confirming', async () => {
+    mockList(rows);
+    mockRequests([
+      {
+        id: 'r1',
+        requestType: 'SELF_LEAVE',
+        status: 'PENDING',
+        reason: 'Moving city',
+        requester: { id: 'staff1', name: 'Sami Staff', email: 'staff1@example.com' },
+        target: { id: 'staff1', name: 'Sami Staff', email: 'staff1@example.com', role: 'STAFF' },
+        reviewedAt: null,
+        reviewedBy: null,
+        reviewNote: null,
+        createdAt: '2026-10-02T00:00:00.000Z',
+      },
+    ]);
+    render(<StaffPage />);
+    expect(screen.getByText('Pending requests (1)')).toBeInTheDocument();
+    expect(screen.getByText('Sami Staff (STAFF) asks to leave.')).toBeInTheDocument();
+    expect(screen.getByText('Removal requested')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(reviewMutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText(/signs them out on every device/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Approve and remove' }));
+    expect(reviewMutateAsync).toHaveBeenCalledWith({ requestId: 'r1', decision: 'approve' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    expect(reviewMutateAsync).toHaveBeenCalledWith({ requestId: 'r1', decision: 'reject' });
+  });
+});
+
+describe('StaffPage — ADR-056 Latin-only names', () => {
+  it('flags a non-Latin name as it is typed and blocks sending', async () => {
+    render(<StaffPage />);
+    await userEvent.click(screen.getByRole('button', { name: /invite staff member/i }));
+    await userEvent.type(screen.getByLabelText('Name'), 'রহিম');
+    await userEvent.type(screen.getByLabelText('Email'), 'r@example.com');
+    expect(screen.getByRole('alert')).toHaveTextContent(/English letters/i);
+    expect(screen.getByRole('button', { name: /send invitation/i })).toBeDisabled();
+  });
+});
+
+describe('StaffPage — ADR-061 suspension follows the removal rules', () => {
+  const rows = [
+    member('owner1', 'OWNER', 'Olivia Owner'),
+    member('admin1', 'ADMIN', 'Adam Admin'),
+    member('admin2', 'ADMIN', 'Aisha Admin'),
+    member('staff1', 'STAFF', 'Sami Staff'),
+  ];
+
+  it('owner: Suspend on admins and staff, never on themselves', () => {
+    mockList(rows);
+    render(<StaffPage />);
+    expect(labels('Adam Admin')).toContain('Suspend');
+    expect(labels('Sami Staff')).toContain('Suspend');
+    expect(labels('Olivia Owner')).not.toContain('Suspend');
+  });
+
+  it('admin: Suspend on staff only — never on another admin, the owner or themselves', () => {
+    setActor('admin1', 'ADMIN');
+    mockList(rows);
+    render(<StaffPage />);
+    expect(labels('Sami Staff')).toContain('Suspend');
+    expect(labels('Aisha Admin')).not.toContain('Suspend');
+    expect(labels('Aisha Admin')).toContain('Request removal');
+    expect(labels('Olivia Owner')).not.toContain('Suspend');
+    expect(labels('Adam Admin')).not.toContain('Suspend');
+  });
+
+  it('suspending asks for confirmation first; reactivating does not', async () => {
+    const mutate = vi.fn();
+    vi.mocked(useUpdateStaff).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<
+      typeof useUpdateStaff
+    >);
+    mockList([member('staff1', 'STAFF', 'Sami Staff'), { ...member('staff2', 'STAFF', 'Suki Staff'), status: 'SUSPENDED' }]);
+    render(<StaffPage />);
+
+    const suspend = Array.from(buttonsIn('Sami Staff')).find((b) => b.textContent === 'Suspend')!;
+    await userEvent.click(suspend);
+    expect(screen.getByText('Suspend Sami Staff?')).toBeInTheDocument();
+    expect(mutate).not.toHaveBeenCalled();
+    const confirmButtons = screen.getAllByRole('button', { name: 'Suspend' });
+    await userEvent.click(confirmButtons[confirmButtons.length - 1]!);
+    expect(mutate).toHaveBeenCalledWith({ staffId: 'staff1', input: { status: 'SUSPENDED' } }, expect.anything());
+
+    const reactivate = Array.from(buttonsIn('Suki Staff')).find((b) => b.textContent === 'Reactivate')!;
+    await userEvent.click(reactivate);
+    expect(mutate).toHaveBeenLastCalledWith({ staffId: 'staff2', input: { status: 'ACTIVE' } }, expect.anything());
   });
 });

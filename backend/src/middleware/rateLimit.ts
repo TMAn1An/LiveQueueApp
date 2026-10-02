@@ -79,6 +79,18 @@ export const reportRateLimiter = createLimiter(
 export const emailRateLimiter = createLimiter(env.RATE_LIMIT_EMAIL_WINDOW_MS, env.RATE_LIMIT_EMAIL_MAX);
 
 /**
+ * ADR-058: "forgot password" requests. Same budget as emailRateLimiter (each
+ * one can send an email) but its own counter, so resetting a password never
+ * eats into the verification-resend allowance or the other way round. The
+ * service adds a per-account cooldown on top: this bounds one caller, that
+ * bounds one inbox.
+ */
+export const passwordResetRateLimiter = createLimiter(
+  env.RATE_LIMIT_EMAIL_WINDOW_MS,
+  env.RATE_LIMIT_EMAIL_MAX,
+);
+
+/**
  * Phone verification start/confirm. Its own category for the same reason
  * emailRateLimiter has one: a start request costs a real SMS, which is both
  * money and a way to harass a stranger's phone. Deliberately the tightest

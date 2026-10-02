@@ -280,6 +280,79 @@ export async function sendStaffInvitationEmail(input: {
   }
 }
 
+/**
+ * ADR-058: the "forgot password" link. Carries the link and nothing else —
+ * no password, no account details beyond the recipient's own name. Same
+ * never-throws contract as every other send here.
+ */
+export async function sendPasswordResetEmail(input: {
+  to: string;
+  name: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+}): Promise<boolean> {
+  const resend = getClient();
+  if (!resend) {
+    return false;
+  }
+
+  try {
+    const { error } = await resend.emails.send({
+      from: env.EMAIL_FROM,
+      to: input.to,
+      subject: 'Reset your LiveQueue password',
+      ...messageBody(
+        'Reset your LiveQueue password',
+        `
+<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+  <h2 style="color: #1e293b;">Reset your LiveQueue password</h2>
+  <p style="color: #334155;">
+    Hi ${escapeHtml(input.name)}, someone asked to reset the password for your LiveQueue account.
+  </p>
+  <p style="margin: 24px 0;">
+    <a href="${input.resetUrl}" style="background: #2563eb; color: #fff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: 600;">
+      Choose a new password
+    </a>
+  </p>
+  <p style="color: #64748b; font-size: 13px;">
+    Or paste this link into your browser:<br>
+    <a href="${input.resetUrl}" style="color: #2563eb; word-break: break-all;">${input.resetUrl}</a>
+  </p>
+  <p style="color: #64748b; font-size: 13px;">
+    This link works once and expires in ${input.expiresInMinutes} minutes. Resetting your password signs
+    you out on every device.
+  </p>
+  <p style="color: #94a3b8; font-size: 12px;">
+    If you didn't ask for this, you can ignore this email — your password stays the same.
+  </p>
+</div>`.trim(),
+        [
+          `Hi ${input.name},`,
+          '',
+          'Someone asked to reset the password for your LiveQueue account.',
+          `Choose a new password here: ${input.resetUrl}`,
+          '',
+          `This link works once and expires in ${input.expiresInMinutes} minutes. Resetting your password signs you out on every device.`,
+          '',
+          "If you didn't ask for this, you can ignore this email — your password stays the same.",
+        ].join('\n'),
+      ),
+    });
+    if (error) {
+      logger.error(
+        { name: error.name, message: error.message, from: env.EMAIL_FROM },
+        'Resend rejected the password reset email — check the sender domain and API key configuration',
+      );
+      return false;
+    }
+    logger.info('Password reset email sent');
+    return true;
+  } catch (err) {
+    logger.error({ message: (err as Error).message }, 'Failed to send the password reset email');
+    return false;
+  }
+}
+
 /** Escapes text taken from the organization or the invitee's own name — both
  * are free text an admin typed, and they are being placed into HTML. */
 function escapeHtml(value: string): string {

@@ -1,8 +1,9 @@
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useQueue } from '../hooks/useQueues';
 import { Card } from '../components/Card';
-import { Button } from '../components/Button';
+import { ButtonLink } from '../components/Button';
+import { TabBar } from '../components/TabBar';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
@@ -11,7 +12,7 @@ import { ServicesManager } from '../components/ServicesManager';
 import { FormBuilder } from '../components/FormBuilder';
 import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
 import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
-import { ServiceStartVerificationSetting } from '../components/ServiceStartVerificationSetting';
+import { QueueCreationSettings } from '../components/QueueCreationSettings';
 import { QueueSchedule } from '../components/QueueSchedule';
 import { QueueDetailsCard } from '../components/QueueDetailsCard';
 import { SectionHeading } from '../components/SectionHeading';
@@ -87,43 +88,26 @@ export function QueueDetailsPage() {
             )}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Link to={`/queues/${queue.id}/live`}>
-              <Button variant="primary" size="lg">
-                <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                </svg>
-                Open Queue
-              </Button>
-            </Link>
-            <Link to={`/queues/${queue.id}/counters`}>
-              <Button variant="secondary" size="lg">
-                Manage Counters
-              </Button>
-            </Link>
+            <ButtonLink to={`/queues/${queue.id}/live`} variant="primary" size="lg">
+              <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+              </svg>
+              Open Queue
+            </ButtonLink>
+            <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" size="lg">
+              Manage Counters
+            </ButtonLink>
           </div>
         </div>
 
-        {/* Settings Navigation Tabs */}
-        <div className="mt-5 border-t border-border pt-3">
-          <nav className="flex flex-wrap gap-1" aria-label="Queue configuration tabs">
-            {SETTINGS_TABS.map((tab) => {
-              const active = currentTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setTab(tab.id)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                    active
-                      ? 'bg-brand-600 text-white shadow-xs dark:bg-brand-500'
-                      : 'text-fg-soft hover:bg-subtle hover:text-fg'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              );
-            })}
-          </nav>
+        {/* Settings Navigation Tabs — the shared TabBar (ADR-059). */}
+        <div className="mt-5 border-t border-border pt-4">
+          <TabBar
+            label="Queue settings sections"
+            items={SETTINGS_TABS}
+            activeId={currentTab}
+            onSelect={(id) => setTab(id as SettingsTab)}
+          />
         </div>
       </div>
 
@@ -143,8 +127,11 @@ export function QueueDetailsPage() {
       {showServices && (
         <div className="space-y-6">
           <Card>
-            <SectionHeading title="Service Start Verification" help="Whether staff must enter the code shown in the customer’s app before service can start." />
-            <ServiceStartVerificationSetting queue={queue} />
+            <SectionHeading
+              title="Fixed at Creation"
+              help="Two rules chosen when this queue was created. They stay the same for the life of the queue."
+            />
+            <QueueCreationSettings queue={queue} />
           </Card>
 
           <Card>

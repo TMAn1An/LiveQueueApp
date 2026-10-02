@@ -3,7 +3,7 @@ import { useQueue } from '../hooks/useQueues';
 import { useCounters } from '../hooks/useCounters';
 import { Card } from '../components/Card';
 import { SectionHeading } from '../components/SectionHeading';
-import { Button } from '../components/Button';
+import { ButtonLink } from '../components/Button';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner } from '../components/Spinner';
@@ -61,17 +61,13 @@ export function QueueLivePage() {
             </div>
 
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Link to={`/queues/${queue.id}/counters`}>
-                <Button variant="secondary" size="lg">
-                  <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                    <path fillRule="evenodd" d="M10 2a8 8 0 100 16 8 8 0 000-16zm.75 6.75a.75.75 0 00-1.5 0v3.5a.75.75 0 001.5 0v-3.5zm-.75 6.5a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-                  </svg>
-                  Manage Counters
-                </Button>
-              </Link>
-              <Link to={`/queues/${queue.id}`}>
-                <Button variant="secondary">Queue Settings</Button>
-              </Link>
+              {/* Same size side by side (ADR-059): these used to be lg beside md. */}
+              <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" size="lg">
+                Manage Counters
+              </ButtonLink>
+              <ButtonLink to={`/queues/${queue.id}`} variant="secondary" size="lg">
+                Queue Settings
+              </ButtonLink>
             </div>
           </div>
         </div>

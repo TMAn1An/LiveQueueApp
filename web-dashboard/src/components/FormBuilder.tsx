@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useFormFields, useReplaceFormFields } from '../hooks/useFormFields';
 import { Button } from './Button';
+import { FieldError } from './FieldError';
+import { InfoHelp } from './InfoHelp';
+import { latinTextError } from '../utils/latinText';
 import { PermissionGate } from './PermissionGate';
 import { ErrorBanner } from './ErrorBanner';
 import { ApiError } from '../api/client';
@@ -20,8 +23,16 @@ const FIELD_TYPES: FormFieldType[] = [
 
 const OPTION_TYPES: FormFieldType[] = ['dropdown', 'radio'];
 
+const fieldInputClass =
+  'h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500';
+
 interface EditableField extends FormFieldInput {
   _localId: string;
+}
+
+function optionsError(field: FormFieldInput): string | null {
+  if (!OPTION_TYPES.includes(field.type)) return null;
+  return (field.options ?? []).map(latinTextError).find(Boolean) ?? null;
 }
 
 function toEditable(fields: QueueFormField[]): EditableField[] {
@@ -109,22 +120,22 @@ export function FormBuilder({ queueId }: { queueId: string }) {
     }
   }
 
+  // ADR-056: labels and options are what customers read, so they follow the
+  // same English/Latin rule the backend enforces on save.
+  const hasTextErrors = fields.some((f) => latinTextError(f.label) || optionsError(f));
+
   if (isLoading) return null;
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end">
-        <button
-          type="button"
-          onClick={() => setShowPreview(!showPreview)}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-fg-soft hover:bg-subtle transition-colors"
-        >
-          <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-muted">
+        <Button variant="outline" onClick={() => setShowPreview(!showPreview)}>
+          <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-muted">
             <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
             <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
           </svg>
           {showPreview ? 'Hide Customer Preview' : 'Preview Customer Form'}
-        </button>
+        </Button>
       </div>
 
       <ErrorBanner message={error} />
@@ -133,10 +144,10 @@ export function FormBuilder({ queueId }: { queueId: string }) {
       {showPreview && (
         <div className="rounded-xl border border-brand-200 bg-brand-50/20 p-5 shadow-xs dark:border-brand-900 dark:bg-brand-950/20">
           <div className="mb-4 flex items-center justify-between border-b border-brand-200 dark:border-brand-900 pb-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-brand-700 dark:text-brand-300">
+            <span className="flex items-center gap-0.5 text-xs font-bold uppercase tracking-wider text-brand-700 dark:text-brand-300">
               Customer Mobile Preview
+              <InfoHelp label="the customer preview">What arriving customers see after scanning the QR code.</InfoHelp>
             </span>
-            <span className="text-[11px] text-muted">What arriving customers see after scanning QR</span>
           </div>
 
           {fields.length === 0 ? (
@@ -249,20 +260,27 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                 <input
                   value={field.label}
                   placeholder="e.g. Full Name, Student ID"
+                  aria-label={`Field ${idx + 1} label`}
+                  aria-invalid={latinTextError(field.label) ? true : undefined}
                   onChange={(e) => updateField(field._localId, { label: e.target.value })}
-                  className="w-full rounded-md border border-border-strong px-2.5 py-1.5 text-sm bg-surface text-fg focus:border-brand-500"
+                  className={fieldInputClass}
                 />
+                <FieldError message={latinTextError(field.label)} />
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-fg-soft">
-                  Key <span className="text-[10px] text-muted font-normal">(identifier)</span>
-                </label>
+                <div className="mb-1 flex items-center gap-0.5">
+                  <label className="block text-xs font-medium text-fg-soft">Key</label>
+                  <InfoHelp label="the field key">
+                    A short identifier for this answer — letters, numbers and underscores. Filled in from the label until you change it.
+                  </InfoHelp>
+                </div>
                 <input
                   value={field.key}
                   placeholder="e.g. full_name"
+                  aria-label={`Field ${idx + 1} key`}
                   onChange={(e) => updateField(field._localId, { key: e.target.value })}
-                  className="w-full rounded-md border border-border-strong px-2.5 py-1.5 text-sm font-mono text-fg bg-surface focus:border-brand-500"
+                  className={`${fieldInputClass} font-mono`}
                 />
               </div>
 
@@ -270,8 +288,9 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                 <label className="mb-1 block text-xs font-medium text-fg-soft">Type</label>
                 <select
                   value={field.type}
+                  aria-label={`Field ${idx + 1} type`}
                   onChange={(e) => updateField(field._localId, { type: e.target.value as FormFieldType })}
-                  className="w-full rounded-md border border-border-strong px-2.5 py-1.5 text-sm bg-surface text-fg focus:border-brand-500"
+                  className={fieldInputClass}
                 >
                   {FIELD_TYPES.map((t) => (
                     <option key={t} value={t}>
@@ -281,7 +300,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                 </select>
               </div>
 
-              <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-6">
+              <div className="flex items-end justify-between gap-3 pt-2 sm:justify-end sm:pt-5">
                 <label className="flex items-center gap-1.5 text-xs font-medium text-fg-soft cursor-pointer">
                   <input
                     type="checkbox"
@@ -305,6 +324,8 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                 <input
                   value={(field.options ?? []).join(', ')}
                   placeholder="Option 1, Option 2, Option 3"
+                  aria-label={`Field ${idx + 1} options`}
+                  aria-invalid={optionsError(field) ? true : undefined}
                   onChange={(e) =>
                     updateField(field._localId, {
                       options: e.target.value
@@ -313,8 +334,9 @@ export function FormBuilder({ queueId }: { queueId: string }) {
                         .filter(Boolean),
                     })
                   }
-                  className="w-full rounded-md border border-border-strong px-2.5 py-1.5 text-sm bg-surface text-fg focus:border-brand-500"
+                  className={fieldInputClass}
                 />
+                <FieldError message={optionsError(field)} />
               </div>
             )}
           </div>
@@ -322,6 +344,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
       </div>
 
       <PermissionGate permission="manage_queues">
+        {/* One size for both (ADR-059): Save Form used to be lg beside an md Add Field. */}
         <div className="flex flex-wrap items-center gap-2 pt-2">
           <Button variant="secondary" onClick={addField}>
             <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -330,8 +353,8 @@ export function FormBuilder({ queueId }: { queueId: string }) {
             Add Field
           </Button>
           <Button
-            size="lg"
-            disabled={!dirty || replaceFormFields.isPending}
+            disabled={!dirty || hasTextErrors}
+            loading={replaceFormFields.isPending}
             onClick={() => void handleSave()}
           >
             {replaceFormFields.isPending ? 'Saving…' : 'Save Form'}

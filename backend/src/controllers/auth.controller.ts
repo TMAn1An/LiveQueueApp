@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import * as authService from '../services/auth.service';
 import * as auditService from '../services/audit.service';
+import * as passwordResetService from '../services/passwordReset.service';
 import * as emailVerificationService from '../services/emailVerification.service';
 import * as organizationService from '../services/organization.service';
 import * as staffInvitationService from '../services/staffInvitation.service';
@@ -118,4 +119,36 @@ export async function resendVerificationEmail(req: Request, res: Response) {
 export async function acceptInvitation(req: Request, res: Response) {
   const staff = await staffInvitationService.acceptInvitation(req.body.token, req.body.password);
   res.status(200).json({ success: true, data: { email: staff.email } });
+}
+
+/**
+ * ADR-058. Answers before doing any work, with the same body for every
+ * address, so neither the response nor its timing says whether an account
+ * exists. requestPasswordReset never throws.
+ */
+export async function requestPasswordReset(req: Request, res: Response) {
+  res.status(200).json({
+    success: true,
+    data: { message: passwordResetService.GENERIC_RESET_RESPONSE },
+  });
+  await passwordResetService.requestPasswordReset(req.body.email);
+}
+
+export async function validatePasswordResetToken(req: Request, res: Response) {
+  const valid = await passwordResetService.isResetTokenUsable(req.query.token as string);
+  res.status(200).json({ success: true, data: { valid } });
+}
+
+/** Never signs the person in: they log in afresh with the new password,
+ * like an accepted invitation. */
+export async function resetPassword(req: Request, res: Response) {
+  const staff = await passwordResetService.resetPassword(req.body.token, req.body.password);
+  res.status(200).json({ success: true, data: { reset: true } });
+  await auditService.recordAuditEventSafely({
+    actor: { staffId: staff.id, organizationId: staff.organizationId, staffEmail: staff.email },
+    action: 'password_reset',
+    entityType: 'staff',
+    entityId: staff.id,
+    ipAddress: req.ip,
+  });
 }

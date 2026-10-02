@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useFormFields } from '../hooks/useFormFields';
 import { useUpdateQueue } from '../hooks/useQueues';
 import { Button } from '../components/Button';
+import { InfoHelp } from '../components/InfoHelp';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PermissionGate } from '../components/PermissionGate';
 import { useAuth } from '../context/AuthContext';
@@ -81,7 +82,7 @@ function needsEmail(mode: RepeatIdentityMode): boolean {
   return mode === 'VERIFIED_EMAIL' || mode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD';
 }
 
-const inputClass = 'w-full rounded-md border border-border-strong px-2 py-1.5 text-sm';
+const inputClass = 'w-full h-9 rounded-md border border-border-strong px-3 text-sm';
 
 /** The stored cutoff instant rendered back onto the queue's clock as the
  * `YYYY-MM-DDTHH:mm` a datetime-local input expects. Round-tripping through
@@ -390,13 +391,13 @@ export function RepeatVisitPolicy({
                   step={1}
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="w-24 rounded-md border border-border-strong px-2 py-1.5 text-sm"
+                  className="w-24 h-9 rounded-md border border-border-strong px-3 text-sm"
                 />
                 <select
                   aria-label="Unit"
                   value={unit}
                   onChange={(e) => setUnit(e.target.value as RepeatRestrictionUnit)}
-                  className="flex-1 rounded-md border border-border-strong px-2 py-1.5 text-sm"
+                  className="flex-1 h-9 rounded-md border border-border-strong px-3 text-sm"
                 >
                   {UNIT_ORDER.map((value) => (
                     <option key={value} value={value}>
@@ -424,12 +425,13 @@ export function RepeatVisitPolicy({
                   type="datetime-local"
                   value={until}
                   onChange={(e) => setUntil(e.target.value)}
-                  className="w-full rounded-md border border-border-strong px-2 py-1.5 text-sm"
+                  className="w-full h-9 rounded-md border border-border-strong px-3 text-sm"
                 />
-                <p className="mt-1 text-xs text-muted">
-                  On this queue's clock
-                  {effectiveTimezone ? ` (${effectiveTimezone})` : ''} — the same moment for every
-                  customer, wherever they are.
+                <p className="mt-1 inline-flex items-center text-xs text-muted">
+                  On this queue&apos;s clock{effectiveTimezone ? ` (${effectiveTimezone})` : ''}
+                  <InfoHelp label="the cutoff clock">
+                    The same moment for every customer, wherever they are.
+                  </InfoHelp>
                 </p>
               </div>
             )}
@@ -446,38 +448,36 @@ export function RepeatVisitPolicy({
 
           <fieldset className="space-y-2">
             <legend className="mb-1 text-xs text-muted">Repeat restriction scope</legend>
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="radio"
-                name="repeat-scope"
-                checked={scope === 'QUEUE'}
-                onChange={() => setScope('QUEUE')}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="block font-medium text-fg-soft">Entire queue</span>
-                <span className="block text-xs text-muted">
-                  Repeat limits apply across all sessions.
-                </span>
-              </span>
-            </label>
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="radio"
-                name="repeat-scope"
-                checked={scope === 'SESSION'}
-                onChange={() => setScope('SESSION')}
-                disabled={sessionScopeUnavailable && scope !== 'SESSION'}
-                className="mt-0.5"
-              />
-              <span>
-                <span className="block font-medium text-fg-soft">Per session</span>
-                <span className="block text-xs text-muted">
-                  A completed visit consumes the repeat allowance only for that assigned session
-                  occurrence — a customer served in the morning may join the afternoon session.
-                </span>
-              </span>
-            </label>
+            {/* The ⓘ sits beside the label, not inside it, so opening it
+                never selects the option. */}
+            <div className="flex items-center">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="repeat-scope"
+                  checked={scope === 'QUEUE'}
+                  onChange={() => setScope('QUEUE')}
+                />
+                <span className="font-medium text-fg-soft">Entire queue</span>
+              </label>
+              <InfoHelp label="the entire-queue scope">Repeat limits apply across all sessions.</InfoHelp>
+            </div>
+            <div className="flex items-center">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="repeat-scope"
+                  checked={scope === 'SESSION'}
+                  onChange={() => setScope('SESSION')}
+                  disabled={sessionScopeUnavailable && scope !== 'SESSION'}
+                />
+                <span className="font-medium text-fg-soft">Per session</span>
+              </label>
+              <InfoHelp label="the per-session scope">
+                A completed visit consumes the repeat allowance only for that assigned session
+                occurrence — a customer served in the morning may join the afternoon session.
+              </InfoHelp>
+            </div>
             {sessionScopeUnavailable && (
               <p className="text-xs text-muted">
                 Per-session limits need this queue&apos;s weekly schedule. Turn it on under Schedule
@@ -495,9 +495,22 @@ export function RepeatVisitPolicy({
           )}
 
           <div>
-            <label className="mb-1 block text-xs text-muted" htmlFor="repeat-mode">
-              How is the same customer recognised?
-            </label>
+            <div className="mb-1 flex items-center gap-0.5">
+              <label className="block text-xs text-muted" htmlFor="repeat-mode">
+                How is the same customer recognised?
+              </label>
+              <InfoHelp label="how customers are recognised">
+                <span className="block">{MODE_HELP[mode]}</span>
+                {mode === 'VERIFIED_EMAIL' && (
+                  // With email alone, one mailbox is one entitlement, however
+                  // many people read it.
+                  <span className="mt-1 block">
+                    People who share one mailbox share one visit. If that matters here, use verified
+                    email + a custom unique field instead.
+                  </span>
+                )}
+              </InfoHelp>
+            </div>
             <select
               id="repeat-mode"
               value={mode}
@@ -510,23 +523,19 @@ export function RepeatVisitPolicy({
                 </option>
               ))}
             </select>
-            <p className="mt-1 text-xs text-muted">{MODE_HELP[mode]}</p>
-            {mode === 'VERIFIED_EMAIL' && (
-              // Worth stating plainly rather than letting an operator discover
-              // it from a support ticket: with email alone, one mailbox is one
-              // entitlement, however many people read it.
-              <p className="mt-1 text-xs text-muted">
-                People who share one mailbox share one visit. If that matters here, use verified
-                email + a custom unique field instead.
-              </p>
-            )}
           </div>
 
           {needsField(mode) && (
             <div>
-              <label className="mb-1 block text-xs text-muted" htmlFor="repeat-field">
-                Which form question identifies the customer?
-              </label>
+              <div className="mb-1 flex items-center gap-0.5">
+                <label className="block text-xs text-muted" htmlFor="repeat-field">
+                  Which form question identifies the customer?
+                </label>
+                <InfoHelp label="which questions can identify a customer">
+                  Only required text, number, email and phone questions can identify someone. A
+                  yes/no or multiple-choice answer would put unrelated people under one identity.
+                </InfoHelp>
+              </div>
               {eligibleFields.length > 0 ? (
                 <>
                   <select
@@ -542,10 +551,6 @@ export function RepeatVisitPolicy({
                       </option>
                     ))}
                   </select>
-                  <p className="mt-1 text-xs text-muted">
-                    Only required text, number, email and phone questions can identify someone. A
-                    yes/no or multiple-choice answer would put unrelated people under one identity.
-                  </p>
                 </>
               ) : (
                 <p className="rounded-md border border-border bg-subtle p-2 text-xs text-fg-soft">
@@ -556,9 +561,12 @@ export function RepeatVisitPolicy({
             </div>
           )}
 
-          <p className="text-xs text-muted">
-            Changing these settings applies to customers joining from now on. Visits already
-            recorded are kept, so a customer who has used their visit stays recognised.
+          <p className="inline-flex items-center text-xs text-muted">
+            When changes apply
+            <InfoHelp label="when repeat-visit changes apply">
+              Changing these settings applies to customers joining from now on. Visits already
+              recorded are kept, so a customer who has used their visit stays recognised.
+            </InfoHelp>
           </p>
         </div>
       )}

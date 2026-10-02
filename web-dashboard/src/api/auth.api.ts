@@ -20,6 +20,30 @@ export function checkOrganizationNameAvailability(name: string) {
   });
 }
 
+/** ADR-058: always answers with the same generic message, whether or not the
+ * address belongs to an account. */
+export function requestPasswordReset(email: string) {
+  return apiFetch<{ message: string }>('/api/auth/password-reset/request', {
+    method: 'POST',
+    body: { email },
+  });
+}
+
+/** Read-only: checking a link never uses it up. */
+export function validatePasswordResetToken(token: string) {
+  return apiFetch<{ valid: boolean }>('/api/auth/password-reset/validate', {
+    method: 'GET',
+    query: { token },
+  });
+}
+
+export function resetPassword(token: string, password: string) {
+  return apiFetch<{ reset: true }>('/api/auth/password-reset/confirm', {
+    method: 'POST',
+    body: { token, password },
+  });
+}
+
 export function login(input: { email: string; password: string }) {
   return apiFetch<AuthResult>('/api/auth/login', { method: 'POST', body: input });
 }
