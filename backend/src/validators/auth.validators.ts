@@ -80,3 +80,23 @@ export const verifyEmailSchema = {
     token: z.string().min(1, 'token is required.'),
   }),
 };
+
+/** ADR-058: "forgot password". Only the address — the response is the same
+ * whether or not it belongs to an account. */
+export const requestPasswordResetSchema = {
+  body: z.object({ email: emailSchema }).strict(),
+};
+
+export const resetTokenQuerySchema = {
+  query: z.object({ token: z.string().trim().min(1, 'token is required.').max(512) }),
+};
+
+/** The new password follows the same policy as registration. */
+export const resetPasswordSchema = {
+  body: z
+    .object({
+      token: z.string().trim().min(1, 'A reset token is required.').max(512),
+      password: passwordSchema,
+    })
+    .strict(),
+};

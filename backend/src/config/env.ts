@@ -115,6 +115,8 @@ const envSchema = z.object({
   // since the dashboard (a client-rendered SPA) is what actually completes
   // verification by calling this API in turn.
   APP_BASE_URL: z.string().default('http://localhost:5173'),
+  // ADR-058: how long a "forgot password" link stays usable.
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().positive().max(240).default(30),
 
   RATE_LIMIT_EMAIL_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_EMAIL_MAX: z.coerce.number().int().positive().default(3),

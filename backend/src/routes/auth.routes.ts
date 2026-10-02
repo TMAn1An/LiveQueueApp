@@ -4,6 +4,7 @@ import { authenticate } from '../middleware/authenticate';
 import {
   authRateLimiter,
   emailRateLimiter,
+  passwordResetRateLimiter,
   publicRateLimiter,
   sensitiveRateLimiter,
 } from '../middleware/rateLimit';
@@ -15,6 +16,9 @@ import {
   organizationNameAvailabilitySchema,
   refreshSchema,
   registerSchema,
+  requestPasswordResetSchema,
+  resetPasswordSchema,
+  resetTokenQuerySchema,
   verifyEmailSchema,
 } from '../validators/auth.validators';
 import { acceptInvitationSchema } from '../validators/staff.validators';
@@ -50,6 +54,29 @@ router.post(
   authRateLimiter,
   validate(acceptInvitationSchema),
   authController.acceptInvitation,
+);
+
+// ADR-058: forgot password. All public. The request has its own per-IP
+// limiter (and a per-account cooldown in the service); the
+// check and confirm steps share the login limiter, which already exists to
+// slow guessing.
+router.post(
+  '/password-reset/request',
+  passwordResetRateLimiter,
+  validate(requestPasswordResetSchema),
+  authController.requestPasswordReset,
+);
+router.get(
+  '/password-reset/validate',
+  authRateLimiter,
+  validate(resetTokenQuerySchema),
+  authController.validatePasswordResetToken,
+);
+router.post(
+  '/password-reset/confirm',
+  authRateLimiter,
+  validate(resetPasswordSchema),
+  authController.resetPassword,
 );
 
 // V2 Checkpoint 2 (ADR-024). Public — the token itself is the credential;

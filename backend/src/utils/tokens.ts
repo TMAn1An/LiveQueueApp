@@ -7,6 +7,8 @@ export interface AccessTokenPayload {
   sub: string;
   organizationId: string;
   role: StaffRole;
+  /** Issued-at, in seconds — set by jsonwebtoken on every signed token. */
+  iat?: number;
 }
 
 export function signAccessToken(payload: AccessTokenPayload): string {

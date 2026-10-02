@@ -170,11 +170,19 @@ model Staff {
   /// (every owner, and every staff member created before ADR-035).
   invitationSentAt    DateTime? @map("invitation_sent_at")
 
+  /// ADR-058: access tokens issued before this instant are refused, even
+  /// though their 15-minute JWT lifetime has not run out. Set by a password
+  /// reset, which also revokes every refresh session, so "sign out
+  /// everywhere" takes effect at once rather than when the last access token
+  /// expires. Null for every account that has never reset its password.
+  accessRevokedAt DateTime? @map("access_revoked_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  sessions Session[]
-  counters Counter[]
+  sessions            Session[]
+  counters            Counter[]
+  passwordResetTokens PasswordResetToken[]
 
   @@index([organizationId])
   @@map("staff")
@@ -1014,4 +1022,21 @@ model MembershipRemovalRequest {
   @@unique([targetStaffId, requestType, activeSlot])
   @@index([organizationId, status, createdAt])
   @@map("membership_removal_requests")
+}
+
+/// ADR-058: a "forgot password" link. Only the SHA-256 hash of the emailed
+/// value is stored, like Session.refreshTokenHash. Single use (usedAt), short
+/// lived (expiresAt), and every other outstanding link for the account is
+/// deleted when one is redeemed or a newer one is issued.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  staffId   String    @map("staff_id")
+  staff     Staff     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([staffId, createdAt])
+  @@map("password_reset_tokens")
 }

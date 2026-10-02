@@ -10,6 +10,8 @@ export const AUDIT_ACTIONS = [
   'login',
   'logout',
   'password_changed',
+  // ADR-058: a forgot-password link was redeemed.
+  'password_reset',
   'email_verified',
   'staff_created',
   'staff_updated',
