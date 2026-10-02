@@ -78,7 +78,7 @@ describe('QueueDetailsCard — what is shown is what can be edited', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
-  it.each(['1', '121', '2.5'])('refuses a reminder of %s minutes — outside what a customer could choose', async (value) => {
+  it.each(['1', '121', '2.5'])('refuses a reminder of %s minutes — outside what a person could choose', async (value) => {
     render(<QueueDetailsCard queue={queue} />);
     await userEvent.click(screen.getByRole('button', { name: 'Edit Details' }));
 
@@ -88,12 +88,12 @@ describe('QueueDetailsCard — what is shown is what can be edited', () => {
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
-  it('says the reminder is a default the customer can override', async () => {
+  it('says the reminder is a default the person can override', async () => {
     render(<QueueDetailsCard queue={queue} />);
-    expect(screen.getByText('Unless the customer picks their own time')).toBeInTheDocument();
+    expect(screen.getByText('Unless the person picks their own time')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Edit Details' }));
-    expect(screen.getByText(/Used unless a customer picks their own time in the app/)).toBeInTheDocument();
+    expect(screen.getByText(/Used unless a person picks their own time in the app/)).toBeInTheDocument();
   });
 
   it('keeps form version read-only and refuses an empty prefix', async () => {

@@ -91,7 +91,7 @@ class _EmailVerificationSectionState extends State<EmailVerificationSection> {
         Text('Verify your email address', style: theme.textTheme.titleMedium),
         const SizedBox(height: 4),
         Text(
-          'This queue limits how often one customer may return, so it needs to '
+          'This queue limits how often one person may return, so it needs to '
           'know who you are. We will email you a code.',
           style: theme.textTheme.bodySmall,
         ),

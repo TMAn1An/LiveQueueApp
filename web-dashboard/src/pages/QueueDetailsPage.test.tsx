@@ -113,7 +113,7 @@ describe('QueueDetailsPage — settings tabs and locked creation settings', () =
   const TABS = [
     'General & Timezone',
     'Services & Verification',
-    'Customer Form',
+    'Join Form',
     'Schedule & Capacity',
     'Repeat Visits',
     'QR Code & Entry',
@@ -153,7 +153,7 @@ describe('QueueDetailsPage — settings tabs and locked creation settings', () =
     expect(active).toHaveAttribute('aria-current', 'page');
     expect(active.querySelector('svg')).not.toBeNull();
     expect(active.className).toContain('bg-brand-600');
-    const inactive = screen.getByRole('button', { name: 'Customer Form' });
+    const inactive = screen.getByRole('button', { name: 'Join Form' });
     expect(inactive).not.toHaveAttribute('aria-current');
     expect(inactive.className).toContain('bg-surface');
   });

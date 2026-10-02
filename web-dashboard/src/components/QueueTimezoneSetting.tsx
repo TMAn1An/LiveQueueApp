@@ -72,7 +72,7 @@ export function QueueTimezoneSetting({
               No timezone set.
               <InfoHelp label="when a timezone is needed">
                 Needed only for a monthly or yearly repeat limit, a fixed cutoff date, and showing
-                queue-local times to customers.
+                queue-local times to people.
               </InfoHelp>
             </p>
           </div>

@@ -137,7 +137,7 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
             <Field
               label="Reminder (minutes before turn)"
               htmlFor="queue-reminder"
-              help={`The queue's default, ${MIN_REMINDER_MINUTES}–${MAX_REMINDER_MINUTES} minutes. Used unless a customer picks their own time in the app.`}
+              help={`The queue's default, ${MIN_REMINDER_MINUTES}–${MAX_REMINDER_MINUTES} minutes. Used unless a person picks their own time in the app.`}
               error={reminderError}
             >
               <input
@@ -178,11 +178,11 @@ export function QueueDetailsCard({ queue }: { queue: Queue }) {
           <Detail
             label="Reminder"
             value={`${queue.defaultNotificationMinutes} min before`}
-            help="Unless the customer picks their own time"
+            help="Unless the person picks their own time"
           />
           {/* Multiple services is fixed at creation (ADR-055) and shown,
               locked, under Services & Verification — not here. */}
-          <Detail label="Form version" value={`v${queue.formVersion}`} help="Changes by itself whenever the customer form is edited." />
+          <Detail label="Form version" value={`v${queue.formVersion}`} help="Changes by itself whenever the join form is edited." />
           <div className="col-span-full rounded-lg bg-subtle/50 p-3">
             <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Description</dt>
             <dd className="mt-1 text-sm text-fg-soft">{queue.description || '—'}</dd>

@@ -197,7 +197,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(ServiceSelectionScreen), findsOneWidget);
-      expect(find.text('This queue is not currently accepting new customers.'), findsOneWidget);
+      expect(find.text('This queue is not currently accepting new arrivals.'), findsOneWidget);
       expect(find.text('General Inquiry'), findsNothing);
       expect(find.widgetWithText(FilledButton, 'Next'), findsNothing);
     });

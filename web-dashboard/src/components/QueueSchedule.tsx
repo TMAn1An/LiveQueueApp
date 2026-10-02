@@ -208,7 +208,7 @@ function SessionRow({
       {confirmingDelete && (
         <ConfirmDialog
           title={`Remove the ${formatRange(session.startMinute, session.endMinute)} session?`}
-          message="Customers already assigned to it keep their original time — only future joins are affected. This cannot be undone."
+          message="People already assigned to it keep their original time — only future joins are affected. This cannot be undone."
           confirming={deleteSession.isPending}
           onConfirm={() =>
             deleteSession.mutate(session.id, {
@@ -336,7 +336,7 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
         onChange={(next) => void toggleEnabled(next)}
         disabled={!canEdit || updateQueue.isPending}
         label="Restrict this queue to a weekly schedule"
-        help="Off: customers may join at any time, exactly as today."
+        help="Off: people may join at any time, exactly as today."
       />
 
       {queue.scheduleEnabled && (
@@ -373,15 +373,15 @@ export function QueueSchedule({ queue }: { queue: Queue }) {
             checked={queue.scheduleVisibleToCustomers}
             onChange={(next) => void toggleVisible(next)}
             disabled={!canEdit || updateQueue.isPending}
-            label="Show today's hours to customers"
+            label="Show today's hours to people joining"
             help="Off: the app still explains why a join failed, just not the full schedule."
           />
 
           <div>
             <div className="mb-2 flex items-center gap-0.5">
               <h3 className="text-sm font-semibold text-fg-soft">Sessions</h3>
-              <InfoHelp label="how customers are placed in sessions">
-                A customer who joins while the current session is full, between sessions, or before
+              <InfoHelp label="how people are placed in sessions">
+                A person who joins while the current session is full, between sessions, or before
                 the first session is placed in the next session today that has room, and joins the
                 line when that session starts — they cannot be called earlier. Once today&apos;s
                 last session has ended, or every remaining session is full, new joins are refused.

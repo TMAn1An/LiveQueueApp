@@ -112,7 +112,7 @@ export function describeScheduleUnavailable(code: ScheduleUnavailableCode): stri
     case 'SCHEDULE_DAILY_CAPACITY_REACHED':
       return 'This queue has reached its capacity for today.';
     default:
-      return 'This queue is not currently accepting new customers.';
+      return 'This queue is not currently accepting new arrivals.';
   }
 }
 

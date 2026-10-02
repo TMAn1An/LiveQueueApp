@@ -1742,3 +1742,13 @@ Blocking only `status` would not have been enough: an admin could demote a fello
 - A label that becomes blank clears the key and hands it back to the label, whether or not it was typed — there is never a key without a label.
 - A saved field starts manual: rewording its label keeps its key, because answers already given and the repeat-visit identity rule may refer to it.
 - Save is disabled while any row has a blank label, a blank or invalid key, or a key another row uses, with the reason shown on the row. `keyManual` and the row id are stripped before saving; the request body is unchanged.
+
+## ADR-066: "Person" and "people", everywhere a user reads it (2026-10-02)
+
+**Status:** Implemented on `feature/terminology-form-counter-governance`. Extends ADR-060's skip wording to the whole product.
+
+**Decision.** Text a user reads — dashboard labels, headings, help, empty states, confirmations; backend error messages that the dashboard and app show as-is; mobile app strings and notifications — calls the people in a queue "person" / "people", in natural phrasing ("people waiting", "1 person called now", "Person details", "the join form"). Where a literal swap read badly it was rewritten: "not accepting new customers" → "not accepting new arrivals", "is accepting customers again" → "is open to join again", "Earlier customers must be handled first" → "People who joined earlier must be served first", "Customer Form" → "Join Form".
+
+**Unchanged on purpose.** Stable identifiers and contracts: enum codes (`CUSTOMER_NOT_PRESENT`, `CUSTOMER_LEFT`, reminder source `CUSTOMER`), API fields (`customerContext`, `scheduleVisibleToCustomers`, `customerEmail…`), database tables and columns (`customer_email_verifications`, …), migration names, environment variables (`CUSTOMER_IDENTITY_SECRET`), the HMAC purpose strings in `utils/customerIdentity.ts` (changing them would invalidate every stored identity), type/function names, log messages and code comments. A queue's own `clientTerminology` (an organization may call its people "Customer", "Patient" …) is the organization's choice and is shown as they set it. The specification and older ADRs keep their historical wording.
+
+**Guard.** `web-dashboard/src/terminology.test.ts` fails if a bare "customer" appears outside a comment in dashboard source.

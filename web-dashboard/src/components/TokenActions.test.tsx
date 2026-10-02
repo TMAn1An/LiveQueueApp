@@ -180,7 +180,7 @@ describe('TokenActions — queue without the service-start code (ADR-041)', () =
         new ApiError(
           422,
           'SERVICE_START_VERIFICATION_REQUIRED',
-          "This queue requires the customer's verification code to start service.",
+          "This queue requires the person's verification code to start service.",
         ),
       );
     });
@@ -189,7 +189,7 @@ describe('TokenActions — queue without the service-start code (ADR-041)', () =
     await user.click(screen.getByText('Start'));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "This queue requires the customer's verification code to start service.",
+      "This queue requires the person's verification code to start service.",
     );
   });
 
@@ -352,7 +352,7 @@ describe('TokenActions — Complete stays one click; feedback is optional (ADR-0
     await user.click(screen.getByText('Feedback'));
     expect(completeMutate).not.toHaveBeenCalled();
     await user.type(
-      screen.getByLabelText('Feedback for the customer (optional)'),
+      screen.getByLabelText('Feedback for the person (optional)'),
       '  Please bring the original document next time.  ',
     );
     await user.click(
@@ -476,11 +476,11 @@ describe('TokenActions — Skip unlocks exactly with Call', () => {
     expect(screen.queryByText('Locked')).not.toBeInTheDocument();
     expect(screen.getByText('Scheduled')).toHaveAttribute(
       'title',
-      "This customer's assigned session has not started yet.",
+      "This person's assigned session has not started yet.",
     );
   });
 
-  it('explains a locked row caused by earlier customers differently', () => {
+  it('explains a locked row caused by earlier people differently', () => {
     render(
       <TokenActions
         tokenId="t1"
@@ -493,11 +493,11 @@ describe('TokenActions — Skip unlocks exactly with Call', () => {
 
     expect(screen.getByText('Locked')).toHaveAttribute(
       'title',
-      'Earlier customers must be handled first.',
+      'People who joined earlier must be served first.',
     );
   });
 
-  it('still allows skipping a customer already at a counter', () => {
+  it('still allows skipping a person already at a counter', () => {
     render(<TokenActions tokenId="t1" queueId="q1" status="CALLED" />);
     expect(screen.getByText('Skip')).toBeInTheDocument();
   });

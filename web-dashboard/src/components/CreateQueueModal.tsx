@@ -180,8 +180,8 @@ export function CreateQueueModal({
           <span className="inline-flex items-center text-xs text-muted">
             Repeat-visit limits
             <InfoHelp label="repeat-visit limits">
-              Customers may join as often as they like. To limit repeat visits, open the queue after
-              creating it and set up how customers are identified.
+              People may join as often as they like. To limit repeat visits, open the queue after
+              creating it and set up how people are identified.
             </InfoHelp>
           </span>
           <div className="flex gap-2">

@@ -31,7 +31,7 @@ export function ReportsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Reports"
-        description="Analyze customer queue throughput, wait times, counter utilization, and peak traffic hours."
+        description="Analyze queue throughput, wait times, counter utilization, and peak traffic hours."
         actions={
           <PermissionGate permission="export_reports">
             <Button
@@ -217,7 +217,7 @@ export function ReportsPage() {
           <Card>
             <SectionHeading
               title="Peak Hours"
-              help="When customers arrive: the number of arrivals in each hour of the day."
+              help="When people arrive: the number of arrivals in each hour of the day."
             />
             {report.peakHours.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted italic">No hourly traffic data available.</p>

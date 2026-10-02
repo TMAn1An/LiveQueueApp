@@ -6,7 +6,7 @@ import { PageHeader } from './PageHeader';
 import { SectionHeading } from './SectionHeading';
 import { ErrorBanner } from './ErrorBanner';
 
-const HELP = 'Configure when this queue accepts customers and how many people can join each session.';
+const HELP = 'Configure when this queue accepts people and how many people can join each session.';
 
 function renderHelp() {
   render(
@@ -193,11 +193,11 @@ describe('InfoHelp', () => {
 
 describe('SectionHeading', () => {
   it('shows the title, and keeps the explanation behind the info trigger instead of under it', () => {
-    render(<SectionHeading title="Repeat Visits" help="Limit how often the same customer may rejoin." />);
+    render(<SectionHeading title="Repeat Visits" help="Limit how often the same person may rejoin." />);
 
     expect(screen.getByRole('heading', { level: 2, name: 'Repeat Visits' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'More information about Repeat Visits' })).toBeInTheDocument();
-    expect(screen.getByText('Limit how often the same customer may rejoin.')).not.toBeVisible();
+    expect(screen.getByText('Limit how often the same person may rejoin.')).not.toBeVisible();
   });
 
   it('keeps the heading itself plain text — only the icon is interactive', () => {
@@ -249,13 +249,13 @@ describe('what must stay on the page', () => {
   it('an error next to a heading with help stays visible — help never swallows it', () => {
     render(
       <section>
-        <SectionHeading title="Schedule & Availability" help="Limit when customers can join." />
+        <SectionHeading title="Schedule & Availability" help="Limit when people can join." />
         <ErrorBanner message="Overlaps the 09:00–17:00 session." />
         <p role="status">Saved.</p>
       </section>,
     );
 
-    expect(screen.getByText('Limit when customers can join.')).not.toBeVisible();
+    expect(screen.getByText('Limit when people can join.')).not.toBeVisible();
     expect(screen.getByText('Overlaps the 09:00–17:00 session.')).toBeVisible();
     expect(screen.getByText('Saved.')).toBeVisible();
   });

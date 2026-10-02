@@ -122,7 +122,7 @@ export function ServiceHistoryPage() {
                   <th className="py-3 pr-4">Token</th>
                   <th className="py-3 pr-4">Queue</th>
                   <th className="py-3 pr-4">Service(s)</th>
-                  <th className="py-3 pr-4">Customer Details</th>
+                  <th className="py-3 pr-4">Person Details</th>
                   <th className="py-3 pr-4">Counter</th>
                   <th className="py-3 pr-4">Status</th>
                   <th className="py-3 pr-4">Wait / Duration</th>

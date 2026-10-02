@@ -77,10 +77,10 @@ String? joinBlockedNotice(QueueConfig config, {required bool needsIdentitySetup}
   // customer refuses every join, so this says so here rather than after a
   // whole form is filled in.
   if (needsIdentitySetup) {
-    return 'This queue is not accepting customers yet. Please contact staff.';
+    return 'This queue is not accepting anyone yet. Please contact staff.';
   }
   if (config.status != 'ACTIVE') {
-    return 'This queue is not currently accepting new customers.';
+    return 'This queue is not currently accepting new arrivals.';
   }
   // Phase 4: the backend already composes the specific reason (closed today
   // / opens at 09:00 / session full, etc.).
@@ -102,7 +102,7 @@ String? repeatVisitNotice(QueueConfig config) {
   final notice = _queueWideRepeatNotice(config);
   if (notice == null || !config.identity.isPerSession) return notice;
   if (config.identity.restrictionType == 'ONCE_EVER') {
-    return 'Each customer may be served once per session. You can still join a different session.';
+    return 'Each person may be served once per session. You can still join a different session.';
   }
   return '$notice This limit applies per session — you can still join a different session.';
 }
@@ -111,7 +111,7 @@ String? _queueWideRepeatNotice(QueueConfig config) {
   final identity = config.identity;
   switch (identity.restrictionType) {
     case 'ONCE_EVER':
-      return 'Each customer may use this queue once.';
+      return 'Each person may use this queue once.';
     case 'DURATION':
       final amount = identity.restrictionAmount;
       final unit = _unitLabel(identity.restrictionUnit, amount);
@@ -124,8 +124,8 @@ String? _queueWideRepeatNotice(QueueConfig config) {
       // naming the queue's clock when the customer is on a different one.
       final when = dualTime(until, timezoneName: config.timezone, dateAndTime: true);
       return when.differs
-          ? 'One visit per customer until ${when.queue} (${when.timezoneName}).'
-          : 'One visit per customer until ${when.local}.';
+          ? 'One visit per person until ${when.queue} (${when.timezoneName}).'
+          : 'One visit per person until ${when.local}.';
     default:
       return null;
   }

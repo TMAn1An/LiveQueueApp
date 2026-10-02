@@ -88,7 +88,7 @@ describe('ServiceHistoryPage', () => {
           status: 'SKIPPED',
           completedAt: null,
           skippedAt: '2026-09-07T10:20:00.000Z',
-          skipReason: { code: 'CUSTOMER_NOT_PRESENT', text: 'Customer not present' },
+          skipReason: { code: 'CUSTOMER_NOT_PRESENT', text: 'Person not present' },
         }),
       ]),
     );
@@ -96,7 +96,7 @@ describe('ServiceHistoryPage', () => {
     render(<ServiceHistoryPage />);
 
     const table = within(screen.getByRole('table'));
-    expect(table.getByText('Customer not present')).toBeInTheDocument();
+    expect(table.getByText('Person not present')).toBeInTheDocument();
     expect(table.getByText('Please bring the original document next time.')).toBeInTheDocument();
     // One reason, one feedback — the plain completion adds neither label.
     expect(table.getAllByText(/Reason:/)).toHaveLength(1);

@@ -78,7 +78,7 @@ function QueueSummaryCard({ queue }: { queue: Queue }) {
             <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 shrink-0 text-amber-600">
               <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
             </svg>
-            <span>No active counters. Staff cannot call waiting customers.</span>
+            <span>No active counters. Staff cannot call anyone who is waiting.</span>
           </div>
         )}
       </div>
@@ -136,7 +136,7 @@ export function DashboardPage() {
             </svg>
             <div className="min-w-0 flex-1">
               <p className="font-semibold text-sm">
-                Attention needed: {stalledQueues.length} {stalledQueues.length === 1 ? 'queue has' : 'queues have'} waiting customers without active counters.
+                Attention needed: {stalledQueues.length} {stalledQueues.length === 1 ? 'queue has' : 'queues have'} people waiting and no active counter.
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {stalledQueues.map((q) => (
@@ -170,7 +170,7 @@ export function DashboardPage() {
               </p>
             </div>
             <p className="mt-3 text-xs text-muted">
-              {stats.calledTokens} customer{stats.calledTokens === 1 ? '' : 's'} called now
+              {stats.calledTokens} {stats.calledTokens === 1 ? 'person' : 'people'} called now
             </p>
           </Card>
 
@@ -249,7 +249,7 @@ export function DashboardPage() {
               Create your first queue
             </h3>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted">
-              LiveQueue gives your organization digital tokens, live counter assignment, and instant QR entry for arriving customers.
+              LiveQueue gives your organization digital tokens, live counter assignment, and instant QR entry for people arriving.
             </p>
             {/* ADR-059: the same real Create Queue action as the header, only
                 for someone who may create queues. Everyone else is told who
@@ -274,7 +274,7 @@ export function DashboardPage() {
               <div className="rounded-xl border border-border bg-subtle/50 p-4">
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">2</span>
                 <h4 className="mt-2 text-sm font-semibold text-fg">Add Counters</h4>
-                <p className="mt-1 text-xs text-muted">Configure desks where staff call customers.</p>
+                <p className="mt-1 text-xs text-muted">Configure desks where staff call people.</p>
               </div>
               <div className="rounded-xl border border-border bg-subtle/50 p-4">
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">3</span>

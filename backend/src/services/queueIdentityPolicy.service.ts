@@ -151,7 +151,7 @@ export async function resolveRepeatPolicy(
     throw new AppError(
       422,
       'IDENTITY_POLICY_REQUIRED',
-      'A queue that restricts repeat visits must say how long a customer must wait and how customers are identified.',
+      'A queue that restricts repeat visits must say how long a person must wait and how people are identified.',
     );
   }
 
@@ -163,7 +163,7 @@ export async function resolveRepeatPolicy(
     throw new AppError(
       409,
       'IDENTITY_MODE_UNAVAILABLE',
-      'Phone verification is not available. Identify customers by a verified email address, a required form question, or both.',
+      'Phone verification is not available. Identify people by a verified email address, a required form question, or both.',
     );
   }
 
@@ -188,7 +188,7 @@ export async function resolveRepeatPolicy(
       throw new AppError(
         422,
         'REPEAT_WINDOW_REQUIRED',
-        'Enter how long a customer must wait before returning.',
+        'Enter how long a person must wait before returning.',
       );
     }
     if (amount > MAX_AMOUNT_BY_UNIT[unit]) {
@@ -216,7 +216,7 @@ export async function resolveRepeatPolicy(
       throw new AppError(
         422,
         'IDENTITY_FIELD_REQUIRED',
-        'Choose which form question identifies the customer.',
+        'Choose which form question identifies the person.',
       );
     }
     await assertUsableIdentityField(formFieldsSource ?? (queueId ? { queueId, version: -1 } : null), key);
@@ -318,7 +318,7 @@ export async function assertUsableIdentityField(
     throw new AppError(
       422,
       'IDENTITY_FIELD_REQUIRED',
-      'Add the form question that identifies the customer before restricting repeat visits.',
+      'Add the form question that identifies the person before restricting repeat visits.',
     );
   }
 
@@ -342,14 +342,14 @@ export async function assertUsableIdentityField(
     throw new AppError(
       422,
       'IDENTITY_FIELD_TYPE_INVALID',
-      'That question cannot identify a customer. Choose a text, number, email or phone question.',
+      'That question cannot identify a person. Choose a text, number, email or phone question.',
     );
   }
   if (!field.required) {
     throw new AppError(
       422,
       'IDENTITY_FIELD_MUST_BE_REQUIRED',
-      'The question that identifies the customer must be a required question.',
+      'The question that identifies the person must be a required question.',
     );
   }
 }
@@ -377,14 +377,14 @@ export async function assertIdentityFieldSurvives(
     throw new AppError(
       409,
       'IDENTITY_FIELD_IN_USE',
-      'This queue identifies customers by that question. Change the repeat-visit settings before removing it.',
+      'This queue identifies people by that question. Change the repeat-visit settings before removing it.',
     );
   }
   if (!IDENTITY_FIELD_TYPES.includes(replacement.type) || !replacement.required) {
     throw new AppError(
       409,
       'IDENTITY_FIELD_IN_USE',
-      'This queue identifies customers by that question, so it must stay a required text, number, email or phone question.',
+      'This queue identifies people by that question, so it must stay a required text, number, email or phone question.',
     );
   }
 }

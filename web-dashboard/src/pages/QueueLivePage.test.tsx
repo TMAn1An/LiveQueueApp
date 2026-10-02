@@ -151,7 +151,7 @@ describe('QueueLivePage', () => {
     expect(screen.queryByRole('button', { name: 'Call' })).not.toBeInTheDocument();
   });
 
-  it('shows the queue it belongs to, and its own customers', () => {
+  it('shows the queue it belongs to, and its own people', () => {
     renderPage();
 
     expect(screen.getByRole('heading', { name: 'Pharmacy' })).toBeInTheDocument();

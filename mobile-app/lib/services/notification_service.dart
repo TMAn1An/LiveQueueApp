@@ -201,7 +201,7 @@ class NotificationService {
       title: paused ? 'Queue paused' : 'Queue resumed',
       body: paused
           ? '$queueName has been paused by staff.'
-          : '$queueName is accepting customers again.',
+          : '$queueName is open to join again.',
       soundEnabled: false,
       vibrationEnabled: false,
     );

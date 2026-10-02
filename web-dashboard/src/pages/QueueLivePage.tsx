@@ -50,7 +50,7 @@ export function QueueLivePage() {
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted">
                 <span className="font-medium text-fg-soft">
-                  {waiting} {waiting === 1 ? 'customer waiting' : 'customers waiting'}
+                  {waiting} {waiting === 1 ? 'person waiting' : 'people waiting'}
                 </span>
                 {queue.scheduleEnabled && (
                   <>

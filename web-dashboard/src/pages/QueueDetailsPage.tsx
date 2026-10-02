@@ -29,7 +29,7 @@ interface TabDef {
 const SETTINGS_TABS: TabDef[] = [
   { id: 'general', label: 'General & Timezone' },
   { id: 'services', label: 'Services & Verification' },
-  { id: 'form', label: 'Customer Form' },
+  { id: 'form', label: 'Join Form' },
   { id: 'schedule', label: 'Schedule & Capacity' },
   { id: 'repeat', label: 'Repeat Visits' },
   { id: 'qr', label: 'QR Code & Entry' },
@@ -135,7 +135,7 @@ export function QueueDetailsPage() {
           </Card>
 
           <Card>
-            <SectionHeading title="Services" help="The services offered in this queue, and how long each one usually takes per customer." />
+            <SectionHeading title="Services" help="The services offered in this queue, and how long each one usually takes per person." />
             <ServicesManager queueId={queue.id} services={queue.services} />
           </Card>
         </div>
@@ -144,7 +144,7 @@ export function QueueDetailsPage() {
       {/* SECTION: Customer Form */}
       {showForm && (
         <Card>
-          <SectionHeading title="Dynamic Form Fields" help="Custom questions customers answer when they scan the QR code, before joining the line. Their answers appear on the token row for counter staff." />
+          <SectionHeading title="Dynamic Form Fields" help="Custom questions people answer when they scan the QR code, before joining the line. Their answers appear on the token row for counter staff." />
           <FormBuilder queueId={queue.id} />
         </Card>
       )}
@@ -152,7 +152,7 @@ export function QueueDetailsPage() {
       {/* SECTION: Schedule & Capacity */}
       {showSchedule && (
         <Card>
-          <SectionHeading title="Schedule & Availability" help="Limit when customers can join: weekly opening hours, session windows, and how many people each session takes." />
+          <SectionHeading title="Schedule & Availability" help="Limit when people can join: weekly opening hours, session windows, and how many people each session takes." />
           <QueueSchedule queue={queue} />
         </Card>
       )}
@@ -160,7 +160,7 @@ export function QueueDetailsPage() {
       {/* SECTION: Repeat Visits */}
       {showRepeat && (
         <Card>
-          <SectionHeading title="Repeat Visits" help="Limit how often the same customer may rejoin, by having them verify who they are." />
+          <SectionHeading title="Repeat Visits" help="Limit how often the same person may rejoin, by having them verify who they are." />
           <RepeatVisitPolicy
             queue={queue}
             effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
@@ -171,7 +171,7 @@ export function QueueDetailsPage() {
       {/* SECTION: QR Code & Customer Entry */}
       {showQr && (
         <Card>
-          <SectionHeading title="QR Code" help="Display or print this QR code at your location. Customers scan it to join the queue themselves." />
+          <SectionHeading title="QR Code" help="Display or print this QR code at your location. People scan it to join the queue themselves." />
           <QrCodeDisplay
             qrCodeUri={queue.qrCodeUri}
             organizationName={organization?.name ?? ''}

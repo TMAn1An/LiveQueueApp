@@ -119,7 +119,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
         {confirmingDelete && (
           <ConfirmDialog
             title={`Delete service "${service.serviceName}"?`}
-            message="Customers will no longer be able to select this service. This cannot be undone."
+            message="People will no longer be able to select this service. This cannot be undone."
             confirming={deleteService.isPending}
             onConfirm={() =>
               deleteService.mutate(service.id, {

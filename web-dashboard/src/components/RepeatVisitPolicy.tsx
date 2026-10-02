@@ -54,7 +54,7 @@ function describeUnit(amount: number, unit: RepeatRestrictionUnit): string {
 /** One sentence each, so an administrator can tell them apart without
  * guessing what the product means by "identity" (ADR-037). */
 const MODE_HELP: Partial<Record<RepeatIdentityMode, string>> = {
-  VERIFIED_EMAIL: 'Customer verifies access to an email address before joining.',
+  VERIFIED_EMAIL: 'The person verifies access to an email address before joining.',
   CUSTOM_FIELD: 'Use a required form question such as NID, Student ID or Membership ID.',
   VERIFIED_EMAIL_AND_CUSTOM_FIELD:
     'Use both verified email and a required form question. Useful when several people may share one email address.',
@@ -237,18 +237,18 @@ export function RepeatVisitPolicy({
       <div className="space-y-3">
         {configurationRequired && (
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-            <p className="font-medium">This queue is not accepting customers.</p>
+            <p className="font-medium">Nobody can join this queue right now.</p>
             <p className="mt-1">
               {storedMode
-                ? 'It identifies customers by a verified phone number, which is no longer available — SMS is not integrated. Choose verified email or a custom unique field below, and joins will work again.'
-                : "It limits repeat visits but does not yet say how customers are identified. Until you choose an identity method below, joins are refused — the previous rule recognised the customer's phone app, which meant reinstalling the app got around the limit."}
+                ? 'It identifies people by a verified phone number, which is no longer available — SMS is not integrated. Choose verified email or a custom unique field below, and joins will work again.'
+                : "It limits repeat visits but does not yet say how people are identified. Until you choose an identity method below, joins are refused — the previous rule recognised the person's phone app, which meant reinstalling the app got around the limit."}
             </p>
           </div>
         )}
         <div className="text-sm">
           {queue.allowRepeatVisits ? (
             <p className="text-fg-soft">
-              Customers may join this queue as often as they like.
+              People may join this queue as often as they like.
             </p>
           ) : queue.repeatRestrictionType && queue.repeatIdentityMode ? (
             <div className="space-y-1 text-fg-soft">
@@ -261,7 +261,7 @@ export function RepeatVisitPolicy({
                   : 'Entire queue: the limit applies across all sessions.'}
               </p>
               <p className="text-xs text-muted">
-                Customers are recognised by{' '}
+                People are recognised by{' '}
                 {needsEmail(queue.repeatIdentityMode) && 'an email address they verify'}
                 {queue.repeatIdentityMode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD' && ' and '}
                 {needsField(queue.repeatIdentityMode) &&
@@ -289,18 +289,18 @@ export function RepeatVisitPolicy({
         <p className="text-xs font-semibold uppercase tracking-wider text-faint">Currently</p>
         {configurationRequired && (
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
-            <p className="font-medium">This queue is not accepting customers.</p>
+            <p className="font-medium">Nobody can join this queue right now.</p>
             <p className="mt-1">
               {storedMode
-                ? 'It identifies customers by a verified phone number, which is no longer available — SMS is not integrated. Choose verified email or a custom unique field below, and joins will work again.'
-                : "It limits repeat visits but does not yet say how customers are identified. Until you choose an identity method below, joins are refused — the previous rule recognised the customer's phone app, which meant reinstalling the app got around the limit."}
+                ? 'It identifies people by a verified phone number, which is no longer available — SMS is not integrated. Choose verified email or a custom unique field below, and joins will work again.'
+                : "It limits repeat visits but does not yet say how people are identified. Until you choose an identity method below, joins are refused — the previous rule recognised the person's phone app, which meant reinstalling the app got around the limit."}
             </p>
           </div>
         )}
         <div className="text-sm">
           {queue.allowRepeatVisits ? (
             <p className="text-fg-soft">
-              Customers may join this queue as often as they like.
+              People may join this queue as often as they like.
             </p>
           ) : queue.repeatRestrictionType && queue.repeatIdentityMode ? (
             <div className="space-y-1 text-fg-soft">
@@ -313,7 +313,7 @@ export function RepeatVisitPolicy({
                   : 'Entire queue: the limit applies across all sessions.'}
               </p>
               <p className="text-xs text-muted">
-                Customers are recognised by{' '}
+                People are recognised by{' '}
                 {needsEmail(queue.repeatIdentityMode) && 'an email address they verify'}
                 {queue.repeatIdentityMode === 'VERIFIED_EMAIL_AND_CUSTOM_FIELD' && ' and '}
                 {needsField(queue.repeatIdentityMode) &&
@@ -350,9 +350,9 @@ export function RepeatVisitPolicy({
             className="mt-0.5"
           />
           <span>
-            <span className="block font-medium text-fg-soft">Limit how often a customer returns</span>
+            <span className="block font-medium text-fg-soft">Limit how often a person returns</span>
             <span className="block text-xs text-muted">
-              You choose what counts as the same customer.
+              You choose what counts as the same person.
             </span>
           </span>
         </label>
@@ -430,7 +430,7 @@ export function RepeatVisitPolicy({
                 <p className="mt-1 inline-flex items-center text-xs text-muted">
                   On this queue&apos;s clock{effectiveTimezone ? ` (${effectiveTimezone})` : ''}
                   <InfoHelp label="the cutoff clock">
-                    The same moment for every customer, wherever they are.
+                    The same moment for every person, wherever they are.
                   </InfoHelp>
                 </p>
               </div>
@@ -439,7 +439,7 @@ export function RepeatVisitPolicy({
 
           {type === 'DURATION' && amountValid && (
             <p className="text-xs text-muted">
-              A customer served now could return after {describeUnit(parsedAmount, unit)}
+              A person served now could return after {describeUnit(parsedAmount, unit)}
               {unitNeedsTimezone(unit)
                 ? ` — counted on the calendar, in ${effectiveTimezone ?? 'the queue’s timezone'}.`
                 : '.'}
@@ -475,7 +475,7 @@ export function RepeatVisitPolicy({
               </label>
               <InfoHelp label="the per-session scope">
                 A completed visit consumes the repeat allowance only for that assigned session
-                occurrence — a customer served in the morning may join the afternoon session.
+                occurrence — a person served in the morning may join the afternoon session.
               </InfoHelp>
             </div>
             {sessionScopeUnavailable && (
@@ -497,9 +497,9 @@ export function RepeatVisitPolicy({
           <div>
             <div className="mb-1 flex items-center gap-0.5">
               <label className="block text-xs text-muted" htmlFor="repeat-mode">
-                How is the same customer recognised?
+                How is the same person recognised?
               </label>
-              <InfoHelp label="how customers are recognised">
+              <InfoHelp label="how people are recognised">
                 <span className="block">{MODE_HELP[mode]}</span>
                 {mode === 'VERIFIED_EMAIL' && (
                   // With email alone, one mailbox is one entitlement, however
@@ -529,9 +529,9 @@ export function RepeatVisitPolicy({
             <div>
               <div className="mb-1 flex items-center gap-0.5">
                 <label className="block text-xs text-muted" htmlFor="repeat-field">
-                  Which form question identifies the customer?
+                  Which form question identifies the person?
                 </label>
-                <InfoHelp label="which questions can identify a customer">
+                <InfoHelp label="which questions can identify a person">
                   Only required text, number, email and phone questions can identify someone. A
                   yes/no or multiple-choice answer would put unrelated people under one identity.
                 </InfoHelp>
@@ -554,7 +554,7 @@ export function RepeatVisitPolicy({
                 </>
               ) : (
                 <p className="rounded-md border border-border bg-subtle p-2 text-xs text-fg-soft">
-                  This queue has no question that could identify a customer yet. Add a required
+                  This queue has no question that could identify a person yet. Add a required
                   text, number, email or phone question under Dynamic Form Fields first.
                 </p>
               )}
@@ -564,8 +564,8 @@ export function RepeatVisitPolicy({
           <p className="inline-flex items-center text-xs text-muted">
             When changes apply
             <InfoHelp label="when repeat-visit changes apply">
-              Changing these settings applies to customers joining from now on. Visits already
-              recorded are kept, so a customer who has used their visit stays recognised.
+              Changing these settings applies to people joining from now on. Visits already
+              recorded are kept, so a person who has used their visit stays recognised.
             </InfoHelp>
           </p>
         </div>
@@ -599,7 +599,7 @@ export function RepeatVisitPolicy({
  * names the clock whenever the answer depends on one. */
 function describeRestriction(queue: Queue, effectiveTimezone: string | null): string {
   if (queue.repeatRestrictionType === 'ONCE_EVER') {
-    return 'Each customer may use this queue once, ever';
+    return 'Each person may use this queue once, ever';
   }
   if (queue.repeatRestrictionType === 'UNTIL_DATETIME' && queue.repeatRestrictionUntil) {
     const when = formatInZone(new Date(queue.repeatRestrictionUntil), effectiveTimezone);
@@ -610,7 +610,7 @@ function describeRestriction(queue: Queue, effectiveTimezone: string | null): st
     const zone = unitNeedsTimezone(queue.repeatRestrictionUnit) && effectiveTimezone
       ? ` (${effectiveTimezone})`
       : '';
-    return `A customer may return ${window} after being served${zone}`;
+    return `A person may return ${window} after being served${zone}`;
   }
   return 'Repeat visits are limited';
 }

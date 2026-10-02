@@ -51,7 +51,7 @@ export function LiveQueueTable({
                 <th className="py-3 pr-4">Token</th>
                 {!queueId && <th className="py-3 pr-4">Queue</th>}
                 <th className="py-3 pr-4">Service</th>
-                <th className="py-3 pr-4">Customer</th>
+                <th className="py-3 pr-4">Person</th>
                 <th className="py-3 pr-4">Position</th>
                 <th className="py-3 pr-4">Status</th>
                 <th className="py-3 pr-4">Counter</th>

@@ -68,7 +68,7 @@ export interface ResolvedSkipReason {
 export function resolveSkipReason(input: SkipReasonInput): ResolvedSkipReason {
   const rawCode = input.reasonCode?.trim();
   if (!rawCode) {
-    throw new AppError(422, 'SKIP_REASON_REQUIRED', 'Choose a reason for skipping this customer.');
+    throw new AppError(422, 'SKIP_REASON_REQUIRED', 'Choose a reason for skipping this person.');
   }
   if (!SKIP_REASON_CODES.includes(rawCode as SkipReasonCode)) {
     throw new AppError(422, 'INVALID_SKIP_REASON', 'That skip reason is not recognised.');
@@ -89,7 +89,7 @@ export function resolveSkipReason(input: SkipReasonInput): ResolvedSkipReason {
     throw new AppError(
       422,
       'SKIP_REASON_TEXT_REQUIRED',
-      'Describe the reason for skipping this customer.',
+      'Describe the reason for skipping this person.',
     );
   }
   if (text.length > SKIP_REASON_TEXT_MAX_LENGTH) {

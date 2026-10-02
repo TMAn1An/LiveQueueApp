@@ -35,7 +35,7 @@ export function CompleteWithFeedbackDialog({ tokenId, onClose }: { tokenId: stri
         <ErrorBanner message={error} />
         <div>
           <label htmlFor={`completion-feedback-${tokenId}`} className="mb-1 block text-sm font-medium text-fg-soft">
-            Feedback for the customer (optional)
+            Feedback for the person (optional)
           </label>
           <textarea
             id={`completion-feedback-${tokenId}`}
@@ -47,7 +47,7 @@ export function CompleteWithFeedbackDialog({ tokenId, onClose }: { tokenId: stri
             className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
           />
           <p className={`mt-1 text-xs ${tooLong ? 'text-red-600 dark:text-red-400' : 'text-muted'}`}>
-            {trimmed.length}/{COMPLETION_FEEDBACK_MAX_LENGTH} · The customer sees this in their app.
+            {trimmed.length}/{COMPLETION_FEEDBACK_MAX_LENGTH} · The person sees this in their app.
           </p>
         </div>
         <div className="flex justify-end gap-2">

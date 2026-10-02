@@ -24,7 +24,7 @@ interface Step {
 const STEPS: Step[] = [
   {
     title: 'Welcome to LiveQueue',
-    body: 'A short guide to the minimum path from an empty organization to a queue your customers can actually join. Skip anytime — nothing here is required.',
+    body: 'A short guide to the minimum path from an empty organization to a queue people can actually join. Skip anytime — nothing here is required.',
   },
   {
     title: 'Create your first queue',
@@ -33,12 +33,12 @@ const STEPS: Step[] = [
   },
   {
     title: 'Add services',
-    body: 'Open your new queue’s settings and list what it offers, each with its own expected duration. A customer selects one (or more) when joining.',
+    body: 'Open your new queue’s settings and list what it offers, each with its own expected duration. A person selects one (or more) when joining.',
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {
     title: 'Add counters',
-    body: 'A counter is where staff actually serve someone. A queue with no active counter has nowhere to send a called customer, so add at least one.',
+    body: 'A counter is where staff actually serve someone. A queue with no active counter has nowhere to send a called person, so add at least one.',
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {
@@ -52,23 +52,23 @@ const STEPS: Step[] = [
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {
-    title: 'Configure the customer form',
-    body: 'Decide what a customer fills in when joining — a name, a reference number, anything your queue needs — from the queue’s own settings.',
+    title: 'Configure the join form',
+    body: 'Decide what a person fills in when joining — a name, a reference number, anything your queue needs — from the queue’s own settings.',
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {
-    title: 'Customer identity & repeat visits',
-    body: 'If the same customer should not be able to rejoin immediately after being served, a queue can require a verified email or a custom field to recognise them — also in the queue’s settings.',
+    title: 'Identity & repeat visits',
+    body: 'If the same person should not be able to rejoin immediately after being served, a queue can require a verified email or a custom field to recognise them — also in the queue’s settings.',
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {
     title: 'Generate the queue QR code',
-    body: 'Every queue has its own QR code a customer scans to join — print it, or display it, at the physical location.',
+    body: 'Every queue has its own QR code a person scans to join — print it, or display it, at the physical location.',
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {
     title: 'Test the queue',
-    body: 'Scan the code with the LiveQueue mobile app (or open the queue’s live view here) and join as a customer would, to see the whole flow once before opening for real.',
+    body: 'Scan the code with the LiveQueue mobile app (or open the queue’s live view here) and join as anyone would, to see the whole flow once before opening for real.',
   },
   {
     title: "You're ready",

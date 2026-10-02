@@ -224,7 +224,7 @@ void main() {
       final success = await provider.submitJoin();
 
       expect(success, isFalse);
-      expect(provider.errorMessage, 'This queue is not currently accepting new customers.');
+      expect(provider.errorMessage, 'This queue is not currently accepting new arrivals.');
       expect(provider.createdToken, isNull);
     });
 

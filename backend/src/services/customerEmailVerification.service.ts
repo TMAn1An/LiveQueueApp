@@ -64,7 +64,7 @@ export async function startCustomerEmailVerification(input: { queueId: string; e
     throw new AppError(
       409,
       'EMAIL_VERIFICATION_NOT_REQUIRED',
-      'This queue does not ask customers to verify an email address.',
+      'This queue does not ask people to verify an email address.',
     );
   }
   if (!isEmailAvailable()) {

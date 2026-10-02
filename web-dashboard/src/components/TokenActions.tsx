@@ -83,10 +83,10 @@ export function TokenActions({
   const isFcfsEligible = eligibility.eligible;
   const lockedTitle =
     eligibility.reason === 'SESSION_NOT_STARTED'
-      ? "This customer's assigned session has not started yet."
+      ? "This person's assigned session has not started yet."
       : eligibility.reason === 'NO_AVAILABLE_COUNTER'
         ? 'Waiting for an available counter.'
-        : 'Earlier customers must be handled first.';
+        : 'People who joined earlier must be served first.';
   const [adjustingDuration, setAdjustingDuration] = useState(false);
   const [durationInput, setDurationInput] = useState('');
   const [durationError, setDurationError] = useState<string | null>(null);
@@ -277,7 +277,7 @@ export function TokenActions({
                 "Locked" chip above already explains a locked waiting row, so no
                 second disabled button is rendered beside it. */}
             {/* ADR-042: Skip asks why before anything happens — the reason is
-                what the customer will read. */}
+                what the person will read. */}
             {((status === 'WAITING' && isFcfsEligible) ||
               status === 'CALLED' ||
               status === 'IN_PROGRESS') && (

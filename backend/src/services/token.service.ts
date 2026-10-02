@@ -61,7 +61,7 @@ import {
 } from './queueEtaEngine';
 
 const QUEUE_ARCHIVED_MSG = 'This queue has been archived and can no longer accept new tokens.';
-const QUEUE_NOT_ACTIVE_MSG = 'This queue is currently not accepting new customers.';
+const QUEUE_NOT_ACTIVE_MSG = 'This queue is currently not accepting new arrivals.';
 
 /**
  * What a restricted queue will match this joiner against, or null when the
@@ -110,7 +110,7 @@ function resolveCustomerIdentity(
     throw new AppError(
       409,
       'QUEUE_IDENTITY_CONFIGURATION_REQUIRED',
-      'This queue limits repeat visits but has not been set up to identify customers yet. Please contact the organization.',
+      'This queue limits repeat visits but has not been set up to identify people yet. Please contact the organization.',
     );
   }
 
@@ -1140,7 +1140,7 @@ export async function callToken(
       throw new AppError(
         409,
         'FCFS_VIOLATION',
-        'An earlier customer is still waiting. The earliest eligible customer must be called first.',
+        'Someone who joined earlier is still waiting. The earliest eligible person must be called first.',
       );
     }
 
@@ -1187,7 +1187,7 @@ export async function callToken(
 export type WaitingActionBlockedReason = 'SESSION_NOT_STARTED' | 'EARLIER_WAITING' | 'NO_AVAILABLE_COUNTER';
 
 const SESSION_NOT_STARTED_MESSAGE =
-  "This customer's assigned session has not started yet. They can be called once it begins.";
+  "This person's assigned session has not started yet. They can be called once it begins.";
 
 export interface WaitingActionEligibility {
   eligible: boolean;
@@ -1310,8 +1310,8 @@ export function waitingActionEligibilityFrom(
 
 const WAITING_ACTION_BLOCKED_MESSAGE: Record<WaitingActionBlockedReason, string> = {
   SESSION_NOT_STARTED: SESSION_NOT_STARTED_MESSAGE,
-  EARLIER_WAITING: 'An earlier customer is still waiting. The earliest eligible customer must be handled first.',
-  NO_AVAILABLE_COUNTER: 'No active counter is free right now, so this customer cannot be handled yet.',
+  EARLIER_WAITING: 'Someone who joined earlier is still waiting. The earliest eligible person must be served first.',
+  NO_AVAILABLE_COUNTER: 'No active counter is free right now, so this person cannot be handled yet.',
 };
 
 type TimestampField = 'completedAt' | 'skippedAt';
@@ -1481,7 +1481,7 @@ export async function startToken(
     throw new AppError(
       422,
       'SERVICE_START_VERIFICATION_REQUIRED',
-      "This queue requires the customer's verification code to start service.",
+      "This queue requires the person's verification code to start service.",
     );
   }
 
@@ -1496,14 +1496,14 @@ export async function startToken(
     throw new AppError(
       410,
       'VERIFICATION_CODE_EXPIRED',
-      'This verification code has expired. Ask the customer for a new one.',
+      'This verification code has expired. Ask the person for a new one.',
     );
   }
   if (token.serviceStartOtpFailedAttempts >= OTP_MAX_FAILED_ATTEMPTS) {
     throw new AppError(
       429,
       'VERIFICATION_CODE_LOCKED',
-      'Too many incorrect attempts with this code. Ask the customer for a new one.',
+      'Too many incorrect attempts with this code. Ask the person for a new one.',
     );
   }
 
@@ -1598,7 +1598,7 @@ async function startWithoutVerification(tokenId: string, previousStatus: TokenSt
       throw new AppError(
         422,
         'SERVICE_START_VERIFICATION_REQUIRED',
-        "This queue requires the customer's verification code to start service.",
+        "This queue requires the person's verification code to start service.",
       );
     }
     throw new AppError(
@@ -1933,7 +1933,7 @@ export async function setRequiredDuration(
     throw new AppError(
       409,
       'TOKEN_NOT_ACTIVE',
-      'Required duration can only be set for a currently CALLED or IN_PROGRESS customer.',
+      'Required duration can only be set for a person who has been called or is being served.',
     );
   }
 

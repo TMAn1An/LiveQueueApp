@@ -137,7 +137,7 @@ void main() {
       await pump(tester, provider);
 
       expect(find.textContaining('not currently accepting'), findsNothing);
-      expect(find.textContaining('Each customer'), findsNothing);
+      expect(find.textContaining('Each person'), findsNothing);
       expect(find.textContaining("Today's hours"), findsNothing);
     });
   });
@@ -189,7 +189,7 @@ void main() {
         await pump(tester, provider);
 
         expect(find.text('Customer Service'), findsOneWidget);
-        expect(find.text('This queue is not currently accepting new customers.'), findsOneWidget);
+        expect(find.text('This queue is not currently accepting new arrivals.'), findsOneWidget);
         expectNoWayToJoin();
       });
     }
@@ -201,7 +201,7 @@ void main() {
       await pump(tester, provider);
 
       expect(
-        find.text('This queue is not accepting customers yet. Please contact staff.'),
+        find.text('This queue is not accepting anyone yet. Please contact staff.'),
         findsOneWidget,
       );
       expectNoWayToJoin();
@@ -273,7 +273,7 @@ void main() {
       });
       await pump(tester, provider);
 
-      expect(find.text('Each customer may use this queue once.'), findsOneWidget);
+      expect(find.text('Each person may use this queue once.'), findsOneWidget);
       expect(find.widgetWithText(CheckboxListTile, 'General Inquiry'), findsOneWidget);
     });
 
@@ -302,7 +302,7 @@ void main() {
       await pump(tester, provider);
 
       expect(
-        find.text('Each customer may be served once per session. You can still join a different session.'),
+        find.text('Each person may be served once per session. You can still join a different session.'),
         findsOneWidget,
       );
     });

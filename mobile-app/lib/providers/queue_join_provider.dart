@@ -370,7 +370,7 @@ class QueueJoinProvider extends ChangeNotifier {
   String _messageForJoinError(ApiException e) {
     switch (e.code) {
       case 'QUEUE_NOT_ACTIVE':
-        return 'This queue is not currently accepting new customers.';
+        return 'This queue is not currently accepting new arrivals.';
       case 'QUEUE_ARCHIVED':
         return 'This queue is no longer available.';
       case 'SERVICE_NOT_ACTIVE':
@@ -382,7 +382,7 @@ class QueueJoinProvider extends ChangeNotifier {
       case 'REPEAT_VISIT_NOT_ALLOWED':
         return _repeatVisitMessage(e);
       case 'QUEUE_IDENTITY_CONFIGURATION_REQUIRED':
-        return 'This queue is not accepting customers yet. Please contact staff.';
+        return 'This queue is not accepting anyone yet. Please contact staff.';
       case 'EMAIL_VERIFICATION_REQUIRED':
         return 'Please verify your email address before joining.';
       case 'EMAIL_VERIFICATION_INVALID':

@@ -59,7 +59,7 @@ export async function startPhoneVerification(input: { queueId: string; phone: st
     throw new AppError(
       409,
       'PHONE_VERIFICATION_NOT_REQUIRED',
-      'This queue does not ask customers to verify a phone number.',
+      'This queue does not ask people to verify a phone number.',
     );
   }
   if (!isPhoneVerificationAvailable()) {

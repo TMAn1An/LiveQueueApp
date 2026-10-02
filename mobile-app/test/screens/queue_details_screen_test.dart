@@ -152,7 +152,7 @@ void main() {
       );
 
       expect(find.text("Today's hours: 09:00–12:00, 14:00–17:00"), findsOneWidget);
-      expect(find.text('Each customer may use this queue once.'), findsOneWidget);
+      expect(find.text('Each person may use this queue once.'), findsOneWidget);
       expect(find.text('One service per visit.'), findsOneWidget);
     });
 
@@ -160,7 +160,7 @@ void main() {
       await _pumpDetails(tester, _repository((_) async => _ok(_queueJson({'status': 'PAUSED'}))));
 
       expect(find.text('Paused'), findsOneWidget);
-      expect(find.text('This queue is not currently accepting new customers.'), findsOneWidget);
+      expect(find.text('This queue is not currently accepting new arrivals.'), findsOneWidget);
     });
 
     testWidgets('a queue closed by its schedule says so in the backend own words', (tester) async {

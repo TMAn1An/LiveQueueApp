@@ -163,7 +163,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
             <path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
             <path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
           </svg>
-          {showPreview ? 'Hide Customer Preview' : 'Preview Customer Form'}
+          {showPreview ? 'Hide Join Form Preview' : 'Preview Join Form'}
         </Button>
       </div>
 
@@ -174,8 +174,8 @@ export function FormBuilder({ queueId }: { queueId: string }) {
         <div className="rounded-xl border border-brand-200 bg-brand-50/20 p-5 shadow-xs dark:border-brand-900 dark:bg-brand-950/20">
           <div className="mb-4 flex items-center justify-between border-b border-brand-200 dark:border-brand-900 pb-2">
             <span className="flex items-center gap-0.5 text-xs font-bold uppercase tracking-wider text-brand-700 dark:text-brand-300">
-              Customer Mobile Preview
-              <InfoHelp label="the customer preview">What arriving customers see after scanning the QR code.</InfoHelp>
+              Mobile App Preview
+              <InfoHelp label="the join form preview">What people see in the app after scanning the QR code.</InfoHelp>
             </span>
           </div>
 
@@ -232,7 +232,7 @@ export function FormBuilder({ queueId }: { queueId: string }) {
 
       {fields.length === 0 && (
         <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">
-          No custom fields yet. Click “Add Field” to require or request information from customers.
+          No custom fields yet. Click “Add Field” to require or request information from people joining.
         </div>
       )}
 

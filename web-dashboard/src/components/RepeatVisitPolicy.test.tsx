@@ -98,7 +98,7 @@ describe('RepeatVisitPolicy', () => {
 
   it('no longer offers the old fixed periods or a timezone picker', async () => {
     renderPolicy();
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
 
     expect(screen.queryByText('Once per day')).not.toBeInTheDocument();
     expect(screen.queryByText('Once per week')).not.toBeInTheDocument();
@@ -145,18 +145,18 @@ describe('RepeatVisitPolicy', () => {
     expect(screen.getAllByText(/Asia\/Dhaka/).length).toBeGreaterThan(0);
   });
 
-  it('warns that a queue restricted before this feature is refusing customers', () => {
+  it('warns that a queue restricted before this feature is refusing people', () => {
     renderPolicy({ allowRepeatVisits: false });
 
-    expect(screen.getByText(/not accepting customers/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nobody can join this queue right now/i)).toBeInTheDocument();
     // The settings to fix it are already on screen — no extra step.
-    expect(screen.getByLabelText(/How is the same customer recognised/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/How is the same person recognised/i)).toBeInTheDocument();
   });
 
   it('sends a custom duration window', async () => {
     renderPolicy();
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same person recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Allow again after'));
     await userEvent.clear(screen.getByLabelText('Amount'));
     await userEvent.type(screen.getByLabelText('Amount'), '90');
@@ -177,8 +177,8 @@ describe('RepeatVisitPolicy', () => {
 
   it('sends a once-ever window with no amount or cutoff', async () => {
     renderPolicy();
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same person recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Only once ever'));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -196,7 +196,7 @@ describe('RepeatVisitPolicy', () => {
 
   it('sends a fixed cutoff on the queue’s own clock', async () => {
     renderPolicy();
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
     await userEvent.click(screen.getByLabelText('Block until a date and time'));
     await userEvent.type(screen.getByLabelText('Restriction ends'), '2026-12-31T23:59');
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -211,8 +211,8 @@ describe('RepeatVisitPolicy', () => {
 
   it('will not save a month window when the queue has no timezone', async () => {
     renderPolicy({}, null);
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same person recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Allow again after'));
     await userEvent.selectOptions(screen.getByLabelText('Unit'), 'MONTH');
 
@@ -223,8 +223,8 @@ describe('RepeatVisitPolicy', () => {
 
   it('needs no timezone for a window measured in hours', async () => {
     renderPolicy({}, null);
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same person recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Allow again after'));
     await userEvent.selectOptions(screen.getByLabelText('Unit'), 'HOUR');
 
@@ -234,10 +234,10 @@ describe('RepeatVisitPolicy', () => {
 
   it('offers only questions that can actually identify a person', async () => {
     renderPolicy();
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same person recognised/i), 'CUSTOM_FIELD');
 
-    const select = screen.getByLabelText(/Which form question identifies the customer/i);
+    const select = screen.getByLabelText(/Which form question identifies the person/i);
     expect(select).toHaveTextContent('NID Number');
     // Optional, and a checkbox: neither can hold one person's identity.
     expect(select).not.toHaveTextContent('Optional ID');
@@ -262,10 +262,10 @@ describe('RepeatVisitPolicy', () => {
       data: { formVersion: 1, fields: [field({ key: 'agree', type: 'checkbox' })] },
     } as unknown as ReturnType<typeof useFormFields>);
     renderPolicy();
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same person recognised/i), 'CUSTOM_FIELD');
 
-    expect(screen.getByText(/no question that could identify a customer/i)).toBeInTheDocument();
+    expect(screen.getByText(/no question that could identify a person/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 });
@@ -278,7 +278,7 @@ describe('RepeatVisitPolicy', () => {
 describe('RepeatVisitPolicy — repeat restriction scope (ADR-049)', () => {
   it('defaults to the entire queue and explains both options', async () => {
     renderPolicy({ scheduleEnabled: true });
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
 
     expect(screen.getByLabelText(/Entire queue/)).toBeChecked();
     expect(screen.getByText('Repeat limits apply across all sessions.')).toBeInTheDocument();
@@ -287,8 +287,8 @@ describe('RepeatVisitPolicy — repeat restriction scope (ADR-049)', () => {
 
   it('sends a per-session scope when the schedule is on', async () => {
     renderPolicy({ scheduleEnabled: true });
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    await userEvent.selectOptions(screen.getByLabelText(/How is the same customer recognised/i), 'CUSTOM_FIELD');
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    await userEvent.selectOptions(screen.getByLabelText(/How is the same person recognised/i), 'CUSTOM_FIELD');
     await userEvent.click(screen.getByLabelText('Only once ever'));
     await userEvent.click(screen.getByLabelText(/Per session/));
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -298,7 +298,7 @@ describe('RepeatVisitPolicy — repeat restriction scope (ADR-049)', () => {
 
   it('offers per-session only when the weekly schedule is on', async () => {
     renderPolicy({ scheduleEnabled: false });
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
 
     expect(screen.getByLabelText(/Per session/)).toBeDisabled();
     expect(screen.getByText(/Per-session limits need this queue/)).toBeInTheDocument();
@@ -337,8 +337,8 @@ describe('RepeatVisitPolicy — repeat restriction scope (ADR-049)', () => {
 describe('RepeatVisitPolicy — identity options', () => {
   async function openIdentitySelector() {
     renderPolicy();
-    await userEvent.click(screen.getByLabelText(/Limit how often a customer returns/i));
-    return screen.getByLabelText(/How is the same customer recognised/i);
+    await userEvent.click(screen.getByLabelText(/Limit how often a person returns/i));
+    return screen.getByLabelText(/How is the same person recognised/i);
   }
 
   it('offers verified email, custom field, and both together', async () => {
@@ -380,15 +380,15 @@ describe('RepeatVisitPolicy — identity options', () => {
     await userEvent.selectOptions(select, 'VERIFIED_EMAIL_AND_CUSTOM_FIELD');
 
     expect(
-      screen.getByLabelText(/Which form question identifies the customer/i),
+      screen.getByLabelText(/Which form question identifies the person/i),
     ).toBeInTheDocument();
   });
 
-  it('does not ask for a question when email alone identifies the customer', async () => {
+  it('does not ask for a question when email alone identifies the person', async () => {
     await openIdentitySelector();
 
     expect(
-      screen.queryByLabelText(/Which form question identifies the customer/i),
+      screen.queryByLabelText(/Which form question identifies the person/i),
     ).not.toBeInTheDocument();
   });
 
@@ -412,10 +412,10 @@ describe('RepeatVisitPolicy — identity options', () => {
       repeatIdentityMode: 'VERIFIED_PHONE',
     });
 
-    expect(screen.getByText(/not accepting customers/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nobody can join this queue right now/i)).toBeInTheDocument();
     expect(screen.getByText(/no longer available/i)).toBeInTheDocument();
     // The settings to fix it are already on screen — no extra step.
-    expect(screen.getByLabelText(/How is the same customer recognised/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/How is the same person recognised/i)).toBeInTheDocument();
   });
 
   it('starts a phone-configured queue on a mode that can actually be saved', async () => {
@@ -426,7 +426,7 @@ describe('RepeatVisitPolicy — identity options', () => {
     });
 
 
-    expect(screen.getByLabelText(/How is the same customer recognised/i)).toHaveValue(
+    expect(screen.getByLabelText(/How is the same person recognised/i)).toHaveValue(
       'VERIFIED_EMAIL',
     );
   });

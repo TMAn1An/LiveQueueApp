@@ -97,7 +97,7 @@ function DeviceRow({
         </Button>
       </div>
 
-      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">Customer / Visit</h3>
+      <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-faint">Person / Visit</h3>
       <CustomerContextPanel context={device.customerContext} />
 
       <p className="mt-2 text-xs text-faint">Last seen: {formatDateTime(device.lastSeenAt)}</p>
