@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile_app/models/live_queue_token.dart';
 import 'package:mobile_app/models/notification_preferences.dart';
 import 'package:mobile_app/models/service_start_verification_code.dart';
+import 'package:mobile_app/models/token_reminder_status.dart';
 import 'package:mobile_app/providers/token_tracking_provider.dart';
 import 'package:mobile_app/repositories/device_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
@@ -48,6 +49,15 @@ class _FakeTokenRepository extends TokenRepository {
   Future<void> joinQueueRoom(String queueId) async {}
   @override
   void stopTracking() {}
+
+  /// Not what these tests are about — kept off the network.
+  @override
+  Future<TokenReminderStatus> setNotificationPreferences(
+    String tokenId,
+    String deviceIdentifier,
+    NotificationPreferences preferences,
+  ) async =>
+      throw StateError('not under test');
 
   @override
   Future<ServiceStartVerificationCode> getVerificationCode(String tokenId, String deviceIdentifier) async {

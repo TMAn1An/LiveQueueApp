@@ -1,4 +1,6 @@
 import '../models/live_queue_token.dart';
+import '../models/notification_preferences.dart';
+import '../models/token_reminder_status.dart';
 import '../models/service_start_verification_code.dart';
 import 'api_client.dart';
 
@@ -60,6 +62,30 @@ class TokenApiService {
       body: {'deviceIdentifier': deviceIdentifier},
     );
     return LiveQueueToken.fromJson(data);
+  }
+
+  /// ADR-062: tells the backend how this customer wants to be notified about
+  /// this token — which is what lets it push the reminder, and choose the
+  /// right sound/vibration, while the app is closed. Idempotent; safe to
+  /// repeat whenever tracking starts or a setting changes.
+  ///
+  /// The reminder time is always sent, null included: null is how the app
+  /// says "no time of my own — use this queue's default".
+  Future<TokenReminderStatus> setNotificationPreferences(
+    String tokenId,
+    String deviceIdentifier,
+    NotificationPreferences preferences,
+  ) async {
+    final data = await _client.put(
+      '/api/tokens/$tokenId/notification-preferences',
+      body: {
+        'deviceIdentifier': deviceIdentifier,
+        'reminderMinutes': preferences.reminderMinutesBeforeTurn,
+        'soundEnabled': preferences.soundEnabled,
+        'vibrationEnabled': preferences.vibrationEnabled,
+      },
+    );
+    return TokenReminderStatus.fromJson(data);
   }
 
   /// The ONLY call in the app that can return the raw verification code —

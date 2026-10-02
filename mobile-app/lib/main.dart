@@ -42,6 +42,7 @@ import 'services/token_api_service.dart';
 import 'theme/app_theme.dart';
 import 'utils/app_navigation.dart';
 import 'utils/open_active_token.dart';
+import 'utils/reminder_registration.dart';
 import 'widgets/generic_error_widget.dart';
 
 void main() async {
@@ -304,6 +305,18 @@ class LiveQueueApp extends StatelessWidget {
           create: (context) => NotificationPreferencesProvider(
             repository: context.read<NotificationPreferencesRepository>(),
             notificationService: context.read<NotificationService>(),
+            // ADR-062: a changed setting reaches the backend for every token
+            // the customer currently holds — it is the backend that pushes
+            // the reminder while the app is closed — and the token being
+            // tracked right now, without waiting for tracking to restart.
+            registerWithActiveTokens: (preferences) => registerReminderPreferences(
+              tokenIds: context.read<ActiveTokenProvider>().activeTokens.map((t) => t.tokenId),
+              preferences: preferences,
+              deviceRepository: context.read<DeviceRepository>(),
+              tokenRepository: context.read<TokenRepository>(),
+            ),
+            onChanged: (preferences) =>
+                context.read<TokenTrackingProvider>().updatePreferences(preferences),
           ),
         ),
       ],

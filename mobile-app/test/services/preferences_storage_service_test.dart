@@ -11,7 +11,7 @@ void main() {
   test('load() returns defaults when nothing has been saved', () async {
     final service = PreferencesStorageService();
     final prefs = await service.load();
-    expect(prefs.reminderMinutesBeforeTurn, 5);
+    expect(prefs.reminderMinutesBeforeTurn, isNull);
     expect(prefs.soundEnabled, isTrue);
     expect(prefs.vibrationEnabled, isTrue);
   });
@@ -38,7 +38,7 @@ void main() {
     test('missing storage returns defaults', () async {
       final service = PreferencesStorageService();
       final prefs = await service.load();
-      expect(prefs.reminderMinutesBeforeTurn, 5);
+      expect(prefs.reminderMinutesBeforeTurn, isNull);
       expect(prefs.soundEnabled, isTrue);
       expect(prefs.vibrationEnabled, isTrue);
     });
@@ -61,7 +61,7 @@ void main() {
 
       final prefs = await service.load();
 
-      expect(prefs.reminderMinutesBeforeTurn, 5);
+      expect(prefs.reminderMinutesBeforeTurn, isNull);
       expect(prefs.soundEnabled, isTrue);
       expect(prefs.vibrationEnabled, isTrue);
     });
@@ -72,7 +72,7 @@ void main() {
 
       final prefs = await service.load();
 
-      expect(prefs.reminderMinutesBeforeTurn, 5);
+      expect(prefs.reminderMinutesBeforeTurn, isNull);
       expect(prefs.soundEnabled, isTrue);
       expect(prefs.vibrationEnabled, isTrue);
     });
@@ -85,7 +85,7 @@ void main() {
 
       final prefs = await service.load();
 
-      expect(prefs.reminderMinutesBeforeTurn, 5);
+      expect(prefs.reminderMinutesBeforeTurn, isNull);
     });
 
     test('load() never throws for any of the corruption cases above', () async {

@@ -8,6 +8,7 @@ import '../providers/token_tracking_provider.dart';
 import '../theme/app_colors.dart';
 import '../widgets/connection_indicator.dart';
 import '../widgets/eta_update_dialog.dart';
+import '../widgets/reminder_caution.dart';
 import '../widgets/dual_time_row.dart';
 import '../widgets/status_badge.dart';
 import 'home_screen.dart';
@@ -177,6 +178,24 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                             ? 'Waiting for an active counter'
                             : 'Estimated time unavailable',
                       ),
+                    // ADR-062: which reminder time is in force for this
+                    // token, and whose it is — the customer's own choice
+                    // replaces the queue's default.
+                    _InfoRow(
+                      label: 'Reminder',
+                      value: tracking.reminderFollowsQueueDefault
+                          ? '${tracking.reminderMinutes} min before (queue default)'
+                          : '${tracking.reminderMinutes} min before',
+                    ),
+                    if (tracking.reminderLeadTooShort) ...[
+                      const SizedBox(height: 8),
+                      ReminderCaution(
+                        message:
+                            'Your turn is expected sooner than your '
+                            '${tracking.reminderMinutes}-minute reminder, so it cannot give you '
+                            'that much notice. Please stay nearby.',
+                      ),
+                    ],
                   ],
                   if (token.status == TokenStatus.called && token.counter != null)
                     _InfoRow(label: 'Counter', value: token.counter!.name),

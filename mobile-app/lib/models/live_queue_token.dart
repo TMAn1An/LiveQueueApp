@@ -58,7 +58,15 @@ class LiveQueueToken {
     this.skipReasonText,
     this.completionFeedback,
     this.assignedSession,
+    this.reminderSent = false,
   });
+
+  /// ADR-062: whether the backend has already pushed this token's "almost
+  /// your turn" reminder. The app's own reminder — the one it raises while
+  /// Live Tracking is open — stays quiet once this is true, so the customer
+  /// is told once, not once per channel. False from a backend that predates
+  /// the field.
+  final bool reminderSent;
 
   /// Phase 4 — the fixed session window this token was assigned to at
   /// creation, when its queue schedules sessions. Never changes afterward,
@@ -179,6 +187,7 @@ class LiveQueueToken {
       assignedSession: json['assignedSession'] == null
           ? null
           : QueueSessionWindow.fromJson(json['assignedSession'] as Map<String, dynamic>),
+      reminderSent: json['reminderSent'] as bool? ?? false,
     );
   }
 
@@ -225,6 +234,7 @@ class LiveQueueToken {
       skipReasonText: skipReasonText,
       completionFeedback: completionFeedback,
       assignedSession: assignedSession,
+      reminderSent: reminderSent,
     );
   }
 }
