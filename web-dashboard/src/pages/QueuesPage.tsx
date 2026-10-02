@@ -1,114 +1,18 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useCreateQueue, useDeleteQueue, useQueues, useUpdateQueueStatus } from '../hooks/useQueues';
+import { useDeleteQueue, useQueues, useUpdateQueueStatus } from '../hooks/useQueues';
 import { Card } from '../components/Card';
-import { Button } from '../components/Button';
+import { Button, ButtonLink } from '../components/Button';
+import { CreateQueueButton } from '../components/CreateQueueModal';
 import { StatusBadge } from '../components/StatusBadge';
 import { Spinner, EmptyState } from '../components/Spinner';
-import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PageHeader } from '../components/PageHeader';
 import { actionErrorMessage } from '../utils/actionError';
 import { PermissionGate } from '../components/PermissionGate';
 import { SearchInput } from '../components/SearchInput';
-import { Switch } from '../components/Switch';
-import {
-  SERVICE_START_VERIFICATION_HELP,
-  SERVICE_START_VERIFICATION_LABEL,
-} from '../components/ServiceStartVerificationSetting';
-import { ApiError } from '../api/client';
 import type { Queue, QueueStatus } from '../types/queue';
-
-function CreateQueueModal({ onClose }: { onClose: () => void }) {
-  const createQueue = useCreateQueue();
-  const [name, setName] = useState('');
-  const [tokenPrefix, setTokenPrefix] = useState('A');
-  const [allowMultipleServices, setAllowMultipleServices] = useState(true);
-  // ADR-041: on by default — the creator turns it off deliberately.
-  const [requireServiceStartOtp, setRequireServiceStartOtp] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit() {
-    setError(null);
-    try {
-      await createQueue.mutateAsync({
-        name,
-        tokenPrefix,
-        allowMultipleServices,
-        requireServiceStartOtp,
-      });
-      onClose();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create queue.');
-    }
-  }
-
-  return (
-    <Modal title="Create Queue" onClose={onClose}>
-      <ErrorBanner message={error} />
-      <div className="space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium text-fg-soft">Queue name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Front Desk, Pharmacy, Billing"
-            className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-500"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-fg-soft">Token prefix</label>
-          <input
-            value={tokenPrefix}
-            onChange={(e) => setTokenPrefix(e.target.value)}
-            maxLength={10}
-            placeholder="e.g. A, PH, VIP"
-            className="w-full rounded-md border border-border-strong px-3 py-2 text-sm focus:border-brand-500"
-          />
-          <p className="mt-1 text-xs text-muted">Tokens will be numbered like A001, A002, etc.</p>
-        </div>
-        <div className="space-y-3 rounded-lg border border-border bg-subtle/50 p-3.5">
-          <label className="flex items-start gap-2.5 text-sm cursor-pointer">
-            <input
-              type="checkbox"
-              checked={allowMultipleServices}
-              onChange={(e) => setAllowMultipleServices(e.target.checked)}
-              className="mt-0.5 rounded border-border-strong text-brand-600 focus:ring-brand-500"
-            />
-            <span>
-              <span className="block font-medium text-fg-soft">Allow multiple services</span>
-              <span className="block text-xs text-muted">
-                Customers can select more than one service when joining.
-              </span>
-            </span>
-          </label>
-          <div className="border-t border-border pt-3">
-            <Switch
-              id="create-queue-service-start-verification"
-              checked={requireServiceStartOtp}
-              onChange={setRequireServiceStartOtp}
-              label={SERVICE_START_VERIFICATION_LABEL}
-              description={SERVICE_START_VERIFICATION_HELP}
-            />
-          </div>
-        </div>
-        <p className="text-xs text-muted">
-          Customers may join as often as they like. To limit repeat visits, open the queue after
-          creating it and set up how customers are identified.
-        </p>
-        <div className="flex justify-end gap-2 border-t border-border pt-3">
-          <Button variant="secondary" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button disabled={!name || !tokenPrefix || createQueue.isPending} onClick={() => void handleSubmit()}>
-            {createQueue.isPending ? 'Creating…' : 'Create'}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
 
 function QueueRow({ queue }: { queue: Queue }) {
   const updateStatus = useUpdateQueueStatus(queue.id);
@@ -159,12 +63,12 @@ function QueueRow({ queue }: { queue: Queue }) {
         <div className="flex flex-wrap items-center gap-2">
           {/* Primary: always available, to every role that can see this table */}
           {/* Same size as its neighbours; the primary colour marks it. */}
-          <Link to={`/queues/${queue.id}/live`}>
-            <Button variant="primary">Open Queue</Button>
-          </Link>
-          <Link to={`/queues/${queue.id}`}>
-            <Button variant="outline">Settings</Button>
-          </Link>
+          <ButtonLink to={`/queues/${queue.id}/live`} variant="primary">
+            Open Queue
+          </ButtonLink>
+          <ButtonLink to={`/queues/${queue.id}`} variant="outline">
+            Settings
+          </ButtonLink>
           <PermissionGate permission="manage_queues">
             {!queue.deletedAt && (
               <>
@@ -224,7 +128,6 @@ function QueueRow({ queue }: { queue: Queue }) {
 
 export function QueuesPage() {
   const { data: queues, isLoading } = useQueues();
-  const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<QueueStatus | 'ALL'>('ALL');
 
@@ -251,16 +154,7 @@ export function QueuesPage() {
       <PageHeader
         title="Queues"
         description="Create and operate digital queues, monitor real-time lines, and configure service counters."
-        actions={
-          <PermissionGate permission="manage_queues">
-            <Button size="lg" variant="primary" onClick={() => setShowCreate(true)}>
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
-              </svg>
-              Create Queue
-            </Button>
-          </PermissionGate>
-        }
+        actions={<CreateQueueButton />}
       />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -292,13 +186,14 @@ export function QueuesPage() {
         {isLoading ? (
           <Spinner label="Loading queues…" />
         ) : filtered.length === 0 ? (
-          <EmptyState
-            message={
-              normalizedSearch || statusFilter !== 'ALL'
-                ? 'No queues match your search.'
-                : 'No queues found.'
-            }
-          />
+          normalizedSearch || statusFilter !== 'ALL' ? (
+            <EmptyState message="No queues match your search." />
+          ) : (
+            <div className="flex flex-col items-center gap-4 py-8 text-center">
+              <p className="text-sm text-muted">No queues yet.</p>
+              <CreateQueueButton />
+            </div>
+          )
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -321,8 +216,6 @@ export function QueuesPage() {
           </div>
         )}
       </Card>
-
-      {showCreate && <CreateQueueModal onClose={() => setShowCreate(false)} />}
     </div>
   );
 }

@@ -1846,12 +1846,9 @@ export async function nextToken(organizationId: string, queueId: string, counter
 }
 
 /**
- * ADR-041: the queue's current service-start verification setting, read
- * under a share lock. A concurrent settings change takes the row's write
- * lock, so this either sees the change or finishes before it — and the
- * settings change issues codes for tokens already CALLED once it commits
- * (issueServiceStartCodesForCalledTokens). Either order leaves every CALLED
- * token on a code-requiring queue holding a code.
+ * ADR-041: the queue's service-start verification setting, read under a
+ * share lock. ADR-055 fixed the setting at creation, so it no longer changes
+ * under a CALLED token; the lock is kept as cheap defense in depth.
  */
 async function readRequireServiceStartOtp(
   tx: Prisma.TransactionClient,
@@ -1883,38 +1880,6 @@ function serviceStartCodeFields(tokenId: string, requiresCode: boolean) {
     serviceStartOtpExpiresAt: new Date(Date.now() + OTP_EXPIRY_MINUTES * 60_000),
     serviceStartOtpFailedAttempts: 0,
   };
-}
-
-/**
- * ADR-041: when a queue turns the service-start code ON, every token already
- * CALLED there gets a fresh code at once, in the same transaction as the
- * setting change — so no customer at a counter is left needing a code that
- * was never issued. Called only from queue.service.ts::updateQueue.
- */
-export async function issueServiceStartCodesForCalledTokens(
-  tx: Prisma.TransactionClient,
-  queueId: string,
-): Promise<void> {
-  const called = await tx.token.findMany({
-    where: { queueId, status: 'CALLED' },
-    select: { id: true },
-  });
-  for (const { id } of called) {
-    await tx.token.updateMany({
-      where: { id, status: 'CALLED' },
-      data: serviceStartCodeFields(id, true),
-    });
-  }
-}
-
-/** Tokens currently CALLED in a queue — the customers whose Live Tracking
- * screen changes when the queue's service-start setting does. */
-export async function listCalledTokenIds(queueId: string): Promise<string[]> {
-  const rows = await prisma.token.findMany({
-    where: { queueId, status: 'CALLED' },
-    select: { id: true },
-  });
-  return rows.map((row) => row.id);
 }
 
 /**

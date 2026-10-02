@@ -43,13 +43,6 @@ export async function update(req: Request, res: Response) {
     ipAddress: req.ip,
   });
   await realtime.emitQueueUpdated(queue);
-  // ADR-041: a customer already CALLED sees the code card appear or go away
-  // with the setting, without reopening the app. Re-sent as the same
-  // token.called event their screen already handles — status is unchanged,
-  // so it raises no new notification, only carries the fresh customer view.
-  if ('requireServiceStartOtp' in (req.body as object)) {
-    await realtime.refreshCalledTokens(queue.id);
-  }
 }
 
 export async function updateStatus(req: Request, res: Response) {

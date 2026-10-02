@@ -30,10 +30,13 @@ beforeEach(() => {
 });
 
 describe('QueueDetailsCard — what is shown is what can be edited', () => {
-  it('shows every detail, including the name and multiple-services rule', () => {
+  it('shows every editable detail, and leaves the locked multiple-services rule to its own card', () => {
     render(<QueueDetailsCard queue={queue} />);
 
-    for (const label of ['Name', 'Token prefix', 'Base time', 'Reminder', 'Multiple services', 'Form version', 'Description']) {
+    // ADR-055: multiple services is fixed at creation and shown, locked, under
+    // Services & Verification — not here, where everything else is editable.
+    expect(screen.queryByText('Multiple services')).not.toBeInTheDocument();
+    for (const label of ['Name', 'Token prefix', 'Base time', 'Reminder', 'Form version', 'Description']) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByText('Line')).toBeInTheDocument();
@@ -59,10 +62,20 @@ describe('QueueDetailsCard — what is shown is what can be edited', () => {
         tokenPrefix: 'B',
         baseTimeMinutes: 7,
         defaultNotificationMinutes: 15,
-        allowMultipleServices: true,
       },
       expect.anything(),
     );
+    // ADR-055: the edit form has no control for the creation-only settings.
+    expect(screen.queryByText(/multiple services/i)).not.toBeInTheDocument();
+  });
+
+  it('flags a non-Latin name or description and refuses to save (ADR-056)', async () => {
+    render(<QueueDetailsCard queue={queue} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit Details' }));
+    await userEvent.clear(screen.getByLabelText('Name'));
+    await userEvent.type(screen.getByLabelText('Name'), 'লাইন');
+    expect(screen.getByRole('alert')).toHaveTextContent(/English letters/i);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
   it('keeps form version read-only and refuses an empty prefix', async () => {

@@ -72,58 +72,14 @@ async function calledToken(org: Awaited<ReturnType<typeof setupOrgQueue>>) {
 }
 
 describe('ADR-041 â€” the queue setting itself', () => {
-  it('the migration keeps every existing queue on the verified flow (NOT NULL DEFAULT true)', async () => {
-    // ADD COLUMN ... NOT NULL DEFAULT true backfills every pre-existing row
-    // with true â€” this asserts the column the migration actually produced.
-    const rows = await prisma.$queryRaw<{ column_default: string; is_nullable: string }[]>`
-      SELECT column_default, is_nullable FROM information_schema.columns
-      WHERE table_name = 'queues' AND column_name = 'require_service_start_otp'
-    `;
-    expect(rows).toEqual([{ column_default: 'true', is_nullable: 'NO' }]);
-  });
-
-  it('a new queue requires the code unless the creator turns it off', async () => {
-    const ctx = await registerOwner();
-    const byDefault = await createQueue(ctx.accessToken);
-    expect(byDefault.requireServiceStartOtp).toBe(true);
-
-    const explicitOn = await createQueue(ctx.accessToken, { requireServiceStartOtp: true });
-    expect(explicitOn.requireServiceStartOtp).toBe(true);
-
-    const off = await createQueue(ctx.accessToken, { requireServiceStartOtp: false });
-    expect(off.requireServiceStartOtp).toBe(false);
-    const stored = await prisma.queue.findUniqueOrThrow({ where: { id: off.id } });
-    expect(stored.requireServiceStartOtp).toBe(false);
-  });
-
-  it('can be changed later, and an unrelated edit leaves it alone', async () => {
-    const org = await setupOrgQueue();
-    const off = await updateQueue(org.accessToken, org.queue.id, { requireServiceStartOtp: false });
-    expect(off.status).toBe(200);
-    expect(off.body.data.requireServiceStartOtp).toBe(false);
-
-    const rename = await updateQueue(org.accessToken, org.queue.id, { name: 'Renamed' });
-    expect(rename.body.data.requireServiceStartOtp).toBe(false);
-
-    const on = await updateQueue(org.accessToken, org.queue.id, { requireServiceStartOtp: true });
-    expect(on.body.data.requireServiceStartOtp).toBe(true);
-  });
-
-  it('only a role that manages queues may change it (STAFF may not, ADMIN may)', async () => {
+  it('only a role that manages queues may create a queue with it (STAFF may not)', async () => {
     const org = await setupOrgQueue();
     const staff = await createStaffWithRole(org.organizationId, 'STAFF');
-    const denied = await updateQueue(staff.accessToken, org.queue.id, {
-      requireServiceStartOtp: false,
-    });
+    const denied = await api()
+      .post('/api/queues')
+      .set('Authorization', `Bearer ${staff.accessToken}`)
+      .send({ name: 'Nope', tokenPrefix: 'N', requireServiceStartOtp: true });
     expect(denied.status).toBe(403);
-    const unchanged = await prisma.queue.findUniqueOrThrow({ where: { id: org.queue.id } });
-    expect(unchanged.requireServiceStartOtp).toBe(true);
-
-    const admin = await createStaffWithRole(org.organizationId, 'ADMIN');
-    const allowed = await updateQueue(admin.accessToken, org.queue.id, {
-      requireServiceStartOtp: false,
-    });
-    expect(allowed.status).toBe(200);
   });
 
   it('rejects a non-boolean value', async () => {
@@ -315,61 +271,5 @@ describe('ADR-041 â€” /next follows the same rule as /call', () => {
     expect((await next(org.accessToken, org.queue.id, org.counter.id)).status).toBe(200);
     expect((await otpColumns(token.id)).serviceStartOtpCipher).toBeNull();
     expect((await startWithoutCode(org.accessToken, token.id)).status).toBe(200);
-  });
-});
-
-describe('ADR-041 â€” changing the setting while a customer is already CALLED', () => {
-  it('ON -> OFF: the already-issued code is no longer demanded, and is cleared on start', async () => {
-    const org = await setupOrgQueue();
-    const token = await calledToken(org);
-    expect((await otpColumns(token.id)).serviceStartOtpCipher).not.toBeNull();
-
-    await updateQueue(org.accessToken, org.queue.id, { requireServiceStartOtp: false });
-
-    const res = await startWithoutCode(org.accessToken, token.id);
-    expect(res.status).toBe(200);
-    expect(res.body.data.status).toBe('IN_PROGRESS');
-    const row = await otpColumns(token.id);
-    expect(row.serviceStartOtpCipher).toBeNull();
-    expect(row.serviceStartOtpExpiresAt).toBeNull();
-  });
-
-  it('OFF -> ON: the CALLED customer is issued a code at once, and start now requires it', async () => {
-    const org = await setupOrgQueue({ requireServiceStartOtp: false });
-    const token = await calledToken(org);
-    expect((await otpColumns(token.id)).serviceStartOtpCipher).toBeNull();
-
-    await updateQueue(org.accessToken, org.queue.id, { requireServiceStartOtp: true });
-
-    const issued = await otpColumns(token.id);
-    expect(issued.serviceStartOtpCipher).not.toBeNull();
-    expect(issued.serviceStartOtpExpiresAt!.getTime()).toBeGreaterThan(Date.now());
-
-    const direct = await startWithoutCode(org.accessToken, token.id);
-    expect(direct.status).toBe(422);
-    expect(direct.body.error.code).toBe('SERVICE_START_VERIFICATION_REQUIRED');
-
-    // The customer can read the freshly issued code and the start succeeds.
-    const verified = await startToken(org.accessToken, token.id, token.deviceIdentifier);
-    expect(verified.status).toBe(200);
-    expect(verified.body.data.status).toBe('IN_PROGRESS');
-  });
-
-  it('OFF -> ON leaves finished and waiting tokens untouched', async () => {
-    const org = await setupOrgQueue({ requireServiceStartOtp: false });
-    const done = await calledToken(org);
-    await startWithoutCode(org.accessToken, done.id);
-    const waiting = await createToken({ queueId: org.queue.id, serviceId: org.service.id });
-
-    await updateQueue(org.accessToken, org.queue.id, { requireServiceStartOtp: true });
-
-    expect(await otpColumns(done.id)).toMatchObject({
-      status: 'IN_PROGRESS',
-      serviceStartOtpCipher: null,
-    });
-    expect(await otpColumns(waiting.id)).toMatchObject({
-      status: 'WAITING',
-      serviceStartOtpCipher: null,
-    });
   });
 });
