@@ -16,6 +16,7 @@ import { actionErrorMessage } from '../utils/actionError';
 import { latinTextError } from '../utils/latinText';
 import { formatDateTime } from '../utils/format';
 import type { MembershipRemovalRequest } from '../types/auth';
+import { roleLabel } from '../types/auth';
 
 /**
  * ADR-057: asking the owner to end a membership — your own (a leave
@@ -118,8 +119,8 @@ function RequestSummary({ request }: { request: MembershipRemovalRequest }) {
       </div>
       <p className="mt-1 text-sm text-fg-soft">
         {self
-          ? `${request.requester.name} (${request.target.role}) asks to leave.`
-          : `${request.requester.name} asks to remove ${request.target.name} (${request.target.role}).`}
+          ? `${request.requester.name} (${roleLabel(request.target.role)}) asks to leave.`
+          : `${request.requester.name} asks to remove ${request.target.name} (${roleLabel(request.target.role)}).`}
       </p>
       {request.reason && <p className="mt-1 text-sm text-muted">“{request.reason}”</p>}
       <p className="mt-1 text-xs text-faint">Sent {formatDateTime(request.createdAt)}</p>

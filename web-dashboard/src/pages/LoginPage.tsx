@@ -5,6 +5,9 @@ import { ApiError } from '../api/client';
 import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PasswordInput } from '../components/PasswordInput';
+import { AuthLoadingOverlay } from '../components/AuthLoadingOverlay';
+import { useDelayedFlag } from '../hooks/useDelayedFlag';
+import { AUTH_LOADER_DELAY_MS, startAuthTiming } from '../utils/authTiming';
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -13,15 +16,19 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const showLoader = useDelayedFlag(submitting, AUTH_LOADER_DELAY_MS);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
+    const done = startAuthTiming('login');
     try {
       await login(email, password);
+      done('success');
       navigate('/dashboard', { replace: true });
     } catch (err) {
+      done('error');
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
@@ -30,6 +37,7 @@ export function LoginPage() {
 
   return (
     <form onSubmit={handleSubmit}>
+      {showLoader && <AuthLoadingOverlay message="Signing you in…" />}
       <ErrorBanner message={error} />
       <div className="mb-3">
         <label htmlFor="email" className="mb-1 block text-sm font-medium text-fg-soft">

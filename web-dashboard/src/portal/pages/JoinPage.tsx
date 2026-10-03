@@ -3,6 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getBrowserInstallationId, newUuid, rememberVisit } from '../installation';
 import { portalApi, type FormField, type QueueConfig } from '../portalApi';
 import { Card, Loading, Notice, PrimaryButton, SecondaryButton, Shell } from '../ui';
+import { JourneyBuilder } from '../../shared/journey/JourneyBuilder';
+import { journeyProblems } from '../../shared/journey/journeyRules';
 
 /**
  * ADR-068: queue chosen → services → the queue's own questions → identity
@@ -31,7 +33,13 @@ export function JoinPage() {
   useEffect(() => {
     portalApi
       .queueConfig(queueId)
-      .then(setConfig)
+      .then((loaded) => {
+        setConfig(loaded);
+        // ADR-070: start from the queue's suggested order, if it has one.
+        if (loaded.allowMultipleServices && loaded.recommendedJourney?.length) {
+          setSelected(loaded.recommendedJourney.filter((id) => loaded.services.some((s) => s.id === id)));
+        }
+      })
       .catch((err: Error) => setLoadError(err.message));
   }, [queueId]);
 
@@ -59,16 +67,17 @@ export function JoinPage() {
     const value = answers[field.key];
     return field.type === 'checkbox' ? value !== true : value === undefined || String(value).trim() === '';
   });
-  const canJoin = !blocked && selected.length > 0 && !missingRequired && (!needsEmail || proof) && !busy;
+  const journeyServices = config.services.map((s) => ({
+    id: s.id,
+    name: s.serviceName,
+    maxOccurrencesPerJourney: s.maxOccurrencesPerJourney,
+  }));
+  const journeyInvalid = config.allowMultipleServices && journeyProblems(selected, journeyServices).length > 0;
+  const canJoin =
+    !blocked && selected.length > 0 && !journeyInvalid && !missingRequired && (!needsEmail || proof) && !busy;
 
   function toggleService(id: string) {
-    setSelected((current) =>
-      config!.allowMultipleServices
-        ? current.includes(id)
-          ? current.filter((s) => s !== id)
-          : [...current, id]
-        : [id],
-    );
+    setSelected([id]);
   }
 
   async function sendCode() {
@@ -132,11 +141,27 @@ export function JoinPage() {
         <Notice tone="warn">{blocked}</Notice>
       ) : (
         <form onSubmit={(event) => void join(event)} className="space-y-4">
+          {config.allowMultipleServices ? (
+            <Card>
+              <h2 className="text-base font-semibold">Your services, in order</h2>
+              <p className="mt-1 text-sm text-muted">
+                Add the services you need and arrange them in the order you want to be served. Drag a
+                step by its handle, or use the arrows. Once you join, the order is fixed.
+              </p>
+              <div className="mt-3">
+                <JourneyBuilder
+                  idPrefix="portal-journey"
+                  services={journeyServices}
+                  steps={selected}
+                  onChange={setSelected}
+                  emptyMessage="No services yet. Add one below."
+                />
+              </div>
+            </Card>
+          ) : (
           <Card>
             <fieldset>
-              <legend className="text-base font-semibold">
-                {config.allowMultipleServices ? 'Choose your services' : 'Choose a service'}
-              </legend>
+              <legend className="text-base font-semibold">Choose a service</legend>
               <div className="mt-3 space-y-2">
                 {config.services.map((service) => (
                   <label
@@ -144,7 +169,7 @@ export function JoinPage() {
                     className="flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-border px-3 has-[:checked]:border-brand-500 has-[:checked]:bg-brand-50"
                   >
                     <input
-                      type={config.allowMultipleServices ? 'checkbox' : 'radio'}
+                      type="radio"
                       name="service"
                       checked={selected.includes(service.id)}
                       onChange={() => toggleService(service.id)}
@@ -159,6 +184,7 @@ export function JoinPage() {
               </div>
             </fieldset>
           </Card>
+          )}
 
           {config.formFields.length > 0 && (
             <Card>

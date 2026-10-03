@@ -59,7 +59,8 @@ function App() {
                 <Route path="/queues/:queueId" element={<QueueDetailsPage />} />
                 <Route path="/queues/:queueId/live" element={<QueueLivePage />} />
                 <Route path="/queues/:queueId/counters" element={<QueueCountersPage />} />
-                <Route element={<PermissionRoute permission="manage_staff" />}>
+                {/* ADR-069: Managers see every workspace's people (view_staff). */}
+                <Route element={<PermissionRoute permission={['manage_staff', 'view_staff']} />}>
                   <Route path="/staff" element={<StaffPage />} />
                 </Route>
                 <Route path="/reports" element={<ReportsPage />} />

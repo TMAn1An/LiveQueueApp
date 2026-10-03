@@ -6,6 +6,24 @@ import type { SkipReason } from './terminalNotes';
  * actually given. */
 export type ServiceHistoryStatus = 'COMPLETED' | 'SKIPPED' | 'CANCELLED';
 
+export interface ServiceHistoryStep {
+  stepNumber: number;
+  status: string;
+  service: { id: string; name: string };
+  counter: { id: string; name: string } | null;
+  executiveName: string | null;
+  calledAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  minutes: number | null;
+  referral: {
+    from: { id: string; name: string } | null;
+    to: { id: string; name: string } | null;
+    at: string;
+    note: string | null;
+  } | null;
+}
+
 export interface ServiceHistoryEntry {
   tokenId: string;
   serialNumber: string;
@@ -14,6 +32,9 @@ export interface ServiceHistoryEntry {
   queue: { id: string; name: string };
   services: { id: string; name: string; durationMinutes: number }[];
   counter: { id: string; name: string } | null;
+  /** ADR-070: the ordered journey and who handled each step (empty before
+   * journeys existed). */
+  journey?: ServiceHistoryStep[];
   formFields: DisplayFormField[];
   createdAt: string;
   startedAt: string | null;

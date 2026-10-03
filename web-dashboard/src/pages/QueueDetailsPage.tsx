@@ -11,6 +11,7 @@ import { Spinner } from '../components/Spinner';
 import { QrCodeDisplay } from '../components/QrCodeDisplay';
 import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
 import { ServicesManager } from '../components/ServicesManager';
+import { RecommendedJourneyEditor } from '../components/RecommendedJourneyEditor';
 import { FormBuilder } from '../components/FormBuilder';
 import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
 import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
@@ -141,8 +142,22 @@ export function QueueDetailsPage() {
 
           <Card>
             <SectionHeading title="Services" help="The services offered in this queue, and how long each one usually takes per person." />
-            <ServicesManager queueId={queue.id} services={queue.services} />
+            <ServicesManager queueId={queue.id} services={queue.services} editable={queue.canManage !== false} />
           </Card>
+
+          {queue.allowMultipleServices && (
+            <Card>
+              <SectionHeading
+                title="Recommended Order"
+                help="The order you suggest services be taken in. People joining start from it and can rearrange their own steps before they get their token. Drag a step by its handle, or focus the handle and use the arrow keys. A service may repeat, but never twice in a row."
+              />
+              <RecommendedJourneyEditor
+                queueId={queue.id}
+                services={queue.services}
+                editable={queue.canManage !== false}
+              />
+            </Card>
+          )}
         </div>
       )}
 

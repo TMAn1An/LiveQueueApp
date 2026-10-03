@@ -321,13 +321,30 @@ function assertMayUpdate(
   }
 }
 
+/**
+ * The target of a governance action (edit, suspend). Executives outside the
+ * actor's workspace are "not found" (ADR-069); the organization's Head,
+ * Managers and other Admins stay addressable so the long-standing refusals
+ * (CANNOT_MODIFY_OWNER, SUSPENSION_REQUIRES_OWNER_APPROVAL, …) still explain
+ * why the action is not allowed, instead of pretending they do not exist.
+ */
+async function findGovernanceTarget(actor: WorkspaceActor, staffId: string): Promise<Staff> {
+  if (actor.role === 'ADMIN') {
+    const higher = await prisma.staff.findFirst({
+      where: { id: staffId, organizationId: actor.organizationId, role: { not: 'STAFF' } },
+    });
+    if (higher) return higher;
+  }
+  return findStaffScoped(actor, staffId);
+}
+
 export async function updateStaff(
   scopeActor: WorkspaceActor,
   staffId: string,
   input: UpdateStaffInput,
   actor: { staffId: string; role: StaffRole },
 ) {
-  const existing = await findStaffScoped(scopeActor, staffId);
+  const existing = await findGovernanceTarget(scopeActor, staffId);
   assertNotOwner(existing);
   assertMayUpdate(actor, existing, input);
 

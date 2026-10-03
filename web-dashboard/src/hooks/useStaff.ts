@@ -2,12 +2,36 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as staffApi from '../api/staff.api';
 import type { CreateStaffInput, UpdateStaffInput } from '../api/staff.api';
 
-export function useStaffList(page = 1, pageSize = 20, search = '') {
+export function useStaffList(page = 1, pageSize = 20, search = '', adminId = '', enabled = true) {
   return useQuery({
     // `search` is part of the key so each term caches independently and
     // clearing it returns to the already-cached unfiltered page.
-    queryKey: ['staff', page, pageSize, search],
-    queryFn: async () => staffApi.listStaff(page, pageSize, search),
+    queryKey: ['staff', page, pageSize, search, adminId],
+    queryFn: async () => staffApi.listStaff(page, pageSize, search, adminId),
+    enabled,
+  });
+}
+
+/** ADR-069: the organization's Admins (for the Head's and Manager's
+ * workspace filter, and for handing a queue to an Admin). */
+export function useAdmins(enabled = true) {
+  const query = useStaffList(1, 100, '', '', enabled);
+  return {
+    ...query,
+    admins: (query.data?.data ?? []).filter((s) => s.role === 'ADMIN' && s.status === 'ACTIVE'),
+  };
+}
+
+export function useSetExecutiveWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ staffId, adminId }: { staffId: string; adminId: string | null }) =>
+      staffApi.setExecutiveWorkspace(staffId, adminId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['staff'] });
+      void queryClient.invalidateQueries({ queryKey: ['counters'] });
+      void queryClient.invalidateQueries({ queryKey: ['assignableStaff'] });
+    },
   });
 }
 

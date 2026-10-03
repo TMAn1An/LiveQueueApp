@@ -3,6 +3,7 @@ import {
   computeEffectiveDurationMinutes,
   computeEffectiveEndTime,
   minutesUntil,
+  simulateRoutedEtas,
   simulateWaitingTokenEtas,
 } from '../src/services/queueEtaEngine';
 
@@ -95,6 +96,82 @@ describe('simulateWaitingTokenEtas', () => {
     );
     expect(longOccupancy.get('a1')!.getTime()).toBeGreaterThan(shortOccupancy.get('a1')!.getTime());
     expect(longOccupancy.get('a1')!.getTime() - shortOccupancy.get('a1')!.getTime()).toBe(min(15));
+  });
+});
+
+describe('simulateRoutedEtas (ADR-070)', () => {
+  const now = new Date('2026-10-03T10:00:00Z');
+  const at = (minutes: number) => new Date(now.getTime() + minutes * 60_000);
+  const free = (id: string, serviceIds: string[] | null = null, freeAt = now) => ({
+    id,
+    freeAt,
+    serviceIds: serviceIds ? new Set(serviceIds) : null,
+  });
+  const waiting = (id: string, serviceId: string | null, durationMinutes: number, extra = {}) => ({
+    id,
+    serviceId,
+    durationMinutes,
+    boundCounterId: null,
+    referredAt: null,
+    ...extra,
+  });
+
+  it('matches simulateWaitingTokenEtas when nothing is routed', () => {
+    const counters = [free('c1'), free('c2', null, at(4))];
+    const tokens = [waiting('a', null, 5), waiting('b', null, 3), waiting('c', null, 7)];
+    const routed = simulateRoutedEtas(counters, tokens);
+    const plain = simulateWaitingTokenEtas(counters, tokens);
+    expect([...routed.entries()]).toEqual([...plain.entries()]);
+  });
+
+  it('gives a counter only the services it handles', () => {
+    const result = simulateRoutedEtas(
+      [free('reg', ['R']), free('pay', ['P'])],
+      [waiting('a', 'R', 5), waiting('b', 'R', 5), waiting('c', 'P', 5)],
+    );
+    expect(result.get('a')).toEqual(now);
+    expect(result.get('b')).toEqual(at(5));
+    expect(result.get('c')).toEqual(now);
+  });
+
+  it('counts the later steps of someone being served toward those behind them', () => {
+    // One counter; X is at it for step 1 until +10 and then needs step 2 (7
+    // min) — arrival order puts X's step 2 ahead of B.
+    const result = simulateRoutedEtas(
+      [free('c1', null, at(10))],
+      [
+        waiting('x', 'S2', 7, { sequence: 1, availableAt: at(10), inService: true }),
+        waiting('b', 'S1', 10, { sequence: 2 }),
+      ],
+    );
+    expect(result.get('b')).toEqual(at(17));
+    expect(result.has('x')).toBe(false);
+  });
+
+  it('lets a counter take someone later in line while an earlier person is still elsewhere', () => {
+    // X is at Registration until +10 and needs Payment next; B wants Payment now.
+    const result = simulateRoutedEtas(
+      [free('reg', ['R'], at(10)), free('pay', ['P'])],
+      [
+        waiting('x', 'P', 5, { sequence: 1, availableAt: at(10), inService: true }),
+        waiting('b', 'P', 5, { sequence: 2 }),
+      ],
+    );
+    expect(result.get('b')).toEqual(now);
+  });
+
+  it('puts a referral first at its counter, and gives no estimate to whom no counter can serve', () => {
+    const result = simulateRoutedEtas(
+      [free('pay', ['P'])],
+      [
+        waiting('a', 'P', 5, { sequence: 1 }),
+        waiting('x', 'P', 5, { sequence: 2, boundCounterId: 'pay', referredAt: now }),
+        waiting('z', 'Q', 5, { sequence: 3 }),
+      ],
+    );
+    expect(result.get('x')).toEqual(now);
+    expect(result.get('a')).toEqual(at(5));
+    expect(result.has('z')).toBe(false);
   });
 });
 

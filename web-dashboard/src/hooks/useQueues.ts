@@ -3,10 +3,48 @@ import * as queueApi from '../api/queue.api';
 import type { CreateQueueInput, UpdateQueueInput } from '../api/queue.api';
 import type { QueueStatus } from '../types/queue';
 
-export function useQueues() {
+/** ADR-069: `adminId` narrows to one Admin's workspace (Head / Manager). */
+export function useQueues(adminId?: string) {
   return useQuery({
-    queryKey: ['queues'],
-    queryFn: async () => (await queueApi.listQueues()).data,
+    queryKey: adminId ? ['queues', { adminId }] : ['queues'],
+    queryFn: async () => (await queueApi.listQueues(adminId)).data,
+  });
+}
+
+export function useDeletedQueues(adminId?: string, enabled = true) {
+  return useQuery({
+    queryKey: ['queues', 'deleted', adminId ?? null],
+    queryFn: async () => (await queueApi.listDeletedQueues(adminId)).data,
+    enabled,
+  });
+}
+
+export function useAssignQueueAdmin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ queueId, adminId }: { queueId: string; adminId: string }) =>
+      queueApi.assignQueueAdmin(queueId, adminId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['queues'] });
+      void queryClient.invalidateQueries({ queryKey: ['queue'] });
+      void queryClient.invalidateQueries({ queryKey: ['staff'] });
+    },
+  });
+}
+
+export function useRecommendedJourney(queueId: string | undefined) {
+  return useQuery({
+    queryKey: ['recommendedJourney', queueId],
+    queryFn: async () => (await queueApi.getRecommendedJourney(queueId!)).data,
+    enabled: Boolean(queueId),
+  });
+}
+
+export function useSetRecommendedJourney(queueId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (serviceIds: string[]) => queueApi.setRecommendedJourney(queueId, serviceIds),
+    onSuccess: (res) => queryClient.setQueryData(['recommendedJourney', queueId], res.data),
   });
 }
 
@@ -53,7 +91,10 @@ export function useUpdateQueueStatus(queueId: string) {
 export function useDeleteQueue() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (queueId: string) => queueApi.deleteQueue(queueId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['queues'] }),
+    mutationFn: ({ queueId, reason }: { queueId: string; reason: string }) => queueApi.deleteQueue(queueId, reason),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['queues'] });
+      void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 }

@@ -5,16 +5,32 @@ export function listCounters(queueId: string) {
   return apiFetch<Counter[]>(`/api/queues/${queueId}/counters`);
 }
 
-export function createCounter(queueId: string, name: string) {
-  return apiFetch<Counter>(`/api/queues/${queueId}/counters`, { method: 'POST', body: { name } });
+/** ADR-069: with an operator it opens straight away; without one it is OFF. */
+export function createCounter(queueId: string, name: string, operatorStaffId?: string) {
+  return apiFetch<Counter>(`/api/queues/${queueId}/counters`, {
+    method: 'POST',
+    body: operatorStaffId ? { name, operatorStaffId } : { name },
+  });
 }
 
 export function updateCounter(counterId: string, name: string) {
   return apiFetch<Counter>(`/api/counters/${counterId}`, { method: 'PUT', body: { name } });
 }
 
-export function setCounterStatus(counterId: string, status: CounterStatus) {
-  return apiFetch<Counter>(`/api/counters/${counterId}/status`, { method: 'PATCH', body: { status } });
+/**
+ * ADR-069: OFF releases the operator. Opening or pausing an OFF counter needs
+ * one, given here as `operatorStaffId`.
+ */
+export function setCounterStatus(counterId: string, status: CounterStatus, operatorStaffId?: string) {
+  return apiFetch<Counter>(`/api/counters/${counterId}/status`, {
+    method: 'PATCH',
+    body: operatorStaffId ? { status, operatorStaffId } : { status },
+  });
+}
+
+/** ADR-070: the services a counter handles; [] = every service. */
+export function setCounterServices(counterId: string, serviceIds: string[]) {
+  return apiFetch<Counter>(`/api/counters/${counterId}/services`, { method: 'PUT', body: { serviceIds } });
 }
 
 /**

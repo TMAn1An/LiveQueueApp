@@ -859,10 +859,43 @@ async function simulateQueue(
     return { ...routing, freeAt: computeEffectiveEndTime(anchor, durationMinutes, now) };
   });
 
+  // ADR-070: the steps still ahead of someone after their current one — the
+  // people behind them wait for those too.
+  const laterStepsOf = (token: { currentStepNumber: number | null; journeySteps?: JourneyStep[] }) =>
+    token.currentStepNumber == null
+      ? []
+      : (token.journeySteps ?? [])
+          .filter((s) => s.stepNumber > token.currentStepNumber! && s.status === 'PENDING')
+          .map((s) => ({ serviceId: s.serviceId, durationMinutes: s.service.durationMinutes }));
+
+  // Someone at a counter for an earlier step comes back for their next one
+  // when this step ends.
+  const returningInputs: RoutedWaitingToken[] = activeCounters.flatMap((counter, index) => {
+    const occupying = counter.tokens[0];
+    if (!occupying) return [];
+    const [next, ...rest] = laterStepsOf(occupying);
+    if (!next) return [];
+    return [
+      {
+        id: occupying.id,
+        sequence: occupying.sequenceNumber,
+        durationMinutes: next.durationMinutes,
+        serviceId: next.serviceId,
+        boundCounterId: null,
+        referredAt: null,
+        availableAt: counterOccupancy[index]!.freeAt,
+        laterSteps: rest,
+        inService: true,
+      },
+    ];
+  });
+
   const waitingInputs: RoutedWaitingToken[] = callable.map((token) => {
     const step = currentStepOf(token);
     return {
       id: token.id,
+      sequence: token.sequenceNumber,
+      laterSteps: laterStepsOf(token),
       // ADR-070: the current step's service time; a pre-journey token keeps
       // the sum of its selected services, as before.
       durationMinutes: step ? step.service.durationMinutes : sumServiceDurations(token.tokenServices),
@@ -877,10 +910,18 @@ async function simulateQueue(
     counterOccupancy,
     withNewArrival
       ? [
+          ...returningInputs,
           ...waitingInputs,
-          { id: NEW_ARRIVAL_PROBE_ID, durationMinutes: 0, serviceId: null, boundCounterId: null, referredAt: null },
+          {
+            id: NEW_ARRIVAL_PROBE_ID,
+            sequence: Number.MAX_SAFE_INTEGER,
+            durationMinutes: 0,
+            serviceId: null,
+            boundCounterId: null,
+            referredAt: null,
+          },
         ]
-      : waitingInputs,
+      : [...returningInputs, ...waitingInputs],
   );
 
   const callableEntries = callable.map((token, index) => {

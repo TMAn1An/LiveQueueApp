@@ -4,6 +4,8 @@ import { AuditLogsPage } from './AuditLogsPage';
 import { useAuditLogs } from '../hooks/useAuditLogs';
 import type { AuditLogEntry } from '../types/auditLog';
 
+// ADR-069: the Admin filter is only for organization-wide roles.
+vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: () => false }) }));
 vi.mock('../hooks/useAuditLogs', () => ({
   useAuditLogs: vi.fn(),
 }));
@@ -116,7 +118,7 @@ describe('AuditLogsPage — search', () => {
 
     render(<AuditLogsPage />);
     fireEvent.click(screen.getByText('Next'));
-    expect(useAuditLogs).toHaveBeenLastCalledWith(2, 20, '');
+    expect(useAuditLogs).toHaveBeenLastCalledWith(2, 20, '', '');
 
     fireEvent.change(screen.getByLabelText('Search audit logs'), {
       target: { value: 'staff_created' },
@@ -125,7 +127,7 @@ describe('AuditLogsPage — search', () => {
       vi.advanceTimersByTime(300);
     });
 
-    expect(useAuditLogs).toHaveBeenLastCalledWith(1, 20, 'staff_created');
+    expect(useAuditLogs).toHaveBeenLastCalledWith(1, 20, 'staff_created', '');
   });
 
   it('distinguishes "no events yet" from "nothing matched the search"', () => {

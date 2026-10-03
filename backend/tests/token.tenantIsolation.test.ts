@@ -4,13 +4,14 @@ import {
   assignCounterTo,
   createCounter,
   createQueue,
-  createRestrictedStaff,
   createService,
   createToken,
   registerOwner,
   setCounterStatus,
   servingToken,
   staffOf,
+  createStaffWithRole,
+  queueAdmins,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -101,7 +102,10 @@ describe('Token tenant isolation', () => {
     const counter = await createCounter(ctx.accessToken, queue.id, { assignToCreator: false });
     await setCounterStatus(ctx.accessToken, counter.id, 'ACTIVE');
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
-    const accountant = await createRestrictedStaff(ctx.organizationId);
+    // ADR-069: an Executive of the queue's Admin.
+    const accountant = await createStaffWithRole(ctx.organizationId, 'STAFF', {
+      workspaceAdminId: queueAdmins.get(queue.id)!.staffId,
+    });
     // ADR-064: at the counter they are assigned to.
     await assignCounterTo(ctx.accessToken, counter.id, accountant.staffId);
 

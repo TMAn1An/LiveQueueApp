@@ -172,7 +172,7 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
 
     const res = await api()
       .delete(`/api/queues/${queue.id}`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`);
+      .set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
     expect(res.status).toBe(200);
 
     const rows = await waitForAuditLogs({

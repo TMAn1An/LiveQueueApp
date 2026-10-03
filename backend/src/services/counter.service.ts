@@ -102,6 +102,15 @@ async function assertEligibleOperator(
   queue: Pick<Queue, 'adminId' | 'organizationId'>,
   staffId: string,
 ) {
+  // Unchanged contract: an unknown person is 404, another organization's 403;
+  // only then does the workspace rule (ADR-069) decide.
+  const staff = await tx.staff.findUnique({ where: { id: staffId }, select: { organizationId: true } });
+  if (!staff) {
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+  }
+  if (staff.organizationId !== queue.organizationId) {
+    throw new AppError(403, 'STAFF_ORGANIZATION_MISMATCH', 'Staff member does not belong to this organization.');
+  }
   const eligible = await tx.staff.findFirst({
     where: { AND: [{ id: staffId }, operatorEligibilityWhere(queue)] },
     select: { id: true },

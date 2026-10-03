@@ -17,8 +17,17 @@ export interface QueueServiceItem {
   description: string | null;
   durationMinutes: number;
   isActive: boolean;
+  /** ADR-070: how often one journey may include it (never back to back). */
+  maxOccurrencesPerJourney?: number;
   createdAt: string;
   updatedAt: string;
+}
+
+/** ADR-069: the Admin a queue belongs to; null while Head-managed. */
+export interface QueueAdminSummary {
+  id: string;
+  name: string;
+  email: string;
 }
 
 export interface Queue {
@@ -79,6 +88,30 @@ export interface Queue {
    * present on the queue-list response. */
   waitingCount?: number;
   activeCounterCount?: number;
+  /** ADR-069: whose workspace this queue is. Null: transitional, managed by
+   * the Organization Head until assigned to an Admin. */
+  adminId?: string | null;
+  admin?: QueueAdminSummary | null;
+  /** ADR-069: whether the signed-in person may change it (server-decided). */
+  canManage?: boolean;
+}
+
+/** ADR-070: the order an Admin suggests services be taken in. */
+export interface RecommendedJourney {
+  serviceIds: string[];
+  /** Services no staffed counter can serve right now. */
+  unroutableServiceIds: string[];
+}
+
+/** ADR-069 D8: a deleted queue, with who removed it and why. */
+export interface DeletedQueue {
+  id: string;
+  name: string;
+  deletedAt: string;
+  deletedByEmail: string | null;
+  deletedByRole: string | null;
+  deletionReason: string | null;
+  admin: QueueAdminSummary | null;
 }
 
 /** ADR-064: the counter an owner or admin has assigned the signed-in person to. */
@@ -96,6 +129,10 @@ export interface Counter {
   name: string;
   status: CounterStatus;
   staffId: string | null;
+  /** ADR-069: who stands at it (null only while OFF). */
+  operator?: { id: string; name: string; role: string } | null;
+  /** ADR-070: the services it handles; empty means every service. */
+  serviceIds?: string[];
   createdAt: string;
   updatedAt: string;
 }

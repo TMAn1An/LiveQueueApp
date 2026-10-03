@@ -16,13 +16,28 @@ import { ErrorBanner } from './ErrorBanner';
 import { actionErrorMessage } from '../utils/actionError';
 import type { QueueServiceItem } from '../types/queue';
 
-function ServiceRow({ queueId, service }: { queueId: string; service: QueueServiceItem }) {
+const MAX_REPEAT_LIMIT = 10;
+
+function repeatLimitText(limit: number): string {
+  return limit === 1 ? 'Once per visit' : `Up to ${limit}× per visit`;
+}
+
+function ServiceRow({
+  queueId,
+  service,
+  editable,
+}: {
+  queueId: string;
+  service: QueueServiceItem;
+  editable: boolean;
+}) {
   const updateService = useUpdateService(queueId);
   const setStatus = useSetServiceStatus(queueId);
   const deleteService = useDeleteService(queueId);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(service.serviceName);
   const [duration, setDuration] = useState(service.durationMinutes);
+  const [repeatLimit, setRepeatLimit] = useState(service.maxOccurrencesPerJourney ?? 2);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [rowError, setRowError] = useState<string | null>(null);
   const nameError = latinNameError(name);
@@ -55,16 +70,30 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
           </div>
         </td>
         <td className="py-3 pr-4">
+          <input
+            type="number"
+            min={1}
+            max={MAX_REPEAT_LIMIT}
+            value={repeatLimit}
+            aria-label="Times one visit may include this service"
+            onChange={(e) => setRepeatLimit(Number(e.target.value))}
+            className="h-9 w-20 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
+          />
+        </td>
+        <td className="py-3 pr-4">
           <StatusBadge status={service.isActive ? 'ACTIVE' : 'INACTIVE'} size="sm" />
         </td>
         <td className="py-3 pr-4">
           <div className="flex items-center gap-2">
             <Button
               loading={updateService.isPending}
-              disabled={!name.trim() || Boolean(nameError)}
+              disabled={!name.trim() || Boolean(nameError) || repeatLimit < 1 || repeatLimit > MAX_REPEAT_LIMIT}
               onClick={() =>
                 updateService.mutate(
-                  { serviceId: service.id, input: { serviceName: name, durationMinutes: duration } },
+                  {
+                    serviceId: service.id,
+                    input: { serviceName: name, durationMinutes: duration, maxOccurrencesPerJourney: repeatLimit },
+                  },
                   { onSuccess: () => setEditing(false), onError: showRowError },
                 )
               }
@@ -91,10 +120,12 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
           {service.durationMinutes} min
         </span>
       </td>
+      <td className="py-3 pr-4 text-xs text-fg-soft">{repeatLimitText(service.maxOccurrencesPerJourney ?? 2)}</td>
       <td className="py-3 pr-4">
         <StatusBadge status={service.isActive ? 'ACTIVE' : 'INACTIVE'} size="sm" />
       </td>
       <td className="py-3 pr-4">
+        {editable && (
         <PermissionGate permission="manage_services">
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="secondary" onClick={() => setEditing(true)}>
@@ -115,6 +146,7 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
             </Button>
           </div>
         </PermissionGate>
+        )}
         {rowError && <div className="mt-2"><ErrorBanner message={rowError} /></div>}
         {confirmingDelete && (
           <ConfirmDialog
@@ -141,13 +173,17 @@ function ServiceRow({ queueId, service }: { queueId: string; service: QueueServi
 export function ServicesManager({
   queueId,
   services,
+  editable = true,
 }: {
   queueId: string;
   services: QueueServiceItem[];
+  /** ADR-069: false for someone who may see but not change this queue. */
+  editable?: boolean;
 }) {
   const createService = useCreateService(queueId);
   const [name, setName] = useState('');
   const [duration, setDuration] = useState(5);
+  const [repeatLimit, setRepeatLimit] = useState(2);
   const [error, setError] = useState<string | null>(null);
   const nameError = latinNameError(name);
 
@@ -162,19 +198,21 @@ export function ServicesManager({
               <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
                 <th className="py-3 pr-4">Name</th>
                 <th className="py-3 pr-4">Duration</th>
+                <th className="py-3 pr-4">Repeats</th>
                 <th className="py-3 pr-4">Status</th>
                 <th className="py-3 pr-4">Actions</th>
               </tr>
             </thead>
             <tbody>
               {services.map((s) => (
-                <ServiceRow key={s.id} queueId={queueId} service={s} />
+                <ServiceRow key={s.id} queueId={queueId} service={s} editable={editable} />
               ))}
             </tbody>
           </table>
         </div>
       )}
 
+      {editable && (
       <PermissionGate permission="manage_services">
         <div className="mt-5 border-t border-border pt-4">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">
@@ -203,13 +241,27 @@ export function ServicesManager({
                 className="h-9 w-24 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
               />
             </div>
+            <div>
+              <label htmlFor={`new-service-repeats-${queueId}`} className="mb-1 block text-xs font-medium text-fg-soft">
+                Max per visit
+              </label>
+              <input
+                id={`new-service-repeats-${queueId}`}
+                type="number"
+                min={1}
+                max={MAX_REPEAT_LIMIT}
+                value={repeatLimit}
+                onChange={(e) => setRepeatLimit(Number(e.target.value))}
+                className="h-9 w-24 rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
+              />
+            </div>
             <Button
-              disabled={!name.trim() || Boolean(nameError)}
+              disabled={!name.trim() || Boolean(nameError) || repeatLimit < 1 || repeatLimit > MAX_REPEAT_LIMIT}
               loading={createService.isPending}
               onClick={() => {
                 setError(null);
                 createService.mutate(
-                  { serviceName: name.trim(), durationMinutes: duration },
+                  { serviceName: name.trim(), durationMinutes: duration, maxOccurrencesPerJourney: repeatLimit },
                   {
                     onSuccess: () => setName(''),
                     // Used to fail silently; a refusal now says why.
@@ -222,9 +274,14 @@ export function ServicesManager({
             </Button>
           </div>
           <FieldError message={nameError} />
+          <p className="mt-2 text-xs text-muted">
+            Max per visit: how many times one person may include this service in their visit. It can
+            never be two steps in a row.
+          </p>
           {error && <div className="mt-2"><ErrorBanner message={error} /></div>}
         </div>
       </PermissionGate>
+      )}
     </div>
   );
 }

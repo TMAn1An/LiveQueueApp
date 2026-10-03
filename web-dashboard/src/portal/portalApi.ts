@@ -1,5 +1,6 @@
 import { getApiBaseUrl } from '../api/client';
 import { newUuid } from './installation';
+import type { JourneyView } from '../shared/journey/JourneyProgress';
 
 /**
  * ADR-068: the portal's calls — all public, unauthenticated endpoints shared
@@ -76,7 +77,16 @@ export interface QueueConfig {
   allowMultipleServices: boolean;
   identity: { requiresVerifiedEmail: boolean; configurationRequired: boolean; repeatRestricted: boolean };
   schedule: { acceptingJoins: boolean; message: string | null };
-  services: { id: string; serviceName: string; description: string | null; durationMinutes: number }[];
+  services: {
+    id: string;
+    serviceName: string;
+    description: string | null;
+    durationMinutes: number;
+    /** ADR-070: how often one visit may include it (never twice in a row). */
+    maxOccurrencesPerJourney?: number;
+  }[];
+  /** ADR-070: the queue's suggested order (service ids, may repeat). */
+  recommendedJourney?: string[];
   formFields: FormField[];
 }
 
@@ -95,6 +105,10 @@ export interface PortalToken {
   serviceStartVerificationRequired: boolean;
   skipReason?: { code: string; text: string | null } | null;
   completionFeedback?: string | null;
+  /** ADR-070: the ordered steps, fixed when the token was created. */
+  journey?: JourneyView | null;
+  /** ADR-069: set only when this visit ended because its queue was deleted. */
+  queueRemoved?: { reason: string | null } | null;
 }
 
 export const portalApi = {

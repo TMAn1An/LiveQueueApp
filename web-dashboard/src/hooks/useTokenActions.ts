@@ -29,8 +29,15 @@ export function useStartToken() {
 export function useCompleteToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ tokenId, feedback }: { tokenId: string; feedback?: string }) =>
-      tokenApi.completeToken(tokenId, feedback),
+    mutationFn: ({
+      tokenId,
+      feedback,
+      referral,
+    }: {
+      tokenId: string;
+      feedback?: string;
+      referral?: { referToCounterId: string; referralNote?: string };
+    }) => tokenApi.completeToken(tokenId, feedback, referral),
     onSuccess: () => invalidateLiveData(queryClient),
   });
 }

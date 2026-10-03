@@ -28,6 +28,15 @@ export interface WaitingActionEligibility {
   reason: WaitingActionBlockedReason | null;
 }
 
+/** ADR-070: a token's ordered journey as the live table shows it. */
+export interface LiveJourney {
+  currentStepNumber: number;
+  totalSteps: number;
+  steps: { stepNumber: number; serviceId: string; serviceName: string; status: string }[];
+  /** The counter the current step was referred to, if any. */
+  referredTo: { id: string; name: string } | null;
+}
+
 export interface LiveQueueTokenRow {
   id: string;
   serialNumber: string;
@@ -38,6 +47,8 @@ export interface LiveQueueTokenRow {
   /** V2 Checkpoint 5 (ADR-027): the full multi-service selection. */
   services: { id: string; name: string }[];
   counter: { id: string; name: string } | null;
+  /** ADR-070: null for a token created before ordered journeys. */
+  journey?: LiveJourney | null;
   position: number | null;
   estimatedWaitMinutes: number | null;
   /** Null for rows that are not WAITING, where the concept does not apply. */

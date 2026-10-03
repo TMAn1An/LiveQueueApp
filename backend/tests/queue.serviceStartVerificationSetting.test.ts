@@ -6,6 +6,7 @@ import {
   createService,
   createStaffWithRole,
   createToken,
+  queueAdmins,
   registerOwner,
   setCounterStatus,
   startToken,
@@ -165,7 +166,10 @@ describe('ADR-041 â€” a queue that does not use the code', () => {
 
   it('lets STAFF (operate_tokens) start directly at their own counter — permissions unchanged', async () => {
     const org = await setupOrgQueue({ requireServiceStartOtp: false });
-    const staff = await createStaffWithRole(org.organizationId, 'STAFF');
+    // An Executive of this queue's workspace, but not at this counter.
+    const staff = await createStaffWithRole(org.organizationId, 'STAFF', {
+      workspaceAdminId: queueAdmins.get(org.queue.id)!.staffId,
+    });
     const token = await calledToken(org);
     // ADR-064: only the staff member at this person's counter may start them.
     expect((await startWithoutCode(staff.accessToken, token.id)).status).toBe(403);

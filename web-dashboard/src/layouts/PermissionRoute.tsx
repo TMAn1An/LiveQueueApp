@@ -9,9 +9,11 @@ import type { Permission } from '../types/auth';
  * prevents the dashboard from rendering a fully-interactive page the backend
  * will reject every action on.
  */
-export function PermissionRoute({ permission }: { permission: Permission }) {
+export function PermissionRoute({ permission }: { permission: Permission | Permission[] }) {
   const { hasPermission } = useAuth();
-  if (!hasPermission(permission)) {
+  // An array means any one of them is enough.
+  const allowed = Array.isArray(permission) ? permission.some(hasPermission) : hasPermission(permission);
+  if (!allowed) {
     return <Navigate to="/dashboard" replace />;
   }
   return <Outlet />;

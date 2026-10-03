@@ -10,6 +10,7 @@ import {
   createStaffWithRole,
   createToken,
   createTokenRequest,
+  queueAdmins,
   registerOwner,
   setCounterStatus,
   servingToken,
@@ -30,11 +31,20 @@ beforeEach(async () => {
   await resetDb();
 });
 
-/** An organization with two independent queues, each with its own counter. */
-async function twoQueues() {
+/** An organization with two independent queues, each with its own counter.
+ *
+ * ADR-069: each new queue belongs to its own Admin, and an Executive can only
+ * ever stand in their own Admin's queue, so staff can never cross between two
+ * Admin queues at all. The one place two queues still share a pool of people
+ * is the transitional, Head-managed state migrated queues start in — `legacy`
+ * builds that, so the cross-queue binding rules keep being exercised. */
+async function twoQueues({ legacy = false }: { legacy?: boolean } = {}) {
   const ctx = await registerOwner();
   const queueA = await createQueue(ctx.accessToken, { name: 'Pharmacy', tokenPrefix: 'A' });
   const queueB = await createQueue(ctx.accessToken, { name: 'Registration', tokenPrefix: 'B' });
+  if (legacy) {
+    await prisma.queue.updateMany({ where: { id: { in: [queueA.id, queueB.id] } }, data: { adminId: null } });
+  }
   const serviceA = await createService(ctx.accessToken, queueA.id);
   const serviceB = await createService(ctx.accessToken, queueB.id);
   const counterA = await createCounter(ctx.accessToken, queueA.id, { name: 'A1' });
@@ -142,7 +152,9 @@ describe('first-come-first-served runs per queue', () => {
   });
 
   it('will not call a token onto a counter from another queue', async () => {
-    const org = await twoQueues();
+    // Legacy, Head-managed queues share their organization-level Executives,
+    // so one person can be moved between them (ADR-069).
+    const org = await twoQueues({ legacy: true });
     await setCounterStatus(org.ctx.accessToken, org.counterB.id, 'ACTIVE');
     const tokenA = await createToken({ queueId: org.queueA.id, serviceId: org.serviceA.id });
 
@@ -330,7 +342,7 @@ describe('staff stay bound to the queue they were assigned in', () => {
 
   // ADR-064: listed only as "on another counter" (a move), never as free.
   it('a staff member on a counter in one queue is not offered as free in another', async () => {
-    const org = await twoQueues();
+    const org = await twoQueues({ legacy: true });
     const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
     await assign(org.ctx.accessToken, org.counterA.id, kara.staffId);
 
@@ -346,9 +358,8 @@ describe('staff stay bound to the queue they were assigned in', () => {
   it.each([
     ['idle and ACTIVE', 'ACTIVE'],
     ['ON_BREAK', 'ON_BREAK'],
-    ['OFFLINE', 'OFFLINE'],
   ])('stays bound while their counter is %s', async (_label, status) => {
-    const org = await twoQueues();
+    const org = await twoQueues({ legacy: true });
     const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
     await assign(org.ctx.accessToken, org.counterA.id, kara.staffId);
     await setCounterStatus(org.ctx.accessToken, org.counterA.id, status);
@@ -363,26 +374,47 @@ describe('staff stay bound to the queue they were assigned in', () => {
     expect(moved.body.error.code).toBe('OPERATOR_ALREADY_ASSIGNED');
   });
 
-  it('frees them only once an administrator unassigns them', async () => {
-    const org = await twoQueues();
+  it('is released when their counter is turned OFF (ADR-069, D5)', async () => {
+    const org = await twoQueues({ legacy: true });
+    const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
+    await assign(org.ctx.accessToken, org.counterA.id, kara.staffId);
+    await setCounterStatus(org.ctx.accessToken, org.counterA.id, 'OFFLINE');
+
+    const counterA = await prisma.counter.findUniqueOrThrow({ where: { id: org.counterA.id } });
+    expect(counterA.staffId).toBeNull();
+    const offered = await assignableStaff(org.ctx.accessToken, org.counterB.id);
+    expect(offered.body.data.find((s: { id: string }) => s.id === kara.staffId).currentCounter).toBeNull();
+  });
+
+  // ADR-069 (D5): turning a counter off is what releases its operator; an
+  // active or paused counter can never simply be emptied.
+  it('frees them only once an administrator turns their counter off', async () => {
+    const org = await twoQueues({ legacy: true });
     const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
     await assign(org.ctx.accessToken, org.counterA.id, kara.staffId);
 
-    const unassigned = await assign(org.ctx.accessToken, org.counterA.id, null);
-    expect(unassigned.status).toBe(200);
+    const emptied = await assign(org.ctx.accessToken, org.counterA.id, null);
+    expect(emptied.status).toBe(409);
+    expect(emptied.body.error.code).toBe('COUNTER_MUST_BE_OFF');
+
+    const turnedOff = await api()
+      .patch(`/api/counters/${org.counterA.id}/status`)
+      .set('Authorization', `Bearer ${org.ctx.accessToken}`)
+      .send({ status: 'OFFLINE' });
+    expect(turnedOff.status).toBe(200);
 
     const offered = await assignableStaff(org.ctx.accessToken, org.counterB.id);
     expect(offered.body.data.map((s: { id: string }) => s.id)).toContain(kara.staffId);
     const moved = await assign(org.ctx.accessToken, org.counterB.id, kara.staffId);
     expect(moved.status).toBe(200);
     // The old counter was not silently emptied by the move — it was emptied
-    // by the explicit unassign above, which is the whole point.
+    // by turning it off above, which is the whole point.
     const counterA = await prisma.counter.findUniqueOrThrow({ where: { id: org.counterA.id } });
     expect(counterA.staffId).toBeNull();
   });
 
   it('still offers the counter’s own current holder while editing it', async () => {
-    const org = await twoQueues();
+    const org = await twoQueues({ legacy: true });
     const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
     await assign(org.ctx.accessToken, org.counterA.id, kara.staffId);
 
@@ -392,7 +424,7 @@ describe('staff stay bound to the queue they were assigned in', () => {
   });
 
   it('lets only one of two simultaneous assignments in different queues win', async () => {
-    const org = await twoQueues();
+    const org = await twoQueues({ legacy: true });
     const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
 
     const results = await Promise.all([
@@ -408,11 +440,13 @@ describe('staff stay bound to the queue they were assigned in', () => {
 });
 
 describe('only owners and admins move staff between counters', () => {
+  // ADR-069: queue A belongs to `admin`; kara and the operator are
+  // Executives of that Admin's workspace.
   async function setup() {
     const org = await twoQueues();
-    const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
-    const admin = await createStaffWithRole(org.ctx.organizationId, 'ADMIN');
-    const operator = await createStaffWithRole(org.ctx.organizationId, 'STAFF');
+    const admin = queueAdmins.get(org.queueA.id)!;
+    const kara = await createStaffWithRole(org.ctx.organizationId, 'STAFF', { workspaceAdminId: admin.staffId });
+    const operator = await createStaffWithRole(org.ctx.organizationId, 'STAFF', { workspaceAdminId: admin.staffId });
     return { ...org, kara, admin, operator };
   }
 

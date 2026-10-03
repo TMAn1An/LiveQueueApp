@@ -6,7 +6,7 @@ import { Pagination } from '../components/Pagination';
 import { TokenActions } from '../components/TokenActions';
 import { Modal } from '../components/Modal';
 import { formatDateTime, formatSessionWindow } from '../utils/format';
-import type { LiveQueueTokenRow } from '../types/dashboard';
+import type { LiveQueueTokenRow, LiveJourney } from '../types/dashboard';
 
 /**
  * One queue's waiting line (ADR-036).
@@ -79,7 +79,11 @@ export function LiveQueueTable({
                   </td>
                   {!queueId && <td className="py-3 pr-4 font-medium text-fg">{row.queue.name}</td>}
                   <td className="py-3 pr-4">
-                    <ServicesSummaryCell services={row.services} />
+                    {row.journey ? (
+                      <JourneySummaryCell journey={row.journey} />
+                    ) : (
+                      <ServicesSummaryCell services={row.services} />
+                    )}
                   </td>
                   <td className="py-3 pr-4">
                     <CustomerSummaryCell row={row} onOpenDetails={() => setDetailsRow(row)} />
@@ -121,6 +125,7 @@ export function LiveQueueTable({
                       actionEligibility={row.actionEligibility}
                       requiresVerificationCode={row.queue.requireServiceStartOtp}
                       counterId={row.counter?.id ?? null}
+                      journey={row.journey ?? null}
                     />
                   </td>
                 </tr>
@@ -150,6 +155,28 @@ function ServicesSummaryCell({ services }: { services: LiveQueueTokenRow['servic
       {first!.name}
       {rest.length > 0 ? ` +${rest.length} more` : ''}
     </span>
+  );
+}
+
+/** ADR-070: "Step 2 of 3 · Payment", what comes next, and any referral. */
+function JourneySummaryCell({ journey }: { journey: LiveJourney }) {
+  const current = journey.steps.find((s) => s.stepNumber === journey.currentStepNumber);
+  const next = journey.steps.find((s) => s.stepNumber === journey.currentStepNumber + 1);
+  return (
+    <div className="space-y-0.5" title={journey.steps.map((s) => `${s.stepNumber}. ${s.serviceName}`).join('\n')}>
+      <p className="text-sm text-fg">
+        <span className="text-xs font-semibold text-muted">
+          Step {journey.currentStepNumber}/{journey.totalSteps}
+        </span>{' '}
+        {current?.serviceName}
+      </p>
+      {next && <p className="text-xs text-muted">Next: {next.serviceName}</p>}
+      {journey.referredTo && (
+        <span className="inline-flex items-center rounded-md bg-brand-50 px-1.5 py-0.5 text-[11px] font-semibold text-brand-fg ring-1 ring-brand-200 dark:bg-brand-950/60 dark:ring-brand-800">
+          Referred to {journey.referredTo.name}
+        </span>
+      )}
+    </div>
   );
 }
 

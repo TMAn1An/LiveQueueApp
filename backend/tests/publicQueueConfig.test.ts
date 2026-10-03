@@ -43,7 +43,7 @@ describe('GET /api/public/queues/:queueId/config', () => {
   it('returns 404 for an archived queue', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    await api().delete(`/api/queues/${queue.id}`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().delete(`/api/queues/${queue.id}`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
 
     const res = await api().get(`/api/public/queues/${queue.id}/config`);
     expect(res.status).toBe(404);

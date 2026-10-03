@@ -283,8 +283,11 @@ export function servingToken(managerAccessToken: string): string {
  * isolation tests, where a serving request from another organization must be
  * refused as "not found" before any counter rule is even reached.
  */
-export async function staffOf(ctx: { organizationId: string }): Promise<string> {
-  return (await createStaffWithRole(ctx.organizationId, 'STAFF')).accessToken;
+/** A STAFF member (Executive). With `queueId`, one of that queue's Admin's
+ * workspace — the only Executives who can see and work it (ADR-069). */
+export async function staffOf(ctx: { organizationId: string }, queueId?: string): Promise<string> {
+  const workspaceAdminId = queueId ? await workspaceAdminOfQueue(queueId) : null;
+  return (await createStaffWithRole(ctx.organizationId, 'STAFF', { workspaceAdminId })).accessToken;
 }
 
 /** The STAFF operator behind `servingToken`, for tests that need their id. */
@@ -327,6 +330,17 @@ export async function assignCounterTo(
   counterId: string,
   staffId: string | null,
 ): Promise<CounterResponse> {
+  if (staffId === null) {
+    // ADR-069: an active or paused counter always has its operator, so
+    // releasing one means turning the counter off first.
+    const counter = await prisma.counter.findUnique({ where: { id: counterId }, select: { status: true } });
+    if (counter && counter.status !== 'OFFLINE') {
+      await api()
+        .patch(`/api/counters/${counterId}/status`)
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ status: 'OFFLINE' });
+    }
+  }
   const res = await api()
     .patch(`/api/counters/${counterId}/assign`)
     .set('Authorization', `Bearer ${accessToken}`)
@@ -362,10 +376,25 @@ export async function createCounterOperator(
 }
 
 export async function setCounterStatus(accessToken: string, counterId: string, status: string) {
+  // ADR-069: only a staffed counter can be open or paused. Suites that just
+  // need "an open counter" get a fresh operator from the queue's workspace.
+  let operatorStaffId: string | undefined;
+  if (status !== 'OFFLINE') {
+    const counter = await prisma.counter.findUnique({
+      where: { id: counterId },
+      select: { staffId: true, queueId: true, queue: { select: { organizationId: true } } },
+    });
+    if (counter && !counter.staffId) {
+      const operator = await createStaffWithRole(counter.queue.organizationId, 'STAFF', {
+        workspaceAdminId: await workspaceAdminOfQueue(counter.queueId),
+      });
+      operatorStaffId = operator.staffId;
+    }
+  }
   const res = await api()
     .patch(`/api/counters/${counterId}/status`)
     .set('Authorization', `Bearer ${accessToken}`)
-    .send({ status });
+    .send(operatorStaffId ? { status, operatorStaffId } : { status });
 
   if (res.status !== 200) {
     throw new Error(`setCounterStatus failed: ${res.status} ${JSON.stringify(res.body)}`);

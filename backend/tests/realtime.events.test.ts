@@ -69,10 +69,8 @@ describe('All 12 specification events are emitted to the organization room', () 
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
     const eventPromise = waitForEvent<Envelope>(socket, 'queue.created');
 
-    await api()
-      .post('/api/queues')
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ name: 'Q1', tokenPrefix: 'A' });
+    // ADR-069: the Head creates it for an Admin (createQueue names one).
+    await createQueue(ctx.accessToken, { name: 'Q1', tokenPrefix: 'A' });
 
     const envelope = await eventPromise;
     expect(envelope.organizationId).toBe(ctx.organizationId);
@@ -276,10 +274,8 @@ describe('Multiple clients in the same organization', () => {
     const eventA = waitForEvent<Envelope>(socketA, 'queue.created');
     const eventB = waitForEvent<Envelope>(socketB, 'queue.created');
 
-    await api()
-      .post('/api/queues')
-      .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ name: 'Shared Queue', tokenPrefix: 'A' });
+    // ADR-069: the Head creates it for an Admin (createQueue names one).
+    await createQueue(ctx.accessToken, { name: 'Shared Queue', tokenPrefix: 'A' });
 
     const [envelopeA, envelopeB] = await Promise.all([eventA, eventB]);
     expect(envelopeA.data.name).toBe('Shared Queue');
@@ -298,10 +294,8 @@ describe('Multiple clients in the same organization', () => {
       orgBReceived = true;
     });
 
-    await api()
-      .post('/api/queues')
-      .set('Authorization', `Bearer ${orgA.accessToken}`)
-      .send({ name: 'Org A Queue', tokenPrefix: 'A' });
+    // ADR-069: the Head creates it for an Admin (createQueue names one).
+    await createQueue(orgA.accessToken, { name: 'Org A Queue', tokenPrefix: 'A' });
 
     await eventA;
     await new Promise((resolve) => setTimeout(resolve, 300));

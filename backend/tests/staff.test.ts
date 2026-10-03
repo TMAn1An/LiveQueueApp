@@ -321,7 +321,8 @@ describe('Permission escalation (frozen RBAC policy — permissions are role-der
   it('PUT /api/staff/:staffId ignores a permissions field even from a caller who holds manage_staff (ADMIN)', async () => {
     const ctx = await registerOwner();
     const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
-    const target = await createStaff(ctx.accessToken, { role: 'STAFF' });
+    // ADR-069: an Admin manages the Executives of their own workspace.
+    const target = await createStaff(ctx.accessToken, { role: 'STAFF', workspaceAdminId: admin.staffId });
 
     const res = await api()
       .put(`/api/staff/${target.body.data.id}`)

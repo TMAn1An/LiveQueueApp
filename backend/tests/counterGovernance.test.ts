@@ -7,7 +7,6 @@ import {
   createStaffWithRole,
   createToken,
   registerOwner,
-  setCounterStatus,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';

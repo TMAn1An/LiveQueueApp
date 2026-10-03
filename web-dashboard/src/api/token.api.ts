@@ -19,11 +19,33 @@ export function startToken(tokenId: string, verificationCode?: string) {
 }
 
 // ADR-042: feedback is optional — omitted entirely for an ordinary completion.
-export function completeToken(tokenId: string, feedback?: string) {
+// ADR-070: on a journey, completing a step that is not the last sends the
+// person back to wait for the next one; `referToCounterId` refers that next
+// step to a counter that handles it (the note is optional).
+export function completeToken(
+  tokenId: string,
+  feedback?: string,
+  referral?: { referToCounterId: string; referralNote?: string },
+) {
   return apiFetch<StaffToken>(`/api/tokens/${tokenId}/complete`, {
     method: 'POST',
-    body: feedback === undefined ? {} : { feedback },
+    body: {
+      ...(feedback === undefined ? {} : { feedback }),
+      ...(referral ? { referToCounterId: referral.referToCounterId } : {}),
+      ...(referral?.referralNote ? { referralNote: referral.referralNote } : {}),
+    },
   });
+}
+
+/** ADR-070: the step after the current one, and where it could be referred. */
+export interface ReferralOptions {
+  nextStep: { stepNumber: number; serviceId: string; serviceName: string } | null;
+  currentCounterHandlesNext: boolean;
+  targets: { id: string; name: string; busy: boolean }[];
+}
+
+export function getReferralOptions(tokenId: string) {
+  return apiFetch<ReferralOptions>(`/api/tokens/${tokenId}/referral-options`);
 }
 
 // ADR-042: every skip says why. reasonText is only meaningful for OTHER.

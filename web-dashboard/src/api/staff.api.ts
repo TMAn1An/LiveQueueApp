@@ -9,10 +9,16 @@ import type {
 
 /** `search` is omitted from the query string entirely when empty (apiFetch
  * skips undefined), so no-search behaves exactly as before. */
-export function listStaff(page = 1, pageSize = 20, search?: string) {
+export function listStaff(page = 1, pageSize = 20, search?: string, adminId?: string) {
   return apiFetch<Staff[]>('/api/staff', {
-    query: { page, pageSize, search: search || undefined },
+    query: { page, pageSize, search: search || undefined, adminId: adminId || undefined },
   });
+}
+
+/** ADR-069: the Organization Head places an Executive in an Admin's
+ * workspace (null: organization-level). */
+export function setExecutiveWorkspace(staffId: string, adminId: string | null) {
+  return apiFetch<Staff>(`/api/staff/${staffId}/workspace`, { method: 'PATCH', body: { adminId } });
 }
 
 // ADR-035: no password. The new colleague sets their own through the
@@ -21,6 +27,9 @@ export interface CreateStaffInput {
   name: string;
   email: string;
   role: Exclude<StaffRole, 'OWNER'>;
+  /** ADR-069: the Head may place a new Executive in an Admin's workspace;
+   * an Admin's invitees always join their own. */
+  workspaceAdminId?: string;
 }
 
 /** The response says whether the invitation actually reached the provider,

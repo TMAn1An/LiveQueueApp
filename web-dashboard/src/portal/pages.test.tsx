@@ -339,3 +339,96 @@ describe('live tracking', () => {
     });
   });
 });
+
+describe('ordered journey (ADR-070)', () => {
+  const MULTI = {
+    ...CONFIG,
+    allowMultipleServices: true,
+    formFields: [],
+    services: [
+      { id: 's1', serviceName: 'Triage', description: null, durationMinutes: 10, maxOccurrencesPerJourney: 2 },
+      { id: 's2', serviceName: 'Dressing', description: null, durationMinutes: 5, maxOccurrencesPerJourney: 1 },
+    ],
+    recommendedJourney: ['s2', 's1'],
+  };
+
+  function steps() {
+    return within(screen.getByRole('list', { name: 'Steps in order' }))
+      .getAllByRole('listitem')
+      .map((li) => li.textContent?.replace(/[↑↓✕]/g, '').trim());
+  }
+
+  it('starts from the recommended order, lets the person rearrange it, and sends that order', async () => {
+    handlers.push((url, init) => {
+      if (url.pathname === '/api/public/queues/q-em/config') return ok(MULTI);
+      if (url.pathname === '/api/tokens' && init.method === 'POST') return ok(TOKEN, 201);
+      if (url.pathname === '/api/tokens/tok-1') return ok(TOKEN);
+      return undefined;
+    });
+    renderAt('/visit/abc123def456/q/q-em');
+    await screen.findByRole('heading', { name: 'Emergency' });
+    expect(steps()).toEqual(['1Step 1: Dressing', '2Step 2: Triage']);
+
+    // Keyboard reorder: focus Triage's handle and press ↑.
+    screen.getByRole('button', { name: /Reorder step 2, Triage/ }).focus();
+    await userEvent.keyboard('{ArrowUp}');
+    expect(steps()).toEqual(['1Step 1: Triage', '2Step 2: Dressing']);
+
+    // Triage may come back once more (not right after itself); Dressing may not.
+    expect(screen.getByRole('button', { name: /Add Dressing/ })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: /Add Triage/ }));
+    expect(steps()).toEqual(['1Step 1: Triage', '2Step 2: Dressing', '3Step 3: Triage']);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Join queue' }));
+    await screen.findByTestId('serial');
+    const post = calls.find((c) => c.method === 'POST' && c.path === '/api/tokens')!;
+    expect((post.body as { serviceIds: string[] }).serviceIds).toEqual(['s1', 's2', 's1']);
+  });
+
+  it('will not join with the same service twice in a row', async () => {
+    handlers.push((url) => (url.pathname === '/api/public/queues/q-em/config' ? ok({ ...MULTI, recommendedJourney: [] }) : undefined));
+    renderAt('/visit/abc123def456/q/q-em');
+    await screen.findByRole('heading', { name: 'Emergency' });
+    await userEvent.click(screen.getByRole('button', { name: /Add Triage/ }));
+    // Right after Triage, Triage cannot be added again.
+    expect(screen.getByRole('button', { name: /Add Triage/ })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: /Add Dressing/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Add Triage/ }));
+    // Removing the middle step brings the two Triage steps together.
+    await userEvent.click(screen.getByRole('button', { name: 'Remove step 2, Dressing' }));
+    expect(screen.getByRole('alert')).toHaveTextContent("Triage can't be two steps in a row.");
+    expect(screen.getByRole('button', { name: 'Join queue' })).toBeDisabled();
+  });
+
+  it('after joining shows the journey read-only: current and next step, and no way to change it', async () => {
+    const journey = {
+      totalSteps: 2,
+      currentStepNumber: 2,
+      current: { stepNumber: 2, serviceId: 's2', serviceName: 'Dressing', status: 'PENDING', counter: null },
+      next: null,
+      referredTo: { id: 'c2', name: 'Desk 2' },
+      steps: [
+        { stepNumber: 1, serviceId: 's1', serviceName: 'Triage', status: 'COMPLETED', counter: { id: 'c1', name: 'Desk 1' } },
+        { stepNumber: 2, serviceId: 's2', serviceName: 'Dressing', status: 'PENDING', counter: null },
+      ],
+    };
+    handlers.push((url) => (url.pathname === '/api/tokens/tok-1' ? ok({ ...TOKEN, journey }) : undefined));
+    renderAt('/visit/token/tok-1');
+    expect(await screen.findByText('Step 2 of 2')).toBeInTheDocument();
+    expect(screen.getByText('You have been referred to Desk 2 for this step.')).toBeInTheDocument();
+    const progress = screen.getByRole('region', { name: 'Your service steps' });
+    expect(within(progress).getByText(/Done · Desk 1/)).toBeInTheDocument();
+    expect(within(progress).queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('a visit cancelled because its queue was deleted shows the reason to that person', async () => {
+    handlers.push((url) =>
+      url.pathname === '/api/tokens/tok-1'
+        ? ok({ ...TOKEN, status: 'CANCELLED', queueRemoved: { reason: 'Clinic closed for renovation.' } })
+        : undefined,
+    );
+    renderAt('/visit/token/tok-1');
+    expect(await screen.findByText('Your place was cancelled')).toBeInTheDocument();
+    expect(screen.getByText(/Reason: Clinic closed for renovation\./)).toBeInTheDocument();
+  });
+});

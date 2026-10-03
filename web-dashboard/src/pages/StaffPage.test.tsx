@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { StaffPage } from './StaffPage';
 import {
   useCancelRemovalRequest,
@@ -12,6 +13,8 @@ import {
   useReviewRemovalRequest,
   useStaffList,
   useUpdateStaff,
+  useAdmins,
+  useSetExecutiveWorkspace,
 } from '../hooks/useStaff';
 import type { MembershipRemovalRequest, Staff, StaffRole } from '../types/auth';
 
@@ -63,6 +66,8 @@ function setActor(id: string, role: StaffRole) {
 }
 
 beforeEach(() => {
+  vi.mocked(useAdmins).mockReturnValue({ admins: [] } as unknown as ReturnType<typeof useAdmins>);
+  vi.mocked(useSetExecutiveWorkspace).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useSetExecutiveWorkspace>);
   vi.clearAllMocks();
   setActor('owner1', 'OWNER');
   mockRequests([]);
@@ -103,8 +108,8 @@ beforeEach(() => {
 
 describe('StaffPage — invitations', () => {
   it('invites without asking an administrator for a password', async () => {
-    render(<StaffPage />);
-    await userEvent.click(screen.getByRole('button', { name: /invite staff member/i }));
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
 
     // The password field is gone entirely; the colleague sets their own.
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
@@ -112,8 +117,8 @@ describe('StaffPage — invitations', () => {
   });
 
   it('reports that the invitation was sent', async () => {
-    render(<StaffPage />);
-    await userEvent.click(screen.getByRole('button', { name: /invite staff member/i }));
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
     await userEvent.type(screen.getByLabelText('Name'), 'Rafi Ahmed');
     await userEvent.type(screen.getByLabelText('Email'), 'rafi@example.com');
     await userEvent.click(screen.getByRole('button', { name: /send invitation/i }));
@@ -128,8 +133,8 @@ describe('StaffPage — invitations', () => {
 
   it('says the account exists when the email could not be delivered', async () => {
     createMutateAsync.mockResolvedValue({ data: { id: 's2', invitationEmailSent: false } });
-    render(<StaffPage />);
-    await userEvent.click(screen.getByRole('button', { name: /invite staff member/i }));
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
     await userEvent.type(screen.getByLabelText('Name'), 'Rafi Ahmed');
     await userEvent.type(screen.getByLabelText('Email'), 'rafi@example.com');
     await userEvent.click(screen.getByRole('button', { name: /send invitation/i }));
@@ -141,19 +146,19 @@ describe('StaffPage — invitations', () => {
 
   it('offers Resend invite only while an invitation is outstanding', () => {
     mockList([staff({ invitationPending: true, status: 'PENDING_EMAIL_VERIFICATION' })]);
-    const { unmount } = render(<StaffPage />);
+    const { unmount } = render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(screen.getByRole('button', { name: /resend invite/i })).toBeInTheDocument();
     expect(screen.getByText(/invitation pending/i)).toBeInTheDocument();
     unmount();
 
     mockList([staff({ invitationPending: false })]);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(screen.queryByRole('button', { name: /resend invite/i })).not.toBeInTheDocument();
   });
 
   it('confirms a resend, and reports one that failed', async () => {
     mockList([staff({ invitationPending: true, status: 'PENDING_EMAIL_VERIFICATION' })]);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
 
     await userEvent.click(screen.getByRole('button', { name: /resend invite/i }));
     expect(resendMutateAsync).toHaveBeenCalledWith('s1');
@@ -177,7 +182,7 @@ describe('StaffPage — remove confirmation', () => {
       isPending: false,
     } as unknown as ReturnType<typeof useDeleteStaff>);
     mockList([staff({ id: 's1', name: 'Jane Doe', role: 'STAFF' })]);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
 
     await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
 
@@ -198,7 +203,7 @@ describe('StaffPage — remove confirmation', () => {
       isPending: false,
     } as unknown as ReturnType<typeof useDeleteStaff>);
     mockList([staff({ id: 's1', name: 'Jane Doe', role: 'STAFF' })]);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
 
     await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
     const removeButtons = screen.getAllByRole('button', { name: 'Remove' });
@@ -229,7 +234,7 @@ describe('StaffPage — ADR-057 role-aware membership actions', () => {
 
   it('owner: Remove on admins and staff, never on themselves', () => {
     mockList(rows);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(labels('Olivia Owner')).not.toContain('Remove');
     expect(labels('Olivia Owner')).not.toContain('Request to leave');
     expect(labels('Adam Admin')).toContain('Remove');
@@ -239,7 +244,7 @@ describe('StaffPage — ADR-057 role-aware membership actions', () => {
   it('admin: Remove on staff, Request removal on another admin, Request to leave on self', () => {
     setActor('admin1', 'ADMIN');
     mockList(rows);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(labels('Sami Staff')).toContain('Remove');
     expect(labels('Aisha Admin')).toEqual(expect.arrayContaining(['Request removal']));
     expect(labels('Aisha Admin')).not.toContain('Remove');
@@ -250,7 +255,7 @@ describe('StaffPage — ADR-057 role-aware membership actions', () => {
   it('admin: a removal request says the owner must approve, and sends the target id', async () => {
     setActor('admin1', 'ADMIN');
     mockList(rows);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
     const requestButton = Array.from(buttonsIn('Aisha Admin')).find(
       (b) => b.textContent === 'Request removal',
     )!;
@@ -276,9 +281,9 @@ describe('StaffPage — ADR-057 role-aware membership actions', () => {
         createdAt: '2026-10-02T00:00:00.000Z',
       },
     ]);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(screen.getByText('Pending requests (1)')).toBeInTheDocument();
-    expect(screen.getByText('Sami Staff (STAFF) asks to leave.')).toBeInTheDocument();
+    expect(screen.getByText('Sami Staff (Executive) asks to leave.')).toBeInTheDocument();
     expect(screen.getByText('Removal requested')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Approve' }));
@@ -294,8 +299,8 @@ describe('StaffPage — ADR-057 role-aware membership actions', () => {
 
 describe('StaffPage — ADR-056 Latin-only names', () => {
   it('flags a non-Latin name as it is typed and blocks sending', async () => {
-    render(<StaffPage />);
-    await userEvent.click(screen.getByRole('button', { name: /invite staff member/i }));
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
     await userEvent.type(screen.getByLabelText('Name'), 'রহিম');
     await userEvent.type(screen.getByLabelText('Email'), 'r@example.com');
     expect(screen.getByRole('alert')).toHaveTextContent(/English letters/i);
@@ -313,7 +318,7 @@ describe('StaffPage — ADR-061 suspension follows the removal rules', () => {
 
   it('owner: Suspend on admins and staff, never on themselves', () => {
     mockList(rows);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(labels('Adam Admin')).toContain('Suspend');
     expect(labels('Sami Staff')).toContain('Suspend');
     expect(labels('Olivia Owner')).not.toContain('Suspend');
@@ -322,7 +327,7 @@ describe('StaffPage — ADR-061 suspension follows the removal rules', () => {
   it('admin: Suspend on staff only — never on another admin, the owner or themselves', () => {
     setActor('admin1', 'ADMIN');
     mockList(rows);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(labels('Sami Staff')).toContain('Suspend');
     expect(labels('Aisha Admin')).not.toContain('Suspend');
     expect(labels('Aisha Admin')).toContain('Request removal');
@@ -336,7 +341,7 @@ describe('StaffPage — ADR-061 suspension follows the removal rules', () => {
       typeof useUpdateStaff
     >);
     mockList([member('staff1', 'STAFF', 'Sami Staff'), { ...member('staff2', 'STAFF', 'Suki Staff'), status: 'SUSPENDED' }]);
-    render(<StaffPage />);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
 
     const suspend = Array.from(buttonsIn('Sami Staff')).find((b) => b.textContent === 'Suspend')!;
     await userEvent.click(suspend);
@@ -349,5 +354,46 @@ describe('StaffPage — ADR-061 suspension follows the removal rules', () => {
     const reactivate = Array.from(buttonsIn('Suki Staff')).find((b) => b.textContent === 'Reactivate')!;
     await userEvent.click(reactivate);
     expect(mutate).toHaveBeenLastCalledWith({ staffId: 'staff2', input: { status: 'ACTIVE' } }, expect.anything());
+  });
+});
+
+// ADR-069 (D4): only the Organization Head invites or appoints Admins and
+// Managers; an Admin invites Executives into their own workspace; a Manager
+// invites no one.
+describe('StaffPage — who may invite whom (ADR-069)', () => {
+  it('the Organization Head may invite an Admin, an Executive or an Organization Manager', async () => {
+    setActor('owner1', 'OWNER');
+    mockList([]);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
+    const options = within(screen.getByLabelText('Role')).getAllByRole('option').map((o) => o.textContent);
+    expect(options).toEqual(['Admin', 'Executive', 'Organization Manager']);
+  });
+
+  it('an Admin may only invite Executives', async () => {
+    setActor('admin1', 'ADMIN');
+    mockList([]);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: /^invite executive$/i }));
+    expect(within(screen.getByLabelText('Role')).getAllByRole('option').map((o) => o.textContent)).toEqual(['Executive']);
+  });
+
+  it('an Organization Manager sees the people, with role labels, but may invite and change no one', () => {
+    setActor('manager1', 'MANAGER');
+    mockList([member('a1', 'ADMIN', 'Ada Admin'), member('s1', 'STAFF', 'Sami Exec')]);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    expect(screen.queryByRole('button', { name: /invite/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Executive')).toBeInTheDocument();
+    for (const name of ['Remove', 'Suspend', 'Request removal']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByLabelText(/Change .*role/)).not.toBeInTheDocument();
+  });
+
+  it('only the Head is offered role changes', () => {
+    setActor('owner1', 'OWNER');
+    mockList([member('s1', 'STAFF', 'Sami Exec')]);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    expect(screen.getByLabelText("Change Sami Exec's role")).toBeInTheDocument();
   });
 });

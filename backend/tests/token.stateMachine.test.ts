@@ -11,6 +11,7 @@ import {
   servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
+import { prisma } from '../src/config/prisma';
 
 beforeEach(async () => {
   await resetDb();
@@ -222,6 +223,9 @@ describe('Token call — counter checks', () => {
     const ctx = await registerOwner();
     const queueA = await createQueue(ctx.accessToken);
     const queueB = await createQueue(ctx.accessToken);
+    // ADR-069: only transitional, Head-managed queues share operators, so
+    // that is where one person can hold a counter of another queue at all.
+    await prisma.queue.updateMany({ where: { id: { in: [queueA.id, queueB.id] } }, data: { adminId: null } });
     const serviceA = await createService(ctx.accessToken, queueA.id);
     const counterB = await createCounter(ctx.accessToken, queueB.id);
     await setCounterStatus(ctx.accessToken, counterB.id, 'ACTIVE');

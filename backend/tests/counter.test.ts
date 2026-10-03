@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, assignCounterTo, createQueue, createRestrictedStaff, registerOwner } from './helpers/app';
+import { api, assignCounterTo, createQueue, createStaffWithRole, queueAdmins, registerOwner } from './helpers/app';
 import { prisma } from '../src/config/prisma';
 import { resetDb } from './helpers/db';
 
 beforeEach(async () => {
   await resetDb();
 });
+
+/** ADR-069: an Executive of the queue's Admin — the people who may operate
+ * its counters. */
+function executiveOf(ctx: { organizationId: string }, queue: { id: string }) {
+  return createStaffWithRole(ctx.organizationId, 'STAFF', { workspaceAdminId: queueAdmins.get(queue.id)!.staffId });
+}
 
 async function createCounter(accessToken: string, queueId: string, name = 'Counter 1') {
   const res = await api()
@@ -51,14 +57,31 @@ describe('Counter CRUD', () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
+    const worker = await executiveOf(ctx, queue);
+
+    // ADR-069: an open or paused counter always has an operator.
+    const unstaffed = await api()
+      .patch(`/api/counters/${counter.id}/status`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ status: 'ON_BREAK' });
+    expect(unstaffed.status).toBe(409);
+    expect(unstaffed.body.error.code).toBe('COUNTER_OPERATOR_REQUIRED');
 
     const res = await api()
       .patch(`/api/counters/${counter.id}/status`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ status: 'ON_BREAK' });
+      .send({ status: 'ON_BREAK', operatorStaffId: worker.staffId });
 
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('ON_BREAK');
+    expect(res.body.data.staffId).toBe(worker.staffId);
+
+    // Turning it off releases the operator.
+    const off = await api()
+      .patch(`/api/counters/${counter.id}/status`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ status: 'OFFLINE' });
+    expect(off.body.data.staffId).toBeNull();
   });
 
   it('rejects an invalid counter status', async () => {
@@ -74,29 +97,36 @@ describe('Counter CRUD', () => {
     expect(res.status).toBe(422);
   });
 
-  it('deletes a counter', async () => {
+  it('deletes a counter, but never a queue\'s last one (ADR-069)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
+    const spare = await createCounter(ctx.accessToken, queue.id, 'Counter 2');
 
     const res = await api()
       .delete(`/api/counters/${counter.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`);
     expect(res.status).toBe(204);
 
+    const last = await api()
+      .delete(`/api/counters/${spare.id}`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`);
+    expect(last.status).toBe(409);
+    expect(last.body.error.code).toBe('QUEUE_NEEDS_A_COUNTER');
+
     const list = await api()
       .get(`/api/queues/${queue.id}/counters`)
       .set('Authorization', `Bearer ${ctx.accessToken}`);
-    expect(list.body.data).toHaveLength(0);
+    expect(list.body.data.map((c: { id: string }) => c.id)).toEqual([spare.id]);
   });
 });
 
 describe('Counter staff assignment', () => {
   it('assigns a counter to a staff member in the same organization', async () => {
     const ctx = await registerOwner();
-    // ADR-064: only STAFF are assigned to counters.
-    const worker = await createRestrictedStaff(ctx.organizationId);
     const queue = await createQueue(ctx.accessToken);
+    // ADR-069: only the queue's Admin or their Executives operate it.
+    const worker = await executiveOf(ctx, queue);
     const counter = await createCounter(ctx.accessToken, queue.id);
 
     const res = await api()
@@ -139,9 +169,9 @@ describe('Counter staff assignment', () => {
 
   it('rejects assigning a staff member who is already assigned to a different counter', async () => {
     const ctx = await registerOwner();
-    // ADR-064: only STAFF are assigned to counters.
-    const worker = await createRestrictedStaff(ctx.organizationId);
     const queue = await createQueue(ctx.accessToken);
+    // ADR-069: only the queue's Admin or their Executives operate it.
+    const worker = await executiveOf(ctx, queue);
     const counterA = await createCounter(ctx.accessToken, queue.id, 'Counter A');
     const counterB = await createCounter(ctx.accessToken, queue.id, 'Counter B');
 
@@ -168,9 +198,9 @@ describe('Counter staff assignment', () => {
 
   it('allows re-assigning a counter to the staff member already assigned to it (no-op, not a conflict)', async () => {
     const ctx = await registerOwner();
-    // ADR-064: only STAFF are assigned to counters.
-    const worker = await createRestrictedStaff(ctx.organizationId);
     const queue = await createQueue(ctx.accessToken);
+    // ADR-069: only the queue's Admin or their Executives operate it.
+    const worker = await executiveOf(ctx, queue);
     const counter = await createCounter(ctx.accessToken, queue.id);
 
     await api()
@@ -192,12 +222,14 @@ describe('Counter staff assignment', () => {
     const queue = await createQueue(ctx.accessToken);
     const counterA = await createCounter(ctx.accessToken, queue.id, 'Counter A');
     const counterB = await createCounter(ctx.accessToken, queue.id, 'Counter B');
-    const other = await createRestrictedStaff(ctx.organizationId);
+    const other = await executiveOf(ctx, queue);
 
+    // ADR-069: the queue's own Admin may stand at one of its counters.
     await api()
       .patch(`/api/counters/${counterA.id}/assign`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ staffId: ctx.staffId });
+      .send({ staffId: queueAdmins.get(queue.id)!.staffId })
+      .expect(200);
 
     const res = await api()
       .patch(`/api/counters/${counterB.id}/assign`)
@@ -243,7 +275,7 @@ describe('Counter permissions', () => {
   it('refuses STAFF creating, renaming, changing status of, or deleting counters (ADR-064)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    const staff = await createRestrictedStaff(ctx.organizationId);
+    const staff = await executiveOf(ctx, queue);
     const counter = await createCounter(ctx.accessToken, queue.id);
     await assignCounterTo(ctx.accessToken, counter.id, staff.staffId);
     const auth = `Bearer ${staff.accessToken}`;
@@ -259,7 +291,8 @@ describe('Counter permissions', () => {
       expect(res.body.error.code).toBe('COUNTER_MANAGEMENT_FORBIDDEN');
     }
     const stored = await prisma.counter.findMany({ where: { queueId: queue.id } });
-    expect(stored.map((c) => [c.name, c.status])).toEqual([['Counter 1', 'OFFLINE']]);
+    // Assigned to an off counter, it became paused (ADR-069) — and stayed so.
+    expect(stored.map((c) => [c.name, c.status])).toEqual([['Counter 1', 'ON_BREAK']]);
   });
 
   /**
@@ -273,7 +306,7 @@ describe('Counter permissions', () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
-    const operator = await createRestrictedStaff(ctx.organizationId);
+    const operator = await executiveOf(ctx, queue);
 
     const assignRes = await api()
       .patch(`/api/counters/${counter.id}/assign`)

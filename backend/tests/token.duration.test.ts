@@ -56,7 +56,7 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     const service = await createService(ctx.accessToken, queue.id);
     const token = await createToken({ queueId: queue.id, serviceId: service.id });
 
-    const res = await setDuration(await staffOf(ctx), token.id, 15);
+    const res = await setDuration(await staffOf(ctx, queue.id), token.id, 15);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('TOKEN_NOT_ACTIVE');
   });
@@ -72,7 +72,7 @@ describe('PATCH /api/tokens/:tokenId/duration — V2 Checkpoint 4', () => {
     await startToken(servingToken(ctx.accessToken), token.id, token.deviceIdentifier);
     await api().post(`/api/tokens/${token.id}/complete`).set('Authorization', `Bearer ${servingToken(ctx.accessToken)}`);
 
-    const res = await setDuration(await staffOf(ctx), token.id, 15);
+    const res = await setDuration(await staffOf(ctx, queue.id), token.id, 15);
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('TOKEN_NOT_ACTIVE');
   });

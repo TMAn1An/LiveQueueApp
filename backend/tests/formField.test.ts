@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createQueue, createRestrictedStaff, registerOwner } from './helpers/app';
+import { api, createQueue, createRestrictedStaff, createStaffWithRole, queueAdmins, registerOwner } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 
@@ -268,7 +268,10 @@ describe('GET /api/queues/:queueId/form-fields (Phase 6 addition)', () => {
   it('any authenticated staff member may read (no manage_queues required)', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    const restricted = await createRestrictedStaff(ctx.organizationId);
+    // ADR-069: any Executive of the queue's Admin workspace.
+    const restricted = await createStaffWithRole(ctx.organizationId, 'STAFF', {
+      workspaceAdminId: queueAdmins.get(queue.id)!.staffId,
+    });
 
     const res = await api()
       .get(`/api/queues/${queue.id}/form-fields`)

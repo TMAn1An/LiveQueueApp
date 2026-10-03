@@ -89,7 +89,9 @@ describe('POST /api/tokens — multi-service selection (V2 Checkpoint 5)', () =>
     expect(res.body.error.code).toBe('SERVICE_NOT_ACTIVE');
   });
 
-  it('Test 5: idempotency — [A,B] and [B,A] under the same key resolve to the same token', async () => {
+  // ADR-070: the selection is now an ordered journey, so [B,A] is a different
+  // request from [A,B]. A genuine retry repeats the same order.
+  it('Test 5: idempotency — a retry of [A,B] resolves to the same token; [B,A] is a different journey', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
     const serviceA = await createService(ctx.accessToken, queue.id);
@@ -107,12 +109,21 @@ describe('POST /api/tokens — multi-service selection (V2 Checkpoint 5)', () =>
 
     const second = await createTokenRequest({
       queueId: queue.id,
-      serviceIds: [serviceB.id, serviceA.id],
+      serviceIds: [serviceA.id, serviceB.id],
       deviceIdentifier,
       idempotencyKey,
     });
     expect(second.status).toBe(201);
     expect(second.body.data.id).toBe(first.body.data.id);
+
+    const reordered = await createTokenRequest({
+      queueId: queue.id,
+      serviceIds: [serviceB.id, serviceA.id],
+      deviceIdentifier,
+      idempotencyKey,
+    });
+    expect(reordered.status).toBe(409);
+    expect(reordered.body.error.code).toBe('IDEMPOTENCY_KEY_CONFLICT');
 
     const rows = await prisma.tokenService.findMany({ where: { tokenId: first.body.data.id } });
     expect(rows).toHaveLength(2);

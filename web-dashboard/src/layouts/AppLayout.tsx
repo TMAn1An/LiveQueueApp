@@ -7,6 +7,7 @@ import { BrandLogo } from '../components/BrandLogo';
 import { Button } from '../components/Button';
 import { OnboardingTutorial } from '../components/OnboardingTutorial';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { roleLabel } from '../types/auth';
 
 interface NavItemProps {
   to: string;
@@ -68,7 +69,7 @@ export function AppLayout() {
           </div>
           {staff?.role && (
             <span className="inline-flex shrink-0 items-center rounded-md bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-fg-soft border border-border">
-              {staff.role}
+              {roleLabel(staff.role)}
             </span>
           )}
         </div>
@@ -93,7 +94,7 @@ export function AppLayout() {
               icon={QueuesIcon}
               onNavigate={closeMobileMenu}
             />
-            {hasPermission('manage_staff') && (
+            {(hasPermission('manage_staff') || hasPermission('view_staff')) && (
               <NavItem
                 to="/staff"
                 label="Staff"
@@ -242,7 +243,7 @@ export function AppLayout() {
 
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline-block text-sm text-fg-soft">
-              {staff?.name} <span className="text-muted">· {staff?.role}</span>
+              {staff?.name} <span className="text-muted">· {roleLabel(staff?.role)}</span>
             </span>
             {/* ADR-059: a real, readable button — it used to be shrunk to
                 text-xs with a ghost style and read as a faint text link. */}

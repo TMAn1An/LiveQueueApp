@@ -10,11 +10,29 @@ export const PERMISSIONS = [
   'export_reports',
   'manage_blocked_devices',
   'view_audit_logs',
+  // ADR-069
+  'view_staff',
+  'delete_queues',
+  'view_all_workspaces',
+  'manage_admins',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
 
-export type StaffRole = 'OWNER' | 'ADMIN' | 'STAFF';
+/** Stable role keys (never renamed); what people read is ROLE_LABELS. */
+export type StaffRole = 'OWNER' | 'ADMIN' | 'STAFF' | 'MANAGER';
+
+/** ADR-069: the names people see. */
+export const ROLE_LABELS: Record<StaffRole, string> = {
+  OWNER: 'Organization Head',
+  ADMIN: 'Admin',
+  STAFF: 'Executive',
+  MANAGER: 'Organization Manager',
+};
+
+export function roleLabel(role: string | null | undefined): string {
+  return role && role in ROLE_LABELS ? ROLE_LABELS[role as StaffRole] : (role ?? '');
+}
 export type StaffStatus = 'ACTIVE' | 'SUSPENDED' | 'PENDING_EMAIL_VERIFICATION';
 export type OrganizationStatus = 'ACTIVE' | 'SUSPENDED';
 
@@ -26,6 +44,8 @@ export interface Staff {
   role: StaffRole;
   status: StaffStatus;
   permissions?: Permission[];
+  /** ADR-069: the Admin workspace an Executive belongs to (null: none). */
+  workspaceAdminId?: string | null;
   /** ADR-035: still waiting on an emailed invitation to be accepted. This is
    * what the Resend action keys off; the token itself is never exposed. */
   invitationPending?: boolean;

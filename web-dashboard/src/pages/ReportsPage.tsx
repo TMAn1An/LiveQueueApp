@@ -10,6 +10,8 @@ import { ErrorBanner } from '../components/ErrorBanner';
 import { actionErrorMessage } from '../utils/actionError';
 import { formatMinutes } from '../utils/format';
 import type { ReportRangePreset } from '../types/report';
+import { AdminFilter } from '../components/AdminFilter';
+import { useAuth } from '../context/AuthContext';
 
 const RANGE_LABELS: Record<ReportRangePreset, string> = {
   today: 'Today',
@@ -23,7 +25,14 @@ export function ReportsPage() {
   const [range, setRange] = useState<ReportRangePreset>('today');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
-  const query = { range, from: range === 'custom' ? from : undefined, to: range === 'custom' ? to : undefined };
+  const [adminFilter, setAdminFilter] = useState('');
+  const { hasPermission } = useAuth();
+  const query = {
+    range,
+    from: range === 'custom' ? from : undefined,
+    to: range === 'custom' ? to : undefined,
+    adminId: adminFilter || undefined,
+  };
   const { data: report, isLoading } = useReport(query);
   const exportReport = useExportReport();
 
@@ -63,6 +72,9 @@ export function ReportsPage() {
             {RANGE_LABELS[r]}
           </Button>
         ))}
+        {hasPermission('view_all_workspaces') && (
+          <AdminFilter id="report-admin-filter" value={adminFilter} onChange={setAdminFilter} />
+        )}
         {range === 'custom' && (
           <div className="flex items-center gap-2 pl-2 border-l border-border">
             <input
@@ -205,6 +217,67 @@ export function ReportsPage() {
                             </span>
                           </div>
                         </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* ADR-070: ordered journeys — steps per service, and referrals. */}
+          {(report.serviceSteps?.length ?? 0) > 0 && (
+            <Card>
+              <SectionHeading
+                title="Service Steps"
+                help="For visits with an ordered journey: how many steps of each service were completed, and how long a step took on average."
+              />
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                      <th className="py-3 pr-4">Service</th>
+                      <th className="py-3 pr-4">Steps Completed</th>
+                      <th className="py-3 pr-4">Average Step</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.serviceSteps!.map((row) => (
+                      <tr key={row.serviceId} className="border-b border-border">
+                        <td className="py-3 pr-4 font-semibold text-fg">{row.serviceName}</td>
+                        <td className="py-3 pr-4 font-mono text-fg-soft">{row.stepsCompleted}</td>
+                        <td className="py-3 pr-4 text-fg-soft">{formatMinutes(row.averageStepMinutes)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          <Card>
+            <SectionHeading
+              title="Referrals"
+              help="People an operator sent from one counter to another for their next step, because the first counter does not handle it."
+            />
+            {(report.referrals?.length ?? 0) === 0 ? (
+              <p className="py-4 text-center text-sm text-muted italic">No referrals in this period.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
+                      <th className="py-3 pr-4">From</th>
+                      <th className="py-3 pr-4">To</th>
+                      <th className="py-3 pr-4">Referrals</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {report.referrals!.map((row) => (
+                      <tr key={`${row.fromCounterName}-${row.toCounterName}`} className="border-b border-border">
+                        <td className="py-3 pr-4 text-fg">{row.fromCounterName ?? 'A removed counter'}</td>
+                        <td className="py-3 pr-4 text-fg">{row.toCounterName ?? 'A removed counter'}</td>
+                        <td className="py-3 pr-4 font-mono text-fg-soft">{row.referrals}</td>
                       </tr>
                     ))}
                   </tbody>

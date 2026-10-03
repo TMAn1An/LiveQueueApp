@@ -9,7 +9,9 @@ import { SearchInput } from '../components/SearchInput';
 import { PageHeader } from '../components/PageHeader';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatDateTime, formatMinutes } from '../utils/format';
-import type { ServiceHistoryStatus } from '../types/serviceHistory';
+import type { ServiceHistoryStatus, ServiceHistoryStep } from '../types/serviceHistory';
+import { AdminFilter } from '../components/AdminFilter';
+import { useAuth } from '../context/AuthContext';
 
 export function ServiceHistoryPage() {
   const [page, setPage] = useState(1);
@@ -21,7 +23,10 @@ export function ServiceHistoryPage() {
 
   const debouncedSearch = useDebouncedValue(search.trim());
   const { data: queues } = useQueues();
+  const [adminFilter, setAdminFilter] = useState('');
+  const { hasPermission } = useAuth();
   const { data: result, isLoading, isFetching } = useServiceHistory({
+    adminId: adminFilter || undefined,
     page,
     pageSize: 20,
     search: debouncedSearch,
@@ -57,6 +62,9 @@ export function ServiceHistoryPage() {
             placeholder="Search by token, device, queue, or service…"
           />
         </div>
+        {hasPermission('view_all_workspaces') && (
+          <AdminFilter id="history-admin-filter" value={adminFilter} onChange={withPageReset(setAdminFilter)} />
+        )}
         <select
           value={status}
           onChange={(e) => withPageReset(setStatus)(e.target.value as ServiceHistoryStatus)}
@@ -143,7 +151,13 @@ export function ServiceHistoryPage() {
                         )}
                       </td>
                       <td className="py-3 pr-4 font-medium text-fg">{entry.queue.name}</td>
-                      <td className="py-3 pr-4 text-fg-soft">{entry.services.map((s) => s.name).join(', ') || '—'}</td>
+                      <td className="py-3 pr-4 text-fg-soft">
+                        {entry.journey && entry.journey.length > 0 ? (
+                          <JourneyHistory steps={entry.journey} />
+                        ) : (
+                          entry.services.map((s) => s.name).join(', ') || '—'
+                        )}
+                      </td>
                       <td className="py-3 pr-4">
                         {entry.formFields.length === 0 ? (
                           <span className="text-faint">—</span>
@@ -195,5 +209,34 @@ export function ServiceHistoryPage() {
         <Pagination pagination={result?.pagination} onPageChange={setPage} />
       </Card>
     </div>
+  );
+}
+
+/** ADR-070: each step in order — who handled it, where, how long, and any
+ * referral (with its staff-only note). */
+function JourneyHistory({ steps }: { steps: ServiceHistoryStep[] }) {
+  return (
+    <ol className="space-y-1 text-xs">
+      {steps.map((step) => (
+        <li key={step.stepNumber}>
+          <span className="font-semibold text-fg">
+            {step.stepNumber}. {step.service.name}
+          </span>
+          <span className="text-muted">
+            {step.counter ? ` · ${step.counter.name}` : ''}
+            {step.executiveName ? ` · ${step.executiveName}` : ''}
+            {step.minutes != null ? ` · ${formatMinutes(step.minutes)}` : ''}
+            {step.status !== 'COMPLETED' ? ` · ${step.status.toLowerCase()}` : ''}
+          </span>
+          {step.referral && (
+            <p className="text-[11px] text-brand-fg">
+              Referred from {step.referral.from?.name ?? 'a removed counter'} to{' '}
+              {step.referral.to?.name ?? 'a removed counter'}
+              {step.referral.note ? ` — "${step.referral.note}"` : ''}
+            </p>
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }

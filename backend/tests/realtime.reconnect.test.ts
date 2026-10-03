@@ -38,10 +38,8 @@ function track(socket: ClientSocket): ClientSocket {
 }
 
 async function createQueueViaRest(accessToken: string, name: string) {
-  await api()
-    .post('/api/queues')
-    .set('Authorization', `Bearer ${accessToken}`)
-    .send({ name, tokenPrefix: 'A' });
+  // ADR-069: through the real endpoint, for an Admin the helper names.
+  await createQueue(accessToken, { name, tokenPrefix: 'A' });
 }
 
 describe('Reconnection', () => {

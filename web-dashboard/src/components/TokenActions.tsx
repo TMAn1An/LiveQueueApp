@@ -13,7 +13,8 @@ import { CompleteWithFeedbackDialog } from './CompleteWithFeedbackDialog';
 import { actionErrorMessage } from '../utils/actionError';
 import { ApiError } from '../api/client';
 import type { TokenStatus } from '../types/token';
-import type { WaitingActionEligibility } from '../types/dashboard';
+import type { LiveJourney, WaitingActionEligibility } from '../types/dashboard';
+import { ReferralDialog } from './ReferralDialog';
 
 /**
  * Spec section 10: Call/Start/Complete/Skip, each appearing only when valid
@@ -60,7 +61,10 @@ export function TokenActions({
   actionEligibility,
   requiresVerificationCode = true,
   counterId = null,
+  journey = null,
 }: {
+  /** ADR-070: the person's ordered journey (null before journeys). */
+  journey?: LiveJourney | null;
   tokenId: string;
   queueId: string;
   /** The counter this person is at, once claimed. */
@@ -105,6 +109,10 @@ export function TokenActions({
   const [skipping, setSkipping] = useState(false);
   const [completingWithFeedback, setCompletingWithFeedback] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  const [referring, setReferring] = useState(false);
+  // ADR-070: completing a step that is not the last sends the person back to
+  // the line for their next one (or, with a referral, to a chosen counter).
+  const hasNextStep = Boolean(journey && journey.currentStepNumber < journey.totalSteps);
 
   function handleComplete() {
     setCompleteError(null);
@@ -223,10 +231,16 @@ export function TokenActions({
                 optional path — never a step added in front of Complete. */}
             {status === 'IN_PROGRESS' && (
               <Button variant="primary" size="lg" loading={completeToken.isPending} onClick={handleComplete}>
-                {completeToken.isPending ? 'Completing…' : 'Complete'}
+                {completeToken.isPending ? 'Completing…' : hasNextStep ? 'Complete step' : 'Complete'}
               </Button>
             )}
-            {status === 'IN_PROGRESS' && (
+            {status === 'IN_PROGRESS' && hasNextStep && (
+              <Button variant="secondary" size="lg" onClick={() => setReferring(true)}>
+                Refer
+              </Button>
+            )}
+            {/* Feedback is for the end of the visit, not between steps. */}
+            {status === 'IN_PROGRESS' && !hasNextStep && (
               <Button variant="secondary" size="lg" onClick={() => setCompletingWithFeedback(true)}>
                 Feedback
               </Button>
@@ -286,6 +300,7 @@ export function TokenActions({
         )}
       </div>
       {skipping && <SkipTokenDialog tokenId={tokenId} onClose={() => setSkipping(false)} />}
+      {referring && <ReferralDialog tokenId={tokenId} onClose={() => setReferring(false)} />}
       {completingWithFeedback && (
         <CompleteWithFeedbackDialog tokenId={tokenId} onClose={() => setCompletingWithFeedback(false)} />
       )}

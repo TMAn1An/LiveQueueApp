@@ -118,7 +118,7 @@ describe('Token creation', () => {
     const service = await createService(ctx.accessToken, queue.id);
     await api()
       .delete(`/api/queues/${queue.id}`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`);
+      .set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
 
     const res = await createTokenRequest({ queueId: queue.id, serviceId: service.id });
 

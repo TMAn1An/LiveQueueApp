@@ -1,6 +1,8 @@
 import { apiFetch } from './client';
 import type {
+  DeletedQueue,
   Queue,
+  RecommendedJourney,
   QueueStatus,
   RepeatIdentityMode,
   RepeatRestrictionScope,
@@ -8,8 +10,9 @@ import type {
   RepeatRestrictionUnit,
 } from '../types/queue';
 
-export function listQueues() {
-  return apiFetch<Queue[]>('/api/queues');
+/** ADR-069: optionally only one Admin's workspace (Head / Manager filter). */
+export function listQueues(adminId?: string) {
+  return apiFetch<Queue[]>(adminId ? `/api/queues?adminId=${encodeURIComponent(adminId)}` : '/api/queues');
 }
 
 export function getQueue(queueId: string) {
@@ -20,7 +23,14 @@ export interface CreateQueueInput {
   name: string;
   description?: string;
   clientTerminology?: string;
-  tokenPrefix: string;
+  /** Optional: defaults to the name's first letter. */
+  tokenPrefix?: string;
+  /** ADR-069: the Organization Head names the Admin a queue belongs to; an
+   * Admin's own queue is always theirs. */
+  adminId?: string;
+  /** ADR-069: the queue's first counter and who operates it (default: the
+   * queue's Admin). */
+  firstCounter?: { name?: string; operatorStaffId?: string };
   startingNumber?: number;
   baseTimeMinutes?: number;
   defaultNotificationMinutes?: number;
@@ -71,6 +81,29 @@ export function updateQueueStatus(queueId: string, status: QueueStatus) {
   return apiFetch<Queue>(`/api/queues/${queueId}/status`, { method: 'PATCH', body: { status } });
 }
 
-export function deleteQueue(queueId: string) {
-  return apiFetch<Queue>(`/api/queues/${queueId}`, { method: 'DELETE' });
+/** ADR-069 D8: always with a reason; refused while anyone is being served. */
+export function deleteQueue(queueId: string, reason: string) {
+  return apiFetch<Queue>(`/api/queues/${queueId}`, { method: 'DELETE', body: { reason } });
+}
+
+export function listDeletedQueues(adminId?: string) {
+  return apiFetch<DeletedQueue[]>(
+    adminId ? `/api/queues/deleted?adminId=${encodeURIComponent(adminId)}` : '/api/queues/deleted',
+  );
+}
+
+/** ADR-069: the Organization Head hands a queue to an Admin. */
+export function assignQueueAdmin(queueId: string, adminId: string) {
+  return apiFetch<Queue>(`/api/queues/${queueId}/admin`, { method: 'PATCH', body: { adminId } });
+}
+
+export function getRecommendedJourney(queueId: string) {
+  return apiFetch<RecommendedJourney>(`/api/queues/${queueId}/recommended-journey`);
+}
+
+export function setRecommendedJourney(queueId: string, serviceIds: string[]) {
+  return apiFetch<RecommendedJourney>(`/api/queues/${queueId}/recommended-journey`, {
+    method: 'PUT',
+    body: { serviceIds },
+  });
 }

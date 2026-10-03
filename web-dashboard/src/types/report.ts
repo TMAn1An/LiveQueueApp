@@ -31,4 +31,8 @@ export interface Report {
   peakHours: PeakHourEntry[];
   counterUtilization: CounterUtilizationEntry[];
   queuePerformance: QueuePerformanceEntry[];
+  /** ADR-070: per service, completed journey steps and their average length. */
+  serviceSteps?: { serviceId: string; serviceName: string; stepsCompleted: number; averageStepMinutes: number | null }[];
+  /** ADR-070: referrals between counters. */
+  referrals?: { fromCounterName: string | null; toCounterName: string | null; referrals: number }[];
 }

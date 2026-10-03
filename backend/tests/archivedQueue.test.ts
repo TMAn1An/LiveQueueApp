@@ -31,7 +31,9 @@ async function createCounter(accessToken: string, queueId: string) {
 async function archiveQueue(accessToken: string, queueId: string) {
   const res = await api()
     .delete(`/api/queues/${queueId}`)
-    .set('Authorization', `Bearer ${accessToken}`);
+    .set('Authorization', `Bearer ${accessToken}`)
+    // ADR-069 (D8): a queue is only ever deleted with a reason.
+    .send({ reason: 'Closing this service point' });
   if (res.status !== 200) {
     throw new Error(`archiveQueue failed: ${res.status} ${JSON.stringify(res.body)}`);
   }

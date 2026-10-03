@@ -9,6 +9,9 @@ import { OrganizationNameStatus } from '../components/OrganizationNameStatus';
 import { FieldError } from '../components/FieldError';
 import { latinNameError } from '../utils/latinText';
 import { useOrganizationNameAvailability } from '../hooks/useOrganizationNameAvailability';
+import { AuthLoadingOverlay } from '../components/AuthLoadingOverlay';
+import { useDelayedFlag } from '../hooks/useDelayedFlag';
+import { AUTH_LOADER_DELAY_MS, startAuthTiming } from '../utils/authTiming';
 
 export function RegisterPage() {
   const { register } = useAuth();
@@ -18,6 +21,7 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const showLoader = useDelayedFlag(submitting, AUTH_LOADER_DELAY_MS);
   // Organization names are unique like usernames; checked as you type.
   const nameStatus = useOrganizationNameAvailability(organizationName);
   const nameScriptError = latinNameError(organizationName);
@@ -26,10 +30,13 @@ export function RegisterPage() {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
+    const done = startAuthTiming('register');
     try {
       await register(organizationName, email, password);
+      done('success');
       navigate('/dashboard', { replace: true });
     } catch (err) {
+      done('error');
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setSubmitting(false);
@@ -38,6 +45,7 @@ export function RegisterPage() {
 
   return (
     <form onSubmit={handleSubmit}>
+      {showLoader && <AuthLoadingOverlay message="Creating your organization…" />}
       <ErrorBanner message={error} />
       <div className="mb-3">
         <label htmlFor="organizationName" className="mb-1 block text-sm font-medium text-fg-soft">

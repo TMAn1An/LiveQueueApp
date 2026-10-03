@@ -150,6 +150,8 @@ describe('AuditLog schema foundation', () => {
         'metadata',
         'ipAddress',
         'createdAt',
+        // ADR-069: the Admin workspace the event belongs to (an id, never a secret).
+        'workspaceAdminId',
       ].sort(),
     );
   });

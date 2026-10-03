@@ -5,6 +5,8 @@ export interface ReportQuery {
   range: ReportRangePreset;
   from?: string;
   to?: string;
+  /** ADR-069: one Admin's workspace (Head / Manager). */
+  adminId?: string;
   [key: string]: string | undefined;
 }
 

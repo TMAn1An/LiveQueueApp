@@ -12,6 +12,7 @@ import {
   startToken,
   servingToken,
   staffOf,
+  queueAdmins,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
@@ -265,13 +266,18 @@ describe('ADR-042 — skip requires a reason', () => {
       404,
     );
 
-    // ADR-064: STAFF skip only in the queue their own counter serves.
-    const staff = await createStaffWithRole(org.organizationId, 'STAFF');
+    // ADR-064: STAFF skip only in the queue their own counter serves — here an
+    // Executive of this queue's Admin (ADR-069) with no counter yet.
+    const staff = await createStaffWithRole(org.organizationId, 'STAFF', {
+      workspaceAdminId: queueAdmins.get(org.queue.id)!.staffId,
+    });
     const unassigned = await skip(staff.accessToken, token.id, { reasonCode: 'NO_RESPONSE' });
     expect(unassigned.status).toBe(403);
     expect(unassigned.body.error.code).toBe('OPERATOR_NOT_ASSIGNED_TO_COUNTER');
     await assignCounterTo(org.accessToken, org.counter.id, null);
     await assignCounterTo(org.accessToken, org.counter.id, staff.staffId);
+    // Released by turning it off, re-staffed paused: open it again (ADR-069).
+    await setCounterStatus(org.accessToken, org.counter.id, 'ACTIVE');
     expect((await skip(staff.accessToken, token.id, { reasonCode: 'NO_RESPONSE' })).status).toBe(
       200,
     );

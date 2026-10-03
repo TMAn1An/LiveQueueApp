@@ -1,14 +1,25 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+import { ApiError } from '../api/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueuesPage } from './QueuesPage';
-import { useCreateQueue, useDeleteQueue, useQueues, useUpdateQueueStatus } from '../hooks/useQueues';
+import {
+  useCreateQueue,
+  useDeleteQueue,
+  useDeletedQueues,
+  useAssignQueueAdmin,
+  useQueues,
+  useUpdateQueueStatus,
+} from '../hooks/useQueues';
 import type { Queue } from '../types/queue';
 
-const mockHasPermission = vi.fn(() => true);
+// An Admin by default (ADR-069): every permission but the organization-wide ones.
+const ADMIN_PERMISSION = (p: string) => p !== 'manage_admins' && p !== 'view_all_workspaces';
+const mockHasPermission = vi.fn(ADMIN_PERMISSION);
 vi.mock('../context/AuthContext', () => ({
-  useAuth: () => ({ hasPermission: mockHasPermission }),
+  useAuth: () => ({ hasPermission: mockHasPermission, staff: { id: 'me', role: 'ADMIN' } }),
 }));
+vi.mock('../hooks/useStaff', () => ({ useAdmins: () => ({ admins: [] }), useStaffList: () => ({ data: { data: [] }, isLoading: false }) }));
 vi.mock('../hooks/useQueues');
 
 function mockQueue(overrides: Partial<Queue> = {}): Queue {
@@ -49,8 +60,11 @@ function mockQueue(overrides: Partial<Queue> = {}): Queue {
 }
 
 beforeEach(() => {
+  vi.mocked(useAssignQueueAdmin).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useAssignQueueAdmin>);
+  vi.mocked(useDeletedQueues).mockReturnValue({ data: [] } as unknown as ReturnType<typeof useDeletedQueues>);
   vi.clearAllMocks();
-  mockHasPermission.mockReturnValue(true);
+  mockHasPermission.mockReset();
+  mockHasPermission.mockImplementation(ADMIN_PERMISSION);
   vi.mocked(useUpdateQueueStatus).mockReturnValue({ mutate: vi.fn() } as unknown as ReturnType<
     typeof useUpdateQueueStatus
   >);
@@ -193,7 +207,7 @@ describe('QueuesPage — explicit Open Queue / Settings actions', () => {
   });
 
   it('Open Queue and Settings remain visible without manage_queues, but Pause/Delete do not', () => {
-    mockHasPermission.mockReturnValue(false);
+    mockHasPermission.mockImplementation(() => false);
     vi.mocked(useQueues).mockReturnValue({
       data: [mockQueue({ id: 'queue-42' })],
       isLoading: false,
@@ -327,7 +341,7 @@ describe('QueuesPage — Create Queue actions', () => {
   });
 
   it('STAFF (no manage_queues) sees no Create Queue action anywhere', () => {
-    mockHasPermission.mockReturnValue(false);
+    mockHasPermission.mockImplementation(() => false);
     vi.mocked(useQueues).mockReturnValue({ data: [], isLoading: false } as unknown as ReturnType<
       typeof useQueues
     >);
@@ -337,49 +351,67 @@ describe('QueuesPage — Create Queue actions', () => {
   });
 });
 
-// V2 Product Completion checkpoint, Part B: deleting a queue must ask first,
-// through the shared ConfirmDialog rather than the page's own ad-hoc
-// inline confirm text it used to show.
-describe('QueuesPage — delete confirmation', () => {
-  it('does not call the delete mutation until Delete is clicked and confirmed', () => {
+// ADR-069 (D8): deleting a queue asks first, and always with a reason.
+describe('QueuesPage — delete with a reason', () => {
+  function setup() {
     const mutate = vi.fn();
-    vi.mocked(useDeleteQueue).mockReturnValue({ mutate } as unknown as ReturnType<
-      typeof useDeleteQueue
-    >);
+    vi.mocked(useDeleteQueue).mockReturnValue({ mutate, isPending: false } as unknown as ReturnType<typeof useDeleteQueue>);
     vi.mocked(useQueues).mockReturnValue({
-      data: [mockQueue({ id: 'q1', name: 'Pharmacy' })],
+      data: [mockQueue({ id: 'q1', name: 'Pharmacy', waitingCount: 3 })],
       isLoading: false,
     } as unknown as ReturnType<typeof useQueues>);
     renderPage();
-
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    return mutate;
+  }
 
+  it('explains what happens to waiting people, and cannot be confirmed without a reason', () => {
+    const mutate = setup();
     expect(screen.getByText('Delete queue "Pharmacy"?')).toBeInTheDocument();
-    expect(mutate).not.toHaveBeenCalled();
-
+    expect(screen.getByText(/3 people are waiting and will have their place cancelled/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete queue' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-
     expect(screen.queryByText('Delete queue "Pharmacy"?')).not.toBeInTheDocument();
     expect(mutate).not.toHaveBeenCalled();
   });
 
-  it('calls the existing delete mutation once Delete is confirmed', () => {
-    const mutate = vi.fn();
-    vi.mocked(useDeleteQueue).mockReturnValue({ mutate } as unknown as ReturnType<
-      typeof useDeleteQueue
-    >);
+  it('sends the reason with the deletion', () => {
+    const mutate = setup();
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: '  Pharmacy moved to building B.  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete queue' }));
+    expect(mutate).toHaveBeenCalledWith({ queueId: 'q1', reason: 'Pharmacy moved to building B.' }, expect.anything());
+  });
+
+  it('shows the refusal while someone is being served', () => {
+    const mutate = setup();
+    mutate.mockImplementation((_v, { onError }: { onError: (e: unknown) => void }) =>
+      onError(new ApiError(409, 'QUEUE_HAS_ACTIVE_SERVICE', 'Someone is being served in this queue.')),
+    );
+    fireEvent.change(screen.getByLabelText('Reason (required)'), { target: { value: 'Closing.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete queue' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Someone is being served in this queue.');
+  });
+
+  it('is offered to an Organization Manager even though they cannot manage the queue', () => {
+    mockHasPermission.mockImplementation((p: string) => ['delete_queues', 'view_all_workspaces', 'view_audit_logs'].includes(p));
     vi.mocked(useQueues).mockReturnValue({
-      data: [mockQueue({ id: 'q1', name: 'Pharmacy' })],
+      data: [mockQueue({ id: 'q1', name: 'Pharmacy', canManage: false, admin: { id: 'a1', name: 'Ada', email: 'a@x' } })],
       isLoading: false,
     } as unknown as ReturnType<typeof useQueues>);
     renderPage();
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    expect(screen.getByText('Ada')).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    // Two "Delete" buttons exist once the dialog is open: the row's original
-    // trigger, and the dialog's own confirm button — the second one.
-    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
-    fireEvent.click(deleteButtons[deleteButtons.length - 1]);
-
-    expect(mutate).toHaveBeenCalledWith('q1', expect.anything());
+  it('marks a Head-managed queue and lets the Head assign it to an Admin', () => {
+    mockHasPermission.mockImplementation(() => true);
+    vi.mocked(useQueues).mockReturnValue({
+      data: [mockQueue({ id: 'q1', name: 'Legacy', admin: null, adminId: null })],
+      isLoading: false,
+    } as unknown as ReturnType<typeof useQueues>);
+    renderPage();
+    expect(screen.getByText('Head-managed')).toBeInTheDocument();
+    expect(screen.getByLabelText('Assign Legacy to an Admin')).toBeInTheDocument();
   });
 });

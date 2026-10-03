@@ -11,6 +11,7 @@ import { ApiError } from '../api/client';
 import { formatDateTime } from '../utils/format';
 import { MyRequests, RemovalRequestDialog } from '../components/MembershipRequests';
 import { useRemovalRequests } from '../hooks/useStaff';
+import { roleLabel } from '../types/auth';
 
 export function ProfilePage() {
   const { staff, organization, permissions, logout } = useAuth();
@@ -43,7 +44,7 @@ export function ProfilePage() {
         <dl className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 text-sm">
           <div className="rounded-lg bg-subtle/50 p-3">
             <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Role</dt>
-            <dd className="mt-1 font-semibold text-fg">{staff.role}</dd>
+            <dd className="mt-1 font-semibold text-fg">{roleLabel(staff.role)}</dd>
           </div>
           <div className="rounded-lg bg-subtle/50 p-3">
             <dt className="text-xs font-semibold uppercase tracking-wider text-faint">Organization</dt>

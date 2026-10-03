@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createQueue, createRestrictedStaff, registerOwner } from './helpers/app';
+import { api, createQueue, createRestrictedStaff, createStaffWithRole, registerOwner } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 
@@ -10,11 +10,20 @@ beforeEach(async () => {
 describe('Queue CRUD', () => {
   it('creates a queue scoped to the caller organization', async () => {
     const ctx = await registerOwner();
+    // ADR-069 (D1): every new queue belongs to an Admin; the Head names one.
+    const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
+    const unowned = await api()
+      .post('/api/queues')
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ name: 'Customer Service' });
+    expect(unowned.status).toBe(422);
+    expect(unowned.body.error.code).toBe('QUEUE_ADMIN_REQUIRED');
 
     const res = await api()
       .post('/api/queues')
       .set('Authorization', `Bearer ${ctx.accessToken}`)
       .send({
+        adminId: admin.staffId,
         name: 'Customer Service',
         tokenPrefix: 'A',
         startingNumber: 1,
@@ -132,7 +141,7 @@ describe('Queue soft deletion', () => {
 
     const res = await api()
       .delete(`/api/queues/${queue.id}`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`);
+      .set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
     expect(res.status).toBe(200);
     expect(res.body.data.deletedAt).not.toBeNull();
 
@@ -144,7 +153,7 @@ describe('Queue soft deletion', () => {
   it('excludes soft-deleted queues from the default list', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    await api().delete(`/api/queues/${queue.id}`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().delete(`/api/queues/${queue.id}`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
 
     const res = await api().get('/api/queues').set('Authorization', `Bearer ${ctx.accessToken}`);
     const ids = (res.body.data as Array<{ id: string }>).map((q) => q.id);
@@ -154,7 +163,7 @@ describe('Queue soft deletion', () => {
   it('still returns a soft-deleted queue via direct GET, exposing deletedAt without changing status', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    await api().delete(`/api/queues/${queue.id}`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    await api().delete(`/api/queues/${queue.id}`).set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
 
     const res = await api()
       .get(`/api/queues/${queue.id}`)
@@ -175,13 +184,13 @@ describe('Queue soft deletion', () => {
 
     const first = await api()
       .delete(`/api/queues/${queue.id}`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`);
+      .set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
     expect(first.status).toBe(200);
     expect(first.body.data.deletedAt).not.toBeNull();
 
     const second = await api()
       .delete(`/api/queues/${queue.id}`)
-      .set('Authorization', `Bearer ${ctx.accessToken}`);
+      .set('Authorization', `Bearer ${ctx.accessToken}`).send({ reason: 'No longer needed' });
 
     expect(second.status).toBe(409);
     expect(second.body.error.code).toBe('QUEUE_ARCHIVED');
@@ -220,7 +229,7 @@ describe('Queue permissions', () => {
 
     const deleteRes = await api()
       .delete(`/api/queues/${queue.id}`)
-      .set('Authorization', `Bearer ${restricted.accessToken}`);
+      .set('Authorization', `Bearer ${restricted.accessToken}`).send({ reason: 'No longer needed' });
     expect(deleteRes.status).toBe(403);
   });
 
@@ -261,7 +270,7 @@ describe('Queue tenant isolation', () => {
 
     const deleteRes = await api()
       .delete(`/api/queues/${queue.id}`)
-      .set('Authorization', `Bearer ${orgB.accessToken}`);
+      .set('Authorization', `Bearer ${orgB.accessToken}`).send({ reason: 'No longer needed' });
     expect(deleteRes.status).toBe(404);
   });
 

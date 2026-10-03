@@ -95,10 +95,23 @@ describe('rate limiting (Phase 7)', () => {
     await resetDb();
     owner = await registerOwner();
 
+    // ADR-069: every new queue belongs to an Admin; the Head names one.
+    const { prisma } = await import('../src/config/prisma.js');
+    const admin = await prisma.staff.create({
+      data: {
+        organizationId: owner.organizationId,
+        name: 'RL Admin',
+        email: `rl-admin-${randomUUID()}@example.com`,
+        passwordHash: 'not-a-real-hash',
+        role: 'ADMIN',
+        permissions: [],
+        status: 'ACTIVE',
+      },
+    });
     const queueRes = await api()
       .post('/api/queues')
       .set(authHeader(owner.accessToken))
-      .send({ name: 'RL Queue', tokenPrefix: 'R' });
+      .send({ name: 'RL Queue', tokenPrefix: 'R', adminId: admin.id });
     if (queueRes.status !== 201) {
       throw new Error(`queue setup failed: ${queueRes.status} ${JSON.stringify(queueRes.body)}`);
     }

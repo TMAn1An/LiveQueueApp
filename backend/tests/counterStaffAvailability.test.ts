@@ -29,14 +29,18 @@ function availableStaff(accessToken: string, counterId: string) {
 }
 
 /** Staff are created directly so their name/status can be pinned. */
+/** ADR-069: added as Executives of the queue's Admin, the only people who
+ * may operate its counters. */
 async function addStaff(
-  organizationId: string,
+  org: { organizationId: string; queue: { id: string } },
   name: string,
   status: 'ACTIVE' | 'SUSPENDED' = 'ACTIVE',
 ) {
+  const { adminId } = await prisma.queue.findUniqueOrThrow({ where: { id: org.queue.id }, select: { adminId: true } });
   return prisma.staff.create({
     data: {
-      organizationId,
+      organizationId: org.organizationId,
+      workspaceAdminId: adminId,
       name,
       email: `${name.toLowerCase().replace(/\s+/g, '-')}-${Math.random().toString(36).slice(2, 8)}@example.com`,
       passwordHash: 'not-a-real-hash',
@@ -50,7 +54,7 @@ async function addStaff(
 describe('counter staff assignment', () => {
   it('assigns a free staff member', async () => {
     const org = await setupOrg();
-    const staff = await addStaff(org.organizationId, 'Kara');
+    const staff = await addStaff(org, 'Kara');
 
     const res = await assign(org.accessToken, org.first.id, staff.id);
 
@@ -60,7 +64,7 @@ describe('counter staff assignment', () => {
 
   it('refuses to move a staff member who already holds another counter', async () => {
     const org = await setupOrg();
-    const staff = await addStaff(org.organizationId, 'Kara');
+    const staff = await addStaff(org, 'Kara');
     await assign(org.accessToken, org.first.id, staff.id);
 
     const res = await assign(org.accessToken, org.second.id, staff.id);
@@ -74,7 +78,7 @@ describe('counter staff assignment', () => {
 
   it('lets a counter keep the person it already has', async () => {
     const org = await setupOrg();
-    const staff = await addStaff(org.organizationId, 'Kara');
+    const staff = await addStaff(org, 'Kara');
     await assign(org.accessToken, org.first.id, staff.id);
 
     const res = await assign(org.accessToken, org.first.id, staff.id);
@@ -85,9 +89,19 @@ describe('counter staff assignment', () => {
 
   it('frees the staff member again when the assignment is cleared', async () => {
     const org = await setupOrg();
-    const staff = await addStaff(org.organizationId, 'Kara');
+    const staff = await addStaff(org, 'Kara');
     await assign(org.accessToken, org.first.id, staff.id);
 
+    // ADR-069 (D5): an open or paused counter is never simply emptied —
+    // turning it off is what releases its operator.
+    const refused = await assign(org.accessToken, org.first.id, null);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error.code).toBe('COUNTER_MUST_BE_OFF');
+    await api()
+      .patch(`/api/counters/${org.first.id}/status`)
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ status: 'OFFLINE' })
+      .expect(200);
     const unassign = await assign(org.accessToken, org.first.id, null);
     expect(unassign.status).toBe(200);
     expect(unassign.body.data.staffId).toBeNull();
@@ -99,7 +113,7 @@ describe('counter staff assignment', () => {
   it("refuses a staff member from another organization", async () => {
     const orgA = await setupOrg();
     const orgB = await setupOrg();
-    const outsider = await addStaff(orgB.organizationId, 'Outsider');
+    const outsider = await addStaff(orgB, 'Outsider');
 
     const res = await assign(orgA.accessToken, orgA.first.id, outsider.id);
 
@@ -109,7 +123,7 @@ describe('counter staff assignment', () => {
 
   it('refuses a suspended staff member', async () => {
     const org = await setupOrg();
-    const suspended = await addStaff(org.organizationId, 'Suspended Sam', 'SUSPENDED');
+    const suspended = await addStaff(org, 'Suspended Sam', 'SUSPENDED');
 
     const res = await assign(org.accessToken, org.first.id, suspended.id);
 
@@ -123,7 +137,7 @@ describe('counter staff assignment', () => {
    */
   it('cannot assign the same person to two counters concurrently', async () => {
     const org = await setupOrg();
-    const staff = await addStaff(org.organizationId, 'Kara');
+    const staff = await addStaff(org, 'Kara');
 
     const results = await Promise.all([
       assign(org.accessToken, org.first.id, staff.id),
@@ -144,8 +158,8 @@ describe('GET /api/counters/:counterId/available-staff', () => {
   // dashboard can offer an explicit move — never as freely assignable.
   it('offers free active people, and marks anyone holding another counter', async () => {
     const org = await setupOrg();
-    const free = await addStaff(org.organizationId, 'Free Fiona');
-    const busy = await addStaff(org.organizationId, 'Busy Bilal');
+    const free = await addStaff(org, 'Free Fiona');
+    const busy = await addStaff(org, 'Busy Bilal');
     await assign(org.accessToken, org.second.id, busy.id);
 
     const res = await availableStaff(org.accessToken, org.first.id);
@@ -160,7 +174,7 @@ describe('GET /api/counters/:counterId/available-staff', () => {
 
   it("still offers the counter's own current holder", async () => {
     const org = await setupOrg();
-    const staff = await addStaff(org.organizationId, 'Kara');
+    const staff = await addStaff(org, 'Kara');
     await assign(org.accessToken, org.first.id, staff.id);
 
     const res = await availableStaff(org.accessToken, org.first.id);
@@ -169,26 +183,42 @@ describe('GET /api/counters/:counterId/available-staff', () => {
     expect(ids).toContain(staff.id);
   });
 
-  it('keeps a holder listed even while their counter is on break or offline', async () => {
+  it('keeps a holder listed while their counter is on break', async () => {
     const org = await setupOrg();
-    const busy = await addStaff(org.organizationId, 'Busy Bilal');
+    const busy = await addStaff(org, 'Busy Bilal');
     await assign(org.accessToken, org.second.id, busy.id);
     await api()
       .patch(`/api/counters/${org.second.id}/status`)
       .set('Authorization', `Bearer ${org.accessToken}`)
-      .send({ status: 'OFFLINE' });
+      .send({ status: 'ON_BREAK' });
 
-    // Counter status is not a presence system: they hold the counter until
-    // explicitly unassigned.
+    // Counter status is not a presence system: a paused counter keeps its
+    // person (ADR-069).
     const res = await availableStaff(org.accessToken, org.first.id);
 
     const entry = res.body.data.find((s: { id: string }) => s.id === busy.id);
     expect(entry.currentCounter).toMatchObject({ id: org.second.id });
   });
 
+  it('lists a holder as free once their counter is turned off (ADR-069, D5)', async () => {
+    const org = await setupOrg();
+    const busy = await addStaff(org, 'Busy Bilal');
+    await assign(org.accessToken, org.second.id, busy.id);
+    await api()
+      .patch(`/api/counters/${org.second.id}/status`)
+      .set('Authorization', `Bearer ${org.accessToken}`)
+      .send({ status: 'OFFLINE' })
+      .expect(200);
+
+    const res = await availableStaff(org.accessToken, org.first.id);
+
+    const entry = res.body.data.find((s: { id: string }) => s.id === busy.id);
+    expect(entry.currentCounter).toBeNull();
+  });
+
   it('excludes suspended staff', async () => {
     const org = await setupOrg();
-    const suspended = await addStaff(org.organizationId, 'Suspended Sam', 'SUSPENDED');
+    const suspended = await addStaff(org, 'Suspended Sam', 'SUSPENDED');
 
     const res = await availableStaff(org.accessToken, org.first.id);
 
@@ -198,7 +228,7 @@ describe('GET /api/counters/:counterId/available-staff', () => {
   it("never lists another organization's staff", async () => {
     const orgA = await setupOrg();
     const orgB = await setupOrg();
-    const outsider = await addStaff(orgB.organizationId, 'Outsider');
+    const outsider = await addStaff(orgB, 'Outsider');
 
     const res = await availableStaff(orgA.accessToken, orgA.first.id);
 

@@ -5,6 +5,8 @@ import { useServiceHistory } from '../hooks/useServiceHistory';
 import { useQueues } from '../hooks/useQueues';
 import type { ServiceHistoryEntry } from '../types/serviceHistory';
 
+// ADR-069: the Admin filter is only for organization-wide roles.
+vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ hasPermission: () => false }) }));
 vi.mock('../hooks/useServiceHistory', () => ({ useServiceHistory: vi.fn() }));
 vi.mock('../hooks/useQueues', () => ({ useQueues: vi.fn() }));
 

@@ -6,6 +6,8 @@ export interface CreateServiceInput {
   description?: string;
   durationMinutes: number;
   isActive?: boolean;
+  /** ADR-070: how often one person's journey may include it (1-10, default 2). */
+  maxOccurrencesPerJourney?: number;
 }
 
 export function createService(queueId: string, input: CreateServiceInput) {

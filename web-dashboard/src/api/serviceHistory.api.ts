@@ -9,6 +9,8 @@ export interface ServiceHistoryFilters {
   status?: ServiceHistoryStatus;
   from?: string;
   to?: string;
+  /** ADR-069: one Admin's workspace (Head / Manager). */
+  adminId?: string;
 }
 
 export function listServiceHistory({
@@ -19,6 +21,7 @@ export function listServiceHistory({
   status,
   from,
   to,
+  adminId,
 }: ServiceHistoryFilters = {}) {
   return apiFetch<ServiceHistoryEntry[]>('/api/service-history', {
     query: {
@@ -31,6 +34,7 @@ export function listServiceHistory({
       status: status || undefined,
       from: from || undefined,
       to: to || undefined,
+      adminId: adminId || undefined,
     },
   });
 }

@@ -17,8 +17,9 @@ async function setup() {
   const owner = await registerOwner();
   const admin = await createStaffWithRole(owner.organizationId, 'ADMIN');
   const admin2 = await createStaffWithRole(owner.organizationId, 'ADMIN');
-  const staff = await createStaffWithRole(owner.organizationId, 'STAFF');
-  const staff2 = await createStaffWithRole(owner.organizationId, 'STAFF');
+  // ADR-069: Executives belong to an Admin's workspace — here, `admin`'s.
+  const staff = await createStaffWithRole(owner.organizationId, 'STAFF', { workspaceAdminId: admin.staffId });
+  const staff2 = await createStaffWithRole(owner.organizationId, 'STAFF', { workspaceAdminId: admin.staffId });
   return { owner, admin, admin2, staff, staff2 };
 }
 

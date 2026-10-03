@@ -6,6 +6,7 @@ import { portalApi } from '../portalApi';
 import { TERMINAL_STATUSES, useLiveToken } from '../useLiveToken';
 import { Card, Loading, Notice, SecondaryButton, Shell } from '../ui';
 import { minutesLabel } from '../format';
+import { JourneyProgress } from '../../shared/journey/JourneyProgress';
 
 const STATUS_TEXT: Record<string, { title: string; tone: 'info' | 'ok' | 'warn' }> = {
   WAITING: { title: 'You are in the queue', tone: 'info' },
@@ -87,7 +88,7 @@ export function TrackingPage() {
         <p className="mt-1 text-5xl font-black tracking-tight" data-testid="serial">
           {token.serialNumber}
         </p>
-        <h1 className="mt-3 text-xl font-bold">{status.title}</h1>
+        <h1 className="mt-3 text-xl font-bold">{token.queueRemoved ? 'Your place was cancelled' : status.title}</h1>
         {token.status === 'WAITING' && (
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-xl bg-subtle p-3">
@@ -119,10 +120,24 @@ export function TrackingPage() {
         {token.status === 'COMPLETED' && token.completionFeedback && (
           <p className="mt-2 text-sm text-muted">{token.completionFeedback}</p>
         )}
-        {token.services.length > 0 && (
+        {token.queueRemoved && (
+          <div className="mt-3">
+            <Notice tone="warn">
+              This queue has been closed, so your place was cancelled.
+              {token.queueRemoved.reason ? ` Reason: ${token.queueRemoved.reason}` : ''}
+            </Notice>
+          </div>
+        )}
+        {!token.journey && token.services.length > 0 && (
           <p className="mt-3 text-sm text-muted">{token.services.map((s) => s.serviceName).join(', ')}</p>
         )}
       </Card>
+
+      {token.journey && token.journey.totalSteps > 1 && (
+        <Card>
+          <JourneyProgress journey={token.journey} />
+        </Card>
+      )}
 
       {!terminal && <NotificationsCard tokenId={tokenId} installationId={installationId} />}
 

@@ -30,7 +30,10 @@ function invalidateCounters(queryClient: ReturnType<typeof useQueryClient>, queu
 export function useCreateCounter(queueId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => counterApi.createCounter(queueId, name),
+    mutationFn: (input: string | { name: string; operatorStaffId?: string }) =>
+      typeof input === 'string'
+        ? counterApi.createCounter(queueId, input)
+        : counterApi.createCounter(queueId, input.name, input.operatorStaffId),
     onSuccess: () => invalidateCounters(queryClient, queueId),
   });
 }
@@ -47,9 +50,32 @@ export function useUpdateCounter(queueId: string) {
 export function useSetCounterStatus(queueId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ counterId, status }: { counterId: string; status: CounterStatus }) =>
-      counterApi.setCounterStatus(counterId, status),
-    onSuccess: () => invalidateCounters(queryClient, queueId),
+    mutationFn: ({
+      counterId,
+      status,
+      operatorStaffId,
+    }: {
+      counterId: string;
+      status: CounterStatus;
+      operatorStaffId?: string;
+    }) => counterApi.setCounterStatus(counterId, status, operatorStaffId),
+    onSuccess: () => {
+      invalidateCounters(queryClient, queueId);
+      // Turning a counter off frees its operator for other counters.
+      void queryClient.invalidateQueries({ queryKey: ['assignableStaff'] });
+    },
+  });
+}
+
+export function useSetCounterServices(queueId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ counterId, serviceIds }: { counterId: string; serviceIds: string[] }) =>
+      counterApi.setCounterServices(counterId, serviceIds),
+    onSuccess: () => {
+      invalidateCounters(queryClient, queueId);
+      void queryClient.invalidateQueries({ queryKey: ['recommendedJourney', queueId] });
+    },
   });
 }
 

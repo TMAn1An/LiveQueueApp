@@ -61,7 +61,7 @@ describe('organization public code', () => {
     const q = await createQueue(owner.accessToken, { name: 'Emergency' });
     await updateQueue(owner.accessToken, q.id, { name: 'Emergency Care' });
     const q2 = await createQueue(owner.accessToken, { name: 'Pharmacy', tokenPrefix: 'P' });
-    await api().delete(`/api/queues/${q2.id}`).set('Authorization', `Bearer ${owner.accessToken}`);
+    await api().delete(`/api/queues/${q2.id}`).set('Authorization', `Bearer ${owner.accessToken}`).send({ reason: 'No longer needed' });
     expect(await publicCodeOf(owner.organizationId)).toBe(code);
     const res = await visit(code);
     expect(res.body.data.queues.map((x: { name: string }) => x.name)).toEqual(['Emergency Care']);
@@ -103,7 +103,7 @@ describe('GET /api/public/organizations/:publicCode', () => {
     const archived = await createQueue(owner.accessToken, { name: 'Old', tokenPrefix: 'O' });
     await createService(owner.accessToken, shown.id);
     expect((await updateQueue(owner.accessToken, hidden.id, { listedOnOrganizationPage: false })).status).toBe(200);
-    await api().delete(`/api/queues/${archived.id}`).set('Authorization', `Bearer ${owner.accessToken}`);
+    await api().delete(`/api/queues/${archived.id}`).set('Authorization', `Bearer ${owner.accessToken}`).send({ reason: 'No longer needed' });
 
     const names = (await visit(code)).body.data.queues.map((q: { name: string }) => q.name);
     expect(names).toEqual(['Billing']);

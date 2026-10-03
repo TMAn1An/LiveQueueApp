@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueueDetailsPage } from './QueueDetailsPage';
-import { useQueue, useUpdateQueue } from '../hooks/useQueues';
+import { useQueue, useRecommendedJourney, useSetRecommendedJourney, useUpdateQueue } from '../hooks/useQueues';
 import type { Queue } from '../types/queue';
 
 // V2 UX + Token Lifecycle checkpoint, Part D: this page previously had no
@@ -60,6 +60,8 @@ function mockQueue(overrides: Partial<Queue> = {}): Queue {
 }
 
 beforeEach(() => {
+  vi.mocked(useRecommendedJourney).mockReturnValue({ data: { serviceIds: [], unroutableServiceIds: [] }, isLoading: false } as unknown as ReturnType<typeof useRecommendedJourney>);
+  vi.mocked(useSetRecommendedJourney).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<typeof useSetRecommendedJourney>);
   vi.clearAllMocks();
   vi.mocked(useUpdateQueue).mockReturnValue({ mutate: vi.fn(), isPending: false } as unknown as ReturnType<
     typeof useUpdateQueue

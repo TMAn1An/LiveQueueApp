@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createQueue, createStaffWithRole, registerOwner } from './helpers/app';
+import { api, createQueue, createStaffWithRole, queueAdmins, registerOwner } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 
@@ -14,10 +14,13 @@ beforeEach(async () => {
   await resetDb();
 });
 
-function createRaw(accessToken: string, body: Record<string, unknown>) {
+/** ADR-069: an Admin creates their own queue (one Admin, one queue), so
+ * each raw creation is made by a fresh Admin of the organization. */
+async function createRaw(ctx: { organizationId: string }, body: Record<string, unknown>) {
+  const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
   return api()
     .post('/api/queues')
-    .set('Authorization', `Bearer ${accessToken}`)
+    .set('Authorization', `Bearer ${admin.accessToken}`)
     .send({ name: 'Main Hall', tokenPrefix: 'M', ...body });
 }
 
@@ -38,7 +41,7 @@ async function stored(queueId: string) {
 describe('ADR-055 — creation', () => {
   it('a new queue does not require the service-start code unless the creator turns it on', async () => {
     const ctx = await registerOwner();
-    const res = await createRaw(ctx.accessToken, {});
+    const res = await createRaw(ctx, {});
     expect(res.status).toBe(201);
     expect(res.body.data.requireServiceStartOtp).toBe(false);
     // Multiple services keep their existing default.
@@ -57,7 +60,7 @@ describe('ADR-055 — creation', () => {
     const ctx = await registerOwner();
     for (const allowMultipleServices of [true, false]) {
       for (const requireServiceStartOtp of [true, false]) {
-        const res = await createRaw(ctx.accessToken, {
+        const res = await createRaw(ctx, {
           name: `Q ${String(allowMultipleServices)} ${String(requireServiceStartOtp)}`,
           allowMultipleServices,
           requireServiceStartOtp,
@@ -134,7 +137,8 @@ describe('ADR-055 — no change after creation, in either direction', () => {
   it('applies to ADMIN exactly as to OWNER — no role may change them', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken, { requireServiceStartOtp: true });
-    const admin = await createStaffWithRole(ctx.organizationId, 'ADMIN');
+    // The queue's own Admin (ADR-069).
+    const admin = queueAdmins.get(queue.id)!;
 
     const res = await updateQueue(admin.accessToken, queue.id, { requireServiceStartOtp: false });
     expect(res.status).toBe(409);

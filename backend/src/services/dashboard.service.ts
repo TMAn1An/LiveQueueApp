@@ -113,6 +113,14 @@ export async function getLiveQueueTable(
         // V2 Checkpoint 5 (ADR-027): the full selection, not just the
         // legacy singular `service` relation.
         tokenServices: { include: { service: true }, orderBy: { service: { createdAt: 'asc' } } },
+        // ADR-070: the ordered journey, for "step 2 of 3" and referrals.
+        journeySteps: {
+          orderBy: { stepNumber: 'asc' },
+          include: {
+            service: { select: { serviceName: true } },
+            referredToCounter: { select: { id: true, name: true } },
+          },
+        },
       },
       orderBy: { createdAt: 'asc' },
       skip: (page - 1) * pageSize,
@@ -157,6 +165,22 @@ export async function getLiveQueueTable(
       },
       services: token.tokenServices.map((ts) => ({ id: ts.service.id, name: ts.service.serviceName })),
       counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
+      // ADR-070: null for a token created before ordered journeys.
+      journey:
+        token.currentStepNumber != null && token.journeySteps.length > 0
+          ? {
+              currentStepNumber: token.currentStepNumber,
+              totalSteps: token.journeySteps.length,
+              steps: token.journeySteps.map((s) => ({
+                stepNumber: s.stepNumber,
+                serviceId: s.serviceId,
+                serviceName: s.service.serviceName,
+                status: s.status,
+              })),
+              referredTo:
+                token.journeySteps.find((s) => s.stepNumber === token.currentStepNumber)?.referredToCounter ?? null,
+            }
+          : null,
       position: position?.position ?? null,
       estimatedWaitMinutes: position?.estimatedWaitMinutes ?? null,
       estimatedReadyAt: position?.estimatedReadyAt ?? null,

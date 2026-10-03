@@ -7,12 +7,16 @@ import { SearchInput } from '../components/SearchInput';
 import { PageHeader } from '../components/PageHeader';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { formatActionLabel, formatDateTime } from '../utils/format';
+import { AdminFilter } from '../components/AdminFilter';
+import { useAuth } from '../context/AuthContext';
 
 export function AuditLogsPage() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [adminFilter, setAdminFilter] = useState('');
+  const { hasPermission } = useAuth();
   const debouncedSearch = useDebouncedValue(search.trim());
-  const { data: result, isLoading, isFetching } = useAuditLogs(page, 20, debouncedSearch);
+  const { data: result, isLoading, isFetching } = useAuditLogs(page, 20, debouncedSearch, adminFilter);
 
   function handleSearchChange(value: string) {
     setSearch(value);
@@ -26,13 +30,26 @@ export function AuditLogsPage() {
         description="Immutable record of sensitive actions, authentication events, and administrative changes."
       />
 
-      <div className="max-w-md">
-        <SearchInput
-          value={search}
-          onChange={handleSearchChange}
-          label="Search audit logs"
-          placeholder="Search by staff, action, or entity…"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="w-full max-w-md">
+          <SearchInput
+            value={search}
+            onChange={handleSearchChange}
+            label="Search audit logs"
+            placeholder="Search by staff, action, or entity…"
+          />
+        </div>
+        {/* ADR-069: the Head and Managers may narrow to one Admin's workspace. */}
+        {hasPermission('view_all_workspaces') && (
+          <AdminFilter
+            id="audit-admin-filter"
+            value={adminFilter}
+            onChange={(v) => {
+              setAdminFilter(v);
+              setPage(1);
+            }}
+          />
+        )}
       </div>
 
       {isFetching && !isLoading && (

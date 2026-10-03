@@ -129,18 +129,33 @@ export interface RoutedWaitingToken extends WaitingTokenInput {
   /** A referral to a counter in `counters` binds the token to it. */
   boundCounterId: string | null;
   referredAt: Date | null;
+  /** Arrival order (lower = earlier). Entries are kept in this order. */
+  sequence?: number;
+  /** When the current step can first be called — for someone still at a
+   * counter for an earlier step, when that step ends. Default: now. */
+  availableAt?: Date;
+  /** The journey's remaining steps after the current one, in order. Each
+   * rejoins the line, in the person's arrival order, when the previous one
+   * ends. */
+  laterSteps?: { serviceId: string; durationMinutes: number }[];
+  /** Someone being served right now: their later steps take part, but they
+   * are not waiting, so they get no estimate of their own. */
+  inService?: boolean;
 }
 
 /**
- * ADR-070: the same multi-counter simulation, with service routing and
- * referrals. Repeatedly takes whichever counter frees up first among those
- * that can still serve someone, and gives it exactly whom "Serve next" would
- * give it (journey.service.ts headForCounter): its earliest referral, else the
- * earliest-joined token whose current step it handles and that is not bound
- * to another counter. With no routing and no referrals this reproduces
+ * ADR-070: the same multi-counter simulation, with service routing,
+ * referrals and ordered journeys. Repeatedly takes the counter that can call
+ * someone soonest and gives it exactly whom "Serve next" would give it then
+ * (journey.service.ts headForCounter): its earliest referral, else the
+ * earliest-joined person available by then whose current step it handles
+ * and who is not bound to another counter. A counter with nobody available
+ * yet waits for whoever becomes available first. When a step ends, the
+ * person's next step rejoins the line in their original arrival order — so
+ * the people behind them see the whole journey ahead of them, not just its
+ * current step. With no routing, referrals or later steps this reproduces
  * simulateWaitingTokenEtas exactly. Tokens no counter can serve get no
- * estimate. Durations are the current step's only — the estimate is when
- * the person will next be called.
+ * estimate. A waiting person's estimate is when their current step is called.
  */
 export function simulateRoutedEtas(
   counters: RoutedCounter[],
@@ -148,36 +163,71 @@ export function simulateRoutedEtas(
 ): Map<string, Date> {
   const result = new Map<string, Date>();
   const freeAtMs = counters.map((c) => c.freeAt.getTime());
-  const remaining = [...waitingTokens];
-  const serves = (c: RoutedCounter, t: RoutedWaitingToken) =>
+  type Entry = RoutedWaitingToken & { readyMs: number; rest: { serviceId: string; durationMinutes: number }[] };
+  const remaining: Entry[] = waitingTokens
+    .map((t, index) => ({ t, index }))
+    .sort((a, b) => (a.t.sequence ?? a.index) - (b.t.sequence ?? b.index) || a.index - b.index)
+    .map(({ t }) => ({ ...t, readyMs: t.availableAt?.getTime() ?? -Infinity, rest: [...(t.laterSteps ?? [])] }));
+  const serves = (c: RoutedCounter, t: Entry) =>
     t.boundCounterId ? t.boundCounterId === c.id : t.serviceId === null || c.serviceIds === null || c.serviceIds.has(t.serviceId);
-  const pick = (c: RoutedCounter): number => {
-    let best = -1;
+
+  /** Whom counter `c`, free at `freeMs`, calls next, and when. */
+  const pick = (c: RoutedCounter, freeMs: number): { index: number; startMs: number } | null => {
+    let referral = -1;
+    let first = -1;
+    let soonest = -1;
     for (let i = 0; i < remaining.length; i++) {
       const t = remaining[i]!;
-      if (t.boundCounterId !== c.id) continue;
-      if (best === -1 || (t.referredAt?.getTime() ?? 0) < (remaining[best]!.referredAt?.getTime() ?? 0)) best = i;
+      if (!serves(c, t)) continue;
+      if (t.readyMs <= freeMs) {
+        if (t.boundCounterId === c.id) {
+          if (referral === -1 || (t.referredAt?.getTime() ?? 0) < (remaining[referral]!.referredAt?.getTime() ?? 0)) {
+            referral = i;
+          }
+        } else if (first === -1) {
+          first = i;
+        }
+      } else if (soonest === -1 || t.readyMs < remaining[soonest]!.readyMs) {
+        soonest = i;
+      }
     }
-    if (best !== -1) return best;
-    return remaining.findIndex((t) => serves(c, t));
+    if (referral !== -1) return { index: referral, startMs: freeMs };
+    if (first !== -1) return { index: first, startMs: freeMs };
+    if (soonest !== -1) return { index: soonest, startMs: remaining[soonest]!.readyMs };
+    return null;
   };
 
   while (remaining.length > 0) {
     let chosenCounter = -1;
-    let chosenToken = -1;
+    let chosen: { index: number; startMs: number } | null = null;
     for (let i = 0; i < counters.length; i++) {
-      const tokenIndex = pick(counters[i]!);
-      if (tokenIndex === -1) continue;
-      if (chosenCounter === -1 || freeAtMs[i]! < freeAtMs[chosenCounter]!) {
+      const candidate = pick(counters[i]!, freeAtMs[i]!);
+      if (!candidate) continue;
+      if (!chosen || candidate.startMs < chosen.startMs) {
         chosenCounter = i;
-        chosenToken = tokenIndex;
+        chosen = candidate;
       }
     }
-    if (chosenCounter === -1) break;
-    const token = remaining.splice(chosenToken, 1)[0]!;
-    const readyAtMs = freeAtMs[chosenCounter]!;
-    result.set(token.id, new Date(readyAtMs));
-    freeAtMs[chosenCounter] = readyAtMs + token.durationMinutes * 60_000;
+    if (!chosen) break;
+    const token = remaining[chosen.index]!;
+    if (!token.inService && !result.has(token.id)) result.set(token.id, new Date(chosen.startMs));
+    const endMs = chosen.startMs + token.durationMinutes * 60_000;
+    freeAtMs[chosenCounter] = endMs;
+    const next = token.rest.shift();
+    if (next) {
+      // The next step rejoins in the same arrival position; a referral only
+      // ever binds the step it was made for.
+      remaining[chosen.index] = {
+        ...token,
+        serviceId: next.serviceId,
+        durationMinutes: next.durationMinutes,
+        boundCounterId: null,
+        referredAt: null,
+        readyMs: endMs,
+      };
+    } else {
+      remaining.splice(chosen.index, 1);
+    }
   }
   return result;
 }

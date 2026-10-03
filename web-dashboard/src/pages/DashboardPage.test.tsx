@@ -15,6 +15,7 @@ vi.mock('../context/AuthContext', () => ({
   }),
 }));
 vi.mock('../hooks/useDashboard');
+vi.mock('../hooks/useStaff', () => ({ useAdmins: () => ({ admins: [] }), useStaffList: () => ({ data: { data: [] }, isLoading: false }) }));
 vi.mock('../hooks/useQueues');
 
 function queue(overrides: Partial<Queue> = {}): Queue {
