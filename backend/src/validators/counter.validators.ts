@@ -21,6 +21,9 @@ export const createCounterSchema = {
       .min(1, 'Counter name is required.')
       .max(120)
       .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE),
+    /** ADR-069: given → the counter starts active with this operator;
+     * omitted → it starts off. */
+    operatorStaffId: z.string().uuid('operatorStaffId must be a valid id.').nullable().optional(),
   }),
 };
 
@@ -41,6 +44,16 @@ export const updateCounterStatusSchema = {
   params: counterIdParams,
   body: z.object({
     status: counterStatus,
+    /** ADR-069: reactivate an off counter with this operator in one step. */
+    operatorStaffId: z.string().uuid('operatorStaffId must be a valid id.').optional(),
+  }),
+};
+
+/** ADR-070: the services a counter handles; empty = every service. */
+export const setCounterServicesSchema = {
+  params: counterIdParams,
+  body: z.object({
+    serviceIds: z.array(z.string().uuid('serviceId must be a valid id.')).max(100),
   }),
 };
 

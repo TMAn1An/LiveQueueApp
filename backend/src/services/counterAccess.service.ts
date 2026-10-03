@@ -28,6 +28,8 @@ export interface CounterActor {
   staffId: string;
   organizationId: string;
   role: StaffRole;
+  /** ADR-069: an Executive's workspace; carried so scope checks see it. */
+  workspaceAdminId?: string | null;
 }
 
 export const OPERATOR_NOT_ASSIGNED_TO_COUNTER = 'OPERATOR_NOT_ASSIGNED_TO_COUNTER';
@@ -90,7 +92,7 @@ export function assertStillAssigned(actor: CounterActor, lockedStaffId: string |
 
 export const COUNTER_MANAGEMENT_DENIAL = {
   code: 'COUNTER_MANAGEMENT_FORBIDDEN',
-  message: 'Only the organization owner or an admin can create, change or delete counters.',
+  message: "Only the queue's Admin or the Organization Head can create, change or delete counters.",
 };
 
 /**

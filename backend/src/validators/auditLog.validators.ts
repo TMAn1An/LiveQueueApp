@@ -7,5 +7,7 @@ export const listAuditLogsSchema = {
     // Trimmed so surrounding whitespace never counts as a search; an empty
     // result is falsy and treated as "no search" by the service layer.
     search: z.string().trim().max(200).optional(),
+    /** ADR-069: Head/Manager filter to one Admin's workspace. */
+    adminId: z.string().uuid('adminId must be a valid id.').optional(),
   }),
 };

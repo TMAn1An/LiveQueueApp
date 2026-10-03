@@ -1,13 +1,9 @@
 import type { Prisma, TokenStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { todayRange } from '../utils/dateRange';
-import {
-  hasFreeActiveCounter,
-  listWaitingTokenPositions,
-  waitingActionEligibilityFrom,
-} from './token.service';
+import { listWaitingTokenPositions, waitingEligibilityForQueue } from './token.service';
 import { buildDisplayFormFields, fetchFormFieldDefs } from '../utils/formFieldDisplay';
-import { requireOwnedQueue } from '../utils/tenantScope';
+import { requireVisibleQueue, visibleQueueIds, type WorkspaceActor } from './workspaceScope.service';
 
 const LIVE_STATUSES: TokenStatus[] = ['WAITING', 'CALLED', 'IN_PROGRESS'];
 
@@ -18,8 +14,12 @@ const LIVE_STATUSES: TokenStatus[] = ['WAITING', 'CALLED', 'IN_PROGRESS'];
  * spec's own "Completed today"/"Skipped today" cards) rather than all-time,
  * for consistency across the card set.
  */
-export async function getDashboardStats(organizationId: string) {
+export async function getDashboardStats(actor: WorkspaceActor, filter: { adminId?: string } = {}) {
   const { from } = todayRange();
+  const organizationId = actor.organizationId;
+  // ADR-069: only the queues this person's workspace scope covers.
+  const queueIds = await visibleQueueIds(actor, filter.adminId);
+  const inScope = { organizationId, queueId: { in: queueIds } };
 
   const [
     activeQueues,
@@ -32,22 +32,24 @@ export async function getDashboardStats(organizationId: string) {
     avgWaitRows,
     avgServiceRows,
   ] = await Promise.all([
-    prisma.queue.count({ where: { organizationId, deletedAt: null, status: 'ACTIVE' } }),
-    prisma.token.count({ where: { organizationId, status: 'WAITING' } }),
-    prisma.token.count({ where: { organizationId, status: 'CALLED' } }),
-    prisma.counter.count({ where: { queue: { organizationId }, status: 'ACTIVE' } }),
-    prisma.counter.count({ where: { queue: { organizationId }, status: 'ON_BREAK' } }),
-    prisma.token.count({ where: { organizationId, status: 'COMPLETED', completedAt: { gte: from } } }),
-    prisma.token.count({ where: { organizationId, status: 'SKIPPED', skippedAt: { gte: from } } }),
+    prisma.queue.count({ where: { id: { in: queueIds }, deletedAt: null, status: 'ACTIVE' } }),
+    prisma.token.count({ where: { ...inScope, status: 'WAITING' } }),
+    prisma.token.count({ where: { ...inScope, status: 'CALLED' } }),
+    prisma.counter.count({ where: { queueId: { in: queueIds }, status: 'ACTIVE' } }),
+    prisma.counter.count({ where: { queueId: { in: queueIds }, status: 'ON_BREAK' } }),
+    prisma.token.count({ where: { ...inScope, status: 'COMPLETED', completedAt: { gte: from } } }),
+    prisma.token.count({ where: { ...inScope, status: 'SKIPPED', skippedAt: { gte: from } } }),
     prisma.$queryRaw<{ avg: number | null }[]>`
       SELECT AVG(EXTRACT(EPOCH FROM (called_at - created_at)) / 60) AS avg
       FROM tokens
-      WHERE organization_id = ${organizationId} AND called_at IS NOT NULL AND created_at >= ${from}
+      WHERE organization_id = ${organizationId} AND queue_id = ANY(${queueIds}::text[])
+        AND called_at IS NOT NULL AND created_at >= ${from}
     `,
     prisma.$queryRaw<{ avg: number | null }[]>`
       SELECT AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) / 60) AS avg
       FROM tokens
-      WHERE organization_id = ${organizationId} AND completed_at IS NOT NULL AND started_at IS NOT NULL
+      WHERE organization_id = ${organizationId} AND queue_id = ANY(${queueIds}::text[])
+        AND completed_at IS NOT NULL AND started_at IS NOT NULL
         AND created_at >= ${from}
     `,
   ]);
@@ -74,7 +76,7 @@ export async function getDashboardStats(organizationId: string) {
  * in the same queue" rule a second time (CLAUDE.md Rule 5).
  */
 export async function getLiveQueueTable(
-  organizationId: string,
+  actor: WorkspaceActor,
   page: number,
   pageSize: number,
   /**
@@ -89,14 +91,17 @@ export async function getLiveQueueTable(
    */
   queueId?: string,
 ) {
+  const organizationId = actor.organizationId;
   if (queueId) {
-    await requireOwnedQueue(organizationId, queueId);
+    await requireVisibleQueue(actor, queueId);
   }
+  // ADR-069: never a token from a queue outside this person's scope.
+  const scopeIds = queueId ? [queueId] : await visibleQueueIds(actor);
 
   const where: Prisma.TokenWhereInput = {
     organizationId,
     status: { in: LIVE_STATUSES },
-    ...(queueId ? { queueId } : {}),
+    queueId: { in: scopeIds },
   };
 
   const [tokens, total] = await Promise.all([
@@ -129,14 +134,11 @@ export async function getLiveQueueTable(
     tokens.map((t) => ({ queueId: t.queueId, formVersion: t.formVersion })),
   );
 
-  // One capacity probe per queue on this page, not one per row: whether a
-  // free ACTIVE counter exists is a queue-level fact, and it is half of the
-  // rule that decides whether a waiting row's Call/Skip are unlocked.
-  const queueHasFreeCounter = new Map(
+  // ADR-070: the "Serve next" rule for every waiting row, once per queue on
+  // this page — whether each row is whom some free counter would call now.
+  const eligibilityByQueue = new Map(
     await Promise.all(
-      waitingQueueIds.map(
-        async (queueId) => [queueId, await hasFreeActiveCounter(queueId)] as const,
-      ),
+      waitingQueueIds.map(async (queueId) => [queueId, await waitingEligibilityForQueue(queueId)] as const),
     ),
   );
 
@@ -164,11 +166,12 @@ export async function getLiveQueueTable(
       // that are not WAITING, where the concept does not apply.
       actionEligibility:
         token.status === 'WAITING'
-          ? waitingActionEligibilityFrom(
-              position?.position ?? null,
-              queueHasFreeCounter.get(token.queueId) ?? false,
-              position?.etaUnavailableReason === 'SESSION_NOT_STARTED',
-            )
+          ? position?.etaUnavailableReason === 'SESSION_NOT_STARTED'
+            ? { eligible: false, reason: 'SESSION_NOT_STARTED' as const }
+            : (eligibilityByQueue.get(token.queueId)?.get(token.id) ?? {
+                eligible: false,
+                reason: 'NO_AVAILABLE_COUNTER' as const,
+              })
           : null,
       // ADR-048: the token's fixed session assignment, so staff can see why
       // a scheduled row is held and when it will join the line. The

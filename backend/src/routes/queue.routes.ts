@@ -11,8 +11,12 @@ import { COUNTER_MANAGEMENT_DENIAL } from '../services/counterAccess.service';
 import { requireVerified } from '../middleware/requireVerified';
 import { validate } from '../middleware/validate';
 import {
+  assignQueueAdminSchema,
   createQueueSchema,
   createQueueSessionSchema,
+  deleteQueueSchema,
+  listQueuesSchema,
+  setRecommendedJourneySchema,
   deleteQueueSessionSchema,
   queueIdOnlySchema,
   updateQueueSchema,
@@ -28,7 +32,16 @@ const router = Router();
 
 // Any authenticated staff member of the organization may read (approved
 // Phase 2 decision 1) — only mutations require the specific permission.
-router.get('/', authenticate, requireVerified, queueController.list);
+router.get('/', authenticate, requireVerified, validate(listQueuesSchema), queueController.list);
+// ADR-069: deletion history (registered before '/:queueId').
+router.get(
+  '/deleted',
+  authenticate,
+  requireVerified,
+  requirePermission('view_audit_logs'),
+  validate(listQueuesSchema),
+  queueController.listDeleted,
+);
 router.post(
   '/',
   authenticate,
@@ -46,13 +59,40 @@ router.put(
   validate(updateQueueSchema),
   queueController.update,
 );
+// ADR-069 D8: the Organization Head, a Manager, or the queue's own Admin —
+// always with a reason (checked again in the service, with the scope).
 router.delete(
   '/:queueId',
   authenticate,
   requireVerified,
-  requirePermission('manage_queues'),
-  validate(queueIdOnlySchema),
+  requirePermission('delete_queues'),
+  validate(deleteQueueSchema),
   queueController.remove,
+);
+// ADR-070: the recommended service order.
+router.get(
+  '/:queueId/recommended-journey',
+  authenticate,
+  requireVerified,
+  validate(queueIdOnlySchema),
+  queueController.getRecommendedJourney,
+);
+router.put(
+  '/:queueId/recommended-journey',
+  authenticate,
+  requireVerified,
+  requirePermission('manage_services'),
+  validate(setRecommendedJourneySchema),
+  queueController.setRecommendedJourney,
+);
+// ADR-069 D2: the Organization Head assigns a queue without an Admin.
+router.patch(
+  '/:queueId/admin',
+  authenticate,
+  requireVerified,
+  requirePermission('manage_admins'),
+  validate(assignQueueAdminSchema),
+  queueController.assignAdmin,
 );
 router.patch(
   '/:queueId/status',

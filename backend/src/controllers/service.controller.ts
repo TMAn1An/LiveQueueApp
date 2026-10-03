@@ -3,7 +3,7 @@ import * as serviceService from '../services/service.service';
 
 export async function create(req: Request, res: Response) {
   const service = await serviceService.createService(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.queueId as string,
     req.body,
   );
@@ -12,7 +12,7 @@ export async function create(req: Request, res: Response) {
 
 export async function update(req: Request, res: Response) {
   const service = await serviceService.updateService(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.serviceId as string,
     req.body,
   );
@@ -21,7 +21,7 @@ export async function update(req: Request, res: Response) {
 
 export async function updateStatus(req: Request, res: Response) {
   const service = await serviceService.setServiceStatus(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.serviceId as string,
     req.body.isActive,
   );
@@ -29,6 +29,6 @@ export async function updateStatus(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
-  await serviceService.deleteService(req.auth!.organizationId, req.params.serviceId as string);
+  await serviceService.deleteService(req.auth!, req.params.serviceId as string);
   res.status(204).send();
 }

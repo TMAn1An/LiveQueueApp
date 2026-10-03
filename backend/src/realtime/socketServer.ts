@@ -3,7 +3,14 @@ import { Server as SocketIOServer } from 'socket.io';
 import { corsOrigins } from '../config/env';
 import { logger } from '../config/logger';
 import { prisma } from '../config/prisma';
-import { organizationRoom, queueRoom, tokenRoom } from './rooms';
+import {
+  legacyWorkspaceRoom,
+  organizationRoom,
+  queueRoom,
+  staffQueueRoom,
+  tokenRoom,
+  workspaceRoom,
+} from './rooms';
 import { socketAuthMiddleware, type AppSocket } from './socketAuth';
 import type {
   AppSocketData,
@@ -81,8 +88,12 @@ export function attachSocketServer(httpServer: HttpServer): AppServer {
         });
         return;
       }
-      socket.join(organizationRoom(auth.organizationId));
-      respond(ack, { success: true });
+      // ADR-069: which staff rooms this person may hear is decided here from
+      // their DB-authoritative role and workspace, never from the request.
+      void (async () => {
+        for (const room of await staffRoomsFor(auth)) socket.join(room);
+        respond(ack, { success: true });
+      })();
     });
 
     // Queue room: public, customer-facing (ADR-007). Only membership is
@@ -142,4 +153,29 @@ export function attachSocketServer(httpServer: HttpServer): AppServer {
 
   ioInstance = io;
   return io;
+}
+
+/** ADR-069: the staff rooms a signed-in person belongs to. */
+async function staffRoomsFor(auth: {
+  staffId: string;
+  organizationId: string;
+  role: string;
+  workspaceAdminId?: string | null;
+}): Promise<string[]> {
+  const rooms: string[] = [];
+  if (auth.role === 'OWNER' || auth.role === 'MANAGER') {
+    rooms.push(organizationRoom(auth.organizationId));
+  } else if (auth.role === 'ADMIN') {
+    rooms.push(workspaceRoom(auth.staffId));
+  } else if (auth.workspaceAdminId) {
+    rooms.push(workspaceRoom(auth.workspaceAdminId));
+  } else {
+    rooms.push(legacyWorkspaceRoom(auth.organizationId));
+  }
+  const counter = await prisma.counter.findUnique({
+    where: { staffId: auth.staffId },
+    select: { queueId: true },
+  });
+  if (counter) rooms.push(staffQueueRoom(counter.queueId));
+  return rooms;
 }

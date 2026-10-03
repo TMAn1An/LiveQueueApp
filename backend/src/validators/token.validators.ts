@@ -17,9 +17,13 @@ export const createTokenSchema = {
     .object({
       queueId: z.string().uuid('queueId must be a valid id.'),
       serviceId: z.string().uuid('serviceId must be a valid id.').optional(),
+      // ADR-070: the ordered journey. The same service may appear again (not
+      // twice in a row, within its repeat limit — checked by the service
+      // layer against the queue's own settings).
       serviceIds: z
         .array(z.string().uuid('each service id must be a valid id.'))
         .min(1, 'Select at least one service.')
+        .max(20, 'A journey can have at most 20 steps.')
         .optional(),
       deviceIdentifier: z.string().trim().min(1, 'deviceIdentifier is required.').max(200),
       // ADR-034: opaque server-signed proof, only present for queues that
@@ -33,10 +37,6 @@ export const createTokenSchema = {
       message: 'Provide exactly one of serviceId or serviceIds.',
       path: ['serviceIds'],
     })
-    .refine(
-      (data) => !data.serviceIds || new Set(data.serviceIds).size === data.serviceIds.length,
-      { message: 'serviceIds must not contain duplicate service ids.', path: ['serviceIds'] },
-    )
     .transform((data) => ({
       queueId: data.queueId,
       deviceIdentifier: data.deviceIdentifier,
@@ -114,6 +114,10 @@ export const completeTokenSchema = {
   body: z
     .object({
       feedback: z.string().max(5000).optional(),
+      /** ADR-070: refer the person's next step to this counter. */
+      referToCounterId: z.string().uuid('referToCounterId must be a valid id.').optional(),
+      /** ADR-070: optional note kept with the referral. */
+      referralNote: z.string().trim().max(500).optional(),
     })
     .default({}),
 };

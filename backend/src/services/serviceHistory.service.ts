@@ -1,5 +1,6 @@
 import { Prisma, type TokenStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
+import { visibleQueueIds, type WorkspaceActor } from './workspaceScope.service';
 import { buildDisplayFormFields, fetchFormFieldDefs } from '../utils/formFieldDisplay';
 
 /**
@@ -37,6 +38,7 @@ interface ListServiceHistoryOptions {
  */
 function buildWhere(
   organizationId: string,
+  scopeQueueIds: string[],
   { search, queueId, status, from, to }: ListServiceHistoryOptions,
 ): Prisma.TokenWhereInput {
   const statusFilter: TokenStatus[] = status ? [status] : ['COMPLETED'];
@@ -50,7 +52,9 @@ function buildWhere(
   return {
     organizationId,
     status: { in: statusFilter },
-    ...(queueId ? { queueId } : {}),
+    // ADR-069: the reader's workspace scope bounds everything; a queueId
+    // filter can only narrow within it.
+    queueId: queueId ? { in: scopeQueueIds.filter((id) => id === queueId) } : { in: scopeQueueIds },
     ...(createdRange ? { createdAt: createdRange } : {}),
     ...(search
       ? {
@@ -94,6 +98,24 @@ const HISTORY_SELECT = {
   tokenServices: {
     select: { service: { select: { id: true, serviceName: true, durationMinutes: true } } },
   },
+  // ADR-070: the ordered journey with who handled each step.
+  journeySteps: {
+    orderBy: { stepNumber: 'asc' },
+    select: {
+      stepNumber: true,
+      status: true,
+      staffId: true,
+      calledAt: true,
+      startedAt: true,
+      completedAt: true,
+      referredAt: true,
+      referralNote: true,
+      service: { select: { id: true, serviceName: true } },
+      counter: { select: { id: true, name: true } },
+      referredFromCounter: { select: { id: true, name: true } },
+      referredToCounter: { select: { id: true, name: true } },
+    },
+  },
 } satisfies Prisma.TokenSelect;
 
 /** Whole minutes actually spent in service, or null when it never started. */
@@ -103,10 +125,11 @@ function actualDurationMinutes(startedAt: Date | null, completedAt: Date | null)
 }
 
 export async function listServiceHistory(
-  organizationId: string,
-  options: ListServiceHistoryOptions,
+  actor: WorkspaceActor,
+  options: ListServiceHistoryOptions & { adminId?: string },
 ) {
-  const where = buildWhere(organizationId, options);
+  const scopeQueueIds = await visibleQueueIds(actor, options.adminId);
+  const where = buildWhere(actor.organizationId, scopeQueueIds, options);
   const { page, pageSize } = options;
 
   const [tokens, total] = await Promise.all([
@@ -127,6 +150,18 @@ export async function listServiceHistory(
   const formFieldDefs = await fetchFormFieldDefs(
     tokens.map((token) => ({ queueId: token.queueId, formVersion: token.formVersion })),
   );
+  // Who served each step, by name — one lookup for the whole page.
+  const stepStaffIds = [
+    ...new Set(tokens.flatMap((t) => t.journeySteps.map((s) => s.staffId)).filter((id): id is string => !!id)),
+  ];
+  const staffNames = new Map(
+    (
+      await prisma.staff.findMany({
+        where: { id: { in: stepStaffIds }, organizationId: actor.organizationId },
+        select: { id: true, name: true },
+      })
+    ).map((row) => [row.id, row.name]),
+  );
 
   return {
     data: tokens.map((token) => ({
@@ -141,6 +176,27 @@ export async function listServiceHistory(
         durationMinutes: ts.service.durationMinutes,
       })),
       counter: token.counter ? { id: token.counter.id, name: token.counter.name } : null,
+      /** ADR-070: the ordered journey and who handled each step; empty for
+       * visits from before journeys existed. */
+      journey: token.journeySteps.map((step) => ({
+        stepNumber: step.stepNumber,
+        status: step.status,
+        service: { id: step.service.id, name: step.service.serviceName },
+        counter: step.counter,
+        executiveName: step.staffId ? (staffNames.get(step.staffId) ?? null) : null,
+        calledAt: step.calledAt,
+        startedAt: step.startedAt,
+        completedAt: step.completedAt,
+        minutes: actualDurationMinutes(step.startedAt, step.completedAt),
+        referral: step.referredAt
+          ? {
+              from: step.referredFromCounter,
+              to: step.referredToCounter,
+              at: step.referredAt,
+              note: step.referralNote,
+            }
+          : null,
+      })),
       formFields: buildDisplayFormFields(
         token.queueId,
         token.formVersion,

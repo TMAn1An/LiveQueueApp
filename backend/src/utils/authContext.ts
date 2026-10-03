@@ -10,6 +10,9 @@ export interface AuthContext {
   role: StaffRole;
   status: StaffStatus;
   permissions: Permission[];
+  /** ADR-069: the Admin workspace an Executive belongs to (null for every
+   * other role, and for organization-level Executives). */
+  workspaceAdminId: string | null;
 }
 
 /**
@@ -46,5 +49,6 @@ export async function resolveAuthContext(rawToken: string): Promise<AuthContext 
     // Request.auth shape (V2 Checkpoint 2, ADR-024).
     status: staff.status,
     permissions: getEffectivePermissions(staff.role),
+    workspaceAdminId: staff.workspaceAdminId,
   };
 }

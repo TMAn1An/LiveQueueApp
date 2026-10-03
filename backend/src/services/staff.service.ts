@@ -2,6 +2,8 @@ import type { Prisma, Staff, StaffRole } from '@prisma/client';
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { assertNoActiveServiceForStaff } from './counterAccess.service';
+import { releaseOperatorCounter } from './counter.service';
+import { isOrganizationWide, visibleStaffWhere, type WorkspaceActor } from './workspaceScope.service';
 import { AppError } from '../utils/AppError';
 import { hashPassword } from '../utils/password';
 import {
@@ -17,7 +19,15 @@ type CreateStaffInput = z.infer<typeof createStaffSchema.body>;
 type UpdateStaffInput = z.infer<typeof updateStaffSchema.body>;
 
 /** Every role name, used to translate a free-text search into an enum filter. */
-const STAFF_ROLES: StaffRole[] = ['OWNER', 'ADMIN', 'STAFF'];
+const STAFF_ROLES: StaffRole[] = ['OWNER', 'ADMIN', 'STAFF', 'MANAGER'];
+
+/** ADR-069: the names people see, so searching "executive" or "head" works. */
+const ROLE_LABELS: Record<StaffRole, string> = {
+  OWNER: 'organization head',
+  MANAGER: 'organization manager',
+  ADMIN: 'admin',
+  STAFF: 'executive',
+};
 
 /**
  * Spec 7.3's "Owner cannot be deleted by normal staff" establishes the
@@ -52,6 +62,8 @@ function serializeStaff(staff: Staff) {
     role: staff.role,
     permissions: getEffectivePermissions(staff.role),
     status: staff.status,
+    /** ADR-069: the Admin workspace an Executive belongs to (null: none). */
+    workspaceAdminId: staff.workspaceAdminId,
     /// ADR-035: true while this person still has an unaccepted invitation,
     /// which is what the dashboard's Resend action keys off. Never exposes
     /// the token itself.
@@ -63,8 +75,9 @@ function serializeStaff(staff: Staff) {
   };
 }
 
-async function findStaffScoped(organizationId: string, staffId: string): Promise<Staff> {
-  const staff = await prisma.staff.findFirst({ where: { id: staffId, organizationId } });
+async function findStaffScoped(actor: WorkspaceActor, staffId: string): Promise<Staff> {
+  // ADR-069: someone outside the actor's workspace scope is "not found".
+  const staff = await prisma.staff.findFirst({ where: { AND: [{ id: staffId }, visibleStaffWhere(actor)] } });
   if (!staff) {
     throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
   }
@@ -85,15 +98,23 @@ async function findStaffScoped(organizationId: string, staffId: string): Promise
  * `in` filter, which is what makes "admin"/"staff" work case-insensitively
  * from the user's point of view.
  */
-function buildStaffWhere(organizationId: string, search?: string): Prisma.StaffWhereInput {
+function buildStaffWhere(actor: WorkspaceActor, search?: string, adminId?: string): Prisma.StaffWhereInput {
+  const scope = visibleStaffWhere(actor);
+  // ADR-069: Head/Manager may narrow to one Admin's workspace — the Admin
+  // and their Executives.
+  const workspace: Prisma.StaffWhereInput =
+    adminId && isOrganizationWide(actor) ? { OR: [{ id: adminId }, { workspaceAdminId: adminId }] } : {};
   if (!search) {
-    return { organizationId };
+    return { AND: [scope, workspace] };
   }
 
-  const matchingRoles = STAFF_ROLES.filter((role) => role.includes(search.toUpperCase()));
+  const term = search.toLowerCase();
+  const matchingRoles = STAFF_ROLES.filter(
+    (role) => role.toLowerCase().includes(term) || ROLE_LABELS[role].includes(term),
+  );
 
   return {
-    organizationId,
+    AND: [scope, workspace],
     OR: [
       { name: { contains: search, mode: 'insensitive' } },
       { email: { contains: search, mode: 'insensitive' } },
@@ -103,12 +124,13 @@ function buildStaffWhere(organizationId: string, search?: string): Prisma.StaffW
 }
 
 export async function listStaff(
-  organizationId: string,
+  actor: WorkspaceActor,
   page: number,
   pageSize: number,
   search?: string,
+  adminId?: string,
 ) {
-  const where = buildStaffWhere(organizationId, search);
+  const where = buildStaffWhere(actor, search, adminId);
   const [staff, total] = await Promise.all([
     prisma.staff.findMany({
       where,
@@ -125,8 +147,8 @@ export async function listStaff(
   };
 }
 
-export async function getStaff(organizationId: string, staffId: string) {
-  const staff = await findStaffScoped(organizationId, staffId);
+export async function getStaff(actor: WorkspaceActor, staffId: string) {
+  const staff = await findStaffScoped(actor, staffId);
   return serializeStaff(staff);
 }
 
@@ -141,7 +163,49 @@ export async function getStaff(organizationId: string, staffId: string) {
  * says whether delivery worked so the dashboard can offer Resend instead of
  * pretending it arrived.
  */
-export async function createStaff(organizationId: string, input: CreateStaffInput) {
+/**
+ * ADR-069 D4: who may invite whom, and into which workspace.
+ *  - Admins and Organization Managers: only the Organization Head.
+ *  - Executives: the Head (into a chosen Admin's workspace, or
+ *    organization-level) or an Admin (always into their own workspace).
+ *  - Managers invite nobody (no manage_staff).
+ */
+async function resolveInviteWorkspace(actor: WorkspaceActor, input: CreateStaffInput): Promise<string | null> {
+  if (input.role !== 'STAFF') {
+    if (actor.role !== 'OWNER') {
+      throw new AppError(
+        403,
+        'HIGHER_ROLE_REQUIRES_HEAD',
+        'Only the Organization Head can invite Admins or Organization Managers.',
+      );
+    }
+    return null;
+  }
+  if (actor.role === 'ADMIN') {
+    if (input.workspaceAdminId && input.workspaceAdminId !== actor.staffId) {
+      throw new AppError(403, 'FORBIDDEN', 'You can only invite Executives into your own workspace.');
+    }
+    return actor.staffId;
+  }
+  if (actor.role === 'OWNER') {
+    if (!input.workspaceAdminId) return null;
+    await requireWorkspaceAdmin(actor.organizationId, input.workspaceAdminId);
+    return input.workspaceAdminId;
+  }
+  throw new AppError(403, 'FORBIDDEN', 'You do not have permission to perform this action.');
+}
+
+async function requireWorkspaceAdmin(organizationId: string, adminId: string, client: Prisma.TransactionClient = prisma) {
+  const admin = await client.staff.findFirst({
+    where: { id: adminId, organizationId, role: 'ADMIN', status: { not: 'SUSPENDED' } },
+    select: { id: true },
+  });
+  if (!admin) throw new AppError(404, 'ADMIN_NOT_FOUND', 'That Admin could not be found.');
+}
+
+export async function createStaff(actor: WorkspaceActor, input: CreateStaffInput) {
+  const organizationId = actor.organizationId;
+  const workspaceAdminId = await resolveInviteWorkspace(actor, input);
   const existing = await prisma.staff.findUnique({ where: { email: input.email } });
   if (existing) {
     throw new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'This email is already registered.');
@@ -160,6 +224,7 @@ export async function createStaff(organizationId: string, input: CreateStaffInpu
       email: input.email,
       passwordHash: await unusablePasswordHash(),
       role: input.role,
+      workspaceAdminId,
       // Role-derived, not client-suppliable (frozen RBAC policy) — kept in
       // sync on the stored row purely for observability; no code path reads
       // this column back as authoritative (see getEffectivePermissions).
@@ -206,8 +271,16 @@ function assertMayUpdate(
   input: UpdateStaffInput,
 ): void {
   if (actor.role === 'OWNER') return;
+  // ADR-069 D4: roles are changed by the Organization Head only — an Admin
+  // can no longer promote an Executive or demote anyone.
+  if (input.role !== undefined && input.role !== existing.role) {
+    throw new AppError(403, 'HIGHER_ROLE_REQUIRES_HEAD', 'Only the Organization Head can change roles.');
+  }
   const isSelf = actor.staffId === existing.id;
-  if (!isSelf && existing.role !== 'ADMIN') return;
+  if (!isSelf && existing.role === 'STAFF') return;
+  if (!isSelf && existing.role !== 'ADMIN') {
+    throw new AppError(403, 'ADMIN_CHANGE_REQUIRES_OWNER', "Only the Organization Head can change this person's account.");
+  }
 
   const changes = {
     status: input.status !== undefined && input.status !== existing.status,
@@ -249,12 +322,12 @@ function assertMayUpdate(
 }
 
 export async function updateStaff(
-  organizationId: string,
+  scopeActor: WorkspaceActor,
   staffId: string,
   input: UpdateStaffInput,
   actor: { staffId: string; role: StaffRole },
 ) {
-  const existing = await findStaffScoped(organizationId, staffId);
+  const existing = await findStaffScoped(scopeActor, staffId);
   assertNotOwner(existing);
   assertMayUpdate(actor, existing, input);
 
@@ -302,6 +375,7 @@ export async function updateStaff(
     if (leavesServing) {
       await assertNoActiveServiceForStaff(tx, staffId);
     }
+    const roleChanges = input.role !== undefined && input.role !== existing.role;
     const updated = await tx.staff.update({
       where: { id: staffId },
       data: {
@@ -312,8 +386,24 @@ export async function updateStaff(
         status: input.status ?? (activatesInvitee ? 'ACTIVE' : undefined),
         ...(passwordHash ? { passwordHash } : {}),
         ...(activatesInvitee ? { invitationTokenHash: null, invitationExpiresAt: null } : {}),
+        // ADR-069: an Executive's workspace belongs to the Executive role;
+        // any role change leaves it.
+        ...(roleChanges ? { workspaceAdminId: null } : {}),
       },
     });
+    if (roleChanges && existing.role === 'ADMIN') {
+      // ADR-069: an Admin's queue and Executives return to the Head (the
+      // same transitional state as before workspaces) rather than vanish.
+      await tx.queue.updateMany({ where: { adminId: staffId, deletedAt: null }, data: { adminId: null } });
+      await tx.staff.updateMany({ where: { workspaceAdminId: staffId }, data: { workspaceAdminId: null } });
+    }
+    // Suspended, or no longer allowed to operate the queue of the counter
+    // they hold: that counter is turned off and they are released.
+    if (leavesServing) {
+      await releaseOperatorCounter(tx, staffId);
+    } else if (roleChanges) {
+      await releaseOperatorCounter(tx, staffId, { keepIfEligible: true });
+    }
     return updated;
   });
 
@@ -322,6 +412,29 @@ export async function updateStaff(
 
 /** ADR-035 — thin pass-through so the controller keeps talking to one
  * service, while the invitation mechanics live with the rest of their kind. */
+/**
+ * ADR-069 D3: the Organization Head moves an Executive into an Admin's
+ * workspace (or back to organization-level with null). If they hold a counter
+ * outside that workspace, it is turned off and they are released (refused
+ * while they are serving someone).
+ */
+export async function setExecutiveWorkspace(actor: WorkspaceActor, staffId: string, adminId: string | null) {
+  if (actor.role !== 'OWNER') {
+    throw new AppError(403, 'FORBIDDEN', 'Only the Organization Head can move Executives between workspaces.');
+  }
+  const target = await findStaffScoped(actor, staffId);
+  if (target.role !== 'STAFF') {
+    throw new AppError(422, 'NOT_AN_EXECUTIVE', 'Only Executives belong to an Admin workspace.');
+  }
+  const updated = await prisma.$transaction(async (tx) => {
+    if (adminId) await requireWorkspaceAdmin(actor.organizationId, adminId, tx);
+    const row = await tx.staff.update({ where: { id: staffId }, data: { workspaceAdminId: adminId } });
+    await releaseOperatorCounter(tx, staffId, { keepIfEligible: true });
+    return row;
+  });
+  return serializeStaff(updated);
+}
+
 export function resendStaffInvitation(organizationId: string, staffId: string) {
   return resendInvitation(organizationId, staffId);
 }

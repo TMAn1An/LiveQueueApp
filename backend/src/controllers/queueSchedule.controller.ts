@@ -3,7 +3,7 @@ import * as scheduleService from '../services/queueSchedule.service';
 
 export async function list(req: Request, res: Response) {
   const sessions = await scheduleService.listQueueSessions(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.queueId as string,
   );
   res.status(200).json({ success: true, data: sessions });
@@ -11,7 +11,7 @@ export async function list(req: Request, res: Response) {
 
 export async function create(req: Request, res: Response) {
   const session = await scheduleService.createQueueSession(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.queueId as string,
     req.body,
   );
@@ -20,7 +20,7 @@ export async function create(req: Request, res: Response) {
 
 export async function update(req: Request, res: Response) {
   const session = await scheduleService.updateQueueSession(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.sessionId as string,
     req.body,
   );
@@ -28,6 +28,6 @@ export async function update(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
-  await scheduleService.deleteQueueSession(req.auth!.organizationId, req.params.sessionId as string);
+  await scheduleService.deleteQueueSession(req.auth!, req.params.sessionId as string);
   res.status(204).send();
 }

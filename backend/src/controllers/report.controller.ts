@@ -7,15 +7,20 @@ function rangeFromQuery(req: Request) {
   return resolveReportRange(query.range, { from: query.from, to: query.to });
 }
 
+/** ADR-069: Head/Manager may narrow to one Admin's workspace. */
+function filterFromQuery(req: Request) {
+  return { adminId: (req.query as { adminId?: string }).adminId };
+}
+
 export async function getReport(req: Request, res: Response) {
   const range = rangeFromQuery(req);
-  const report = await reportService.getReport(req.auth!.organizationId, range);
+  const report = await reportService.getReport(req.auth!, range, filterFromQuery(req));
   res.status(200).json({ success: true, data: report });
 }
 
 export async function exportReport(req: Request, res: Response) {
   const range = rangeFromQuery(req);
-  const report = await reportService.getReport(req.auth!.organizationId, range);
+  const report = await reportService.getReport(req.auth!, range, filterFromQuery(req));
   const csv = reportService.toCsv(report);
 
   res.status(200);

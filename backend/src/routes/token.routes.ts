@@ -116,6 +116,22 @@ router.post(
   validate(skipTokenSchema),
   tokenController.skip,
 );
+// ADR-070: the next step and the counters it could be referred to.
+router.get(
+  '/:tokenId/referral-options',
+  authenticate,
+  requireVerified,
+  requirePermission('operate_tokens'),
+  validate(tokenIdOnlySchema),
+  tokenController.referralOptions,
+);
+// ADR-070: a journey is locked at token creation, for every caller.
+for (const path of ['/:tokenId/services', '/:tokenId/journey', '/:tokenId/steps']) {
+  router.put(path, publicRateLimiter, tokenController.journeyLocked);
+  router.patch(path, publicRateLimiter, tokenController.journeyLocked);
+  router.post(path, publicRateLimiter, tokenController.journeyLocked);
+  router.delete(path, publicRateLimiter, tokenController.journeyLocked);
+}
 router.patch(
   '/:tokenId/duration',
   authenticate,

@@ -35,6 +35,9 @@ export interface AuditActor {
   staffId: string;
   organizationId: string;
   staffEmail: string;
+  /** ADR-069: used to attribute the event to a workspace by default. */
+  role?: string;
+  workspaceAdminId?: string | null;
 }
 
 /**
@@ -48,8 +51,25 @@ export function actorFromAuth(auth: {
   staffId: string;
   organizationId: string;
   email: string;
+  role?: string;
+  workspaceAdminId?: string | null;
 }): AuditActor {
-  return { staffId: auth.staffId, organizationId: auth.organizationId, staffEmail: auth.email };
+  return {
+    staffId: auth.staffId,
+    organizationId: auth.organizationId,
+    staffEmail: auth.email,
+    role: auth.role,
+    workspaceAdminId: auth.workspaceAdminId ?? null,
+  };
+}
+
+/** ADR-069: the workspace an event belongs to when the call site does not
+ * name one: an Admin's own, an Executive's Admin's; organization-level
+ * otherwise. Events about a queue name that queue's Admin explicitly. */
+function defaultWorkspace(actor: AuditActor): string | null {
+  if (actor.role === 'ADMIN') return actor.staffId;
+  if (actor.role === 'STAFF') return actor.workspaceAdminId ?? null;
+  return null;
 }
 
 export interface RecordAuditEventInput {
@@ -59,6 +79,9 @@ export interface RecordAuditEventInput {
   entityId?: string;
   metadata?: Record<string, unknown>;
   ipAddress?: string;
+  /** ADR-069: the Admin workspace this event belongs to. Undefined means
+   * "the actor's own"; null means organization-level. */
+  workspaceAdminId?: string | null;
 }
 
 /**
@@ -85,6 +108,8 @@ export async function recordAuditEvent(input: RecordAuditEventInput) {
       entityId: input.entityId,
       metadata: sanitizeMetadata(input.metadata) as Prisma.InputJsonValue | undefined,
       ipAddress: input.ipAddress,
+      workspaceAdminId:
+        input.workspaceAdminId !== undefined ? input.workspaceAdminId : defaultWorkspace(input.actor),
     },
   });
 }
@@ -123,13 +148,42 @@ export async function recordAuditEventSafely(input: RecordAuditEventInput): Prom
  * `organizationId` stays a top-level (AND-ed) condition with the search
  * `OR` nested inside it, so no search term can widen the tenant scope.
  */
-function buildAuditLogWhere(organizationId: string, search?: string): Prisma.AuditLogWhereInput {
+export interface AuditReader {
+  staffId: string;
+  organizationId: string;
+  role: string;
+}
+
+/**
+ * ADR-069: an Admin reads their own workspace's events only; the
+ * Organization Head and Managers read the whole organization and may narrow
+ * it to one Admin. Events from before workspaces existed have no workspace
+ * and stay with the organization-wide readers.
+ */
+function auditScope(reader: AuditReader, adminId?: string): Prisma.AuditLogWhereInput {
+  if (reader.role === 'OWNER' || reader.role === 'MANAGER') {
+    return adminId
+      ? { organizationId: reader.organizationId, workspaceAdminId: adminId }
+      : { organizationId: reader.organizationId };
+  }
+  if (reader.role === 'ADMIN') {
+    return { organizationId: reader.organizationId, workspaceAdminId: reader.staffId };
+  }
+  return { organizationId: reader.organizationId, id: { in: [] } };
+}
+
+function buildAuditLogWhere(
+  reader: AuditReader,
+  search?: string,
+  adminId?: string,
+): Prisma.AuditLogWhereInput {
+  const scope = auditScope(reader, adminId);
   if (!search) {
-    return { organizationId };
+    return scope;
   }
 
   return {
-    organizationId,
+    ...scope,
     OR: [
       { staffEmail: { contains: search, mode: 'insensitive' } },
       { action: { contains: search, mode: 'insensitive' } },
@@ -140,12 +194,13 @@ function buildAuditLogWhere(organizationId: string, search?: string): Prisma.Aud
 }
 
 export async function listAuditLogs(
-  organizationId: string,
+  reader: AuditReader,
   page: number,
   pageSize: number,
   search?: string,
+  adminId?: string,
 ) {
-  const where = buildAuditLogWhere(organizationId, search);
+  const where = buildAuditLogWhere(reader, search, adminId);
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({
       where,

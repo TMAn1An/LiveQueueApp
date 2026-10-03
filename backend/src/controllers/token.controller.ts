@@ -127,10 +127,14 @@ export async function reissueVerificationCode(req: Request, res: Response) {
 }
 
 export async function complete(req: Request, res: Response) {
-  const { token } = await tokenService.completeToken(
+  const { token, advanced, referredToCounterId } = await tokenService.completeToken(
     req.auth!,
     req.params.tokenId as string,
-    req.body.feedback,
+    {
+      feedback: req.body.feedback,
+      referToCounterId: req.body.referToCounterId,
+      referralNote: req.body.referralNote,
+    },
   );
   res.status(200).json({ success: true, data: token });
   await auditService.recordAuditEventSafely({
@@ -140,14 +144,58 @@ export async function complete(req: Request, res: Response) {
     entityId: token.id,
     // ADR-042: that feedback was left, never its words — the token row
     // already holds them, and free text has no place in the audit trail.
-    metadata: { withFeedback: token.completionFeedback !== null },
+    // ADR-070: whether this finished one journey step or the whole visit.
+    metadata: {
+      withFeedback: token.completionFeedback !== null,
+      ...(advanced ? { stepCompleted: (token.currentStepNumber ?? 1) - 1 } : {}),
+    },
     ipAddress: req.ip,
   });
-  await realtime.emitTokenCompleted(token.id);
+  if (referredToCounterId) {
+    await auditService.recordAuditEventSafely({
+      actor: auditService.actorFromAuth(req.auth!),
+      action: 'token_referred',
+      entityType: 'token',
+      entityId: token.id,
+      // The note stays on the journey step, not in the audit trail.
+      metadata: {
+        stepNumber: token.currentStepNumber,
+        toCounterId: referredToCounterId,
+        withNote: Boolean(req.body.referralNote?.trim()),
+      },
+      ipAddress: req.ip,
+    });
+  }
+  if (advanced) {
+    await realtime.emitTokenStepCompleted(token.id);
+  } else {
+    await realtime.emitTokenCompleted(token.id);
+  }
   // Completing frees the counter this token occupied — every WAITING
   // token's ETA may move earlier (V2 Checkpoint 4, ADR-026).
   await realtime.broadcastQueueEtaUpdate(token.queueId);
   await tokenNotificationDispatch.notifyTokenStatusChange(token.id);
+}
+
+/** ADR-070: the next step, and the counters it could be referred to. */
+export async function referralOptions(req: Request, res: Response) {
+  const options = await tokenService.getReferralOptions(req.auth!, req.params.tokenId as string);
+  res.status(200).json({ success: true, data: options });
+}
+
+/**
+ * ADR-070: a journey is fixed once the token exists. Every attempt to edit
+ * it — reorder, add, remove, replace — is refused here, explicitly, rather
+ * than relying on there being no route for it.
+ */
+export function journeyLocked(_req: Request, res: Response) {
+  res.status(409).json({
+    success: false,
+    error: {
+      code: 'JOURNEY_LOCKED',
+      message: "A visit's services and their order can't be changed after joining.",
+    },
+  });
 }
 
 export async function skip(req: Request, res: Response) {

@@ -1,8 +1,16 @@
 import type { Counter, Queue } from '@prisma/client';
 import { logger } from '../config/logger';
+import { prisma } from '../config/prisma';
 import * as tokenService from '../services/token.service';
 import { SOCKET_EVENTS, type SocketEventEnvelope, type SocketEventType } from './events';
-import { organizationRoom, queueRoom, tokenRoom } from './rooms';
+import {
+  legacyWorkspaceRoom,
+  organizationRoom,
+  queueRoom,
+  staffQueueRoom,
+  tokenRoom,
+  workspaceRoom,
+} from './rooms';
 import { getIO } from './socketServer';
 
 /**
@@ -18,6 +26,34 @@ async function guarded(fn: () => Promise<void> | void): Promise<void> {
   } catch (err) {
     logger.error({ err }, 'Real-time event emission failed');
   }
+}
+
+/**
+ * ADR-069: the staff rooms that may hear about one queue — the Organization
+ * Head and Managers, the queue's own Admin workspace (or the legacy room for
+ * a queue without an Admin), and anyone serving at one of its counters.
+ * Never another Admin's workspace.
+ */
+async function staffRoomsForQueue(
+  queueId: string,
+  organizationId: string,
+  knownAdminId?: string | null,
+): Promise<string[]> {
+  const adminId =
+    knownAdminId !== undefined
+      ? knownAdminId
+      : ((await prisma.queue.findUnique({ where: { id: queueId }, select: { adminId: true } }))?.adminId ?? null);
+  return [
+    organizationRoom(organizationId),
+    adminId ? workspaceRoom(adminId) : legacyWorkspaceRoom(organizationId),
+    staffQueueRoom(queueId),
+  ];
+}
+
+function emitToRooms(rooms: string[], type: SocketEventType, envelope: SocketEventEnvelope): void {
+  const io = getIO();
+  if (!io) return;
+  io.to(rooms).emit(type, envelope);
 }
 
 function emitToRoom(room: string, type: SocketEventType, envelope: SocketEventEnvelope): void {
@@ -37,8 +73,8 @@ function emitToRoom(room: string, type: SocketEventType, envelope: SocketEventEn
 // ---------------------------------------------------------------------------
 
 export function emitQueueCreated(queue: Queue & Record<string, unknown>): Promise<void> {
-  return guarded(() => {
-    emitToRoom(organizationRoom(queue.organizationId), SOCKET_EVENTS.QUEUE_CREATED, {
+  return guarded(async () => {
+    emitToRooms(await staffRoomsForQueue(queue.id, queue.organizationId, queue.adminId), SOCKET_EVENTS.QUEUE_CREATED, {
       type: SOCKET_EVENTS.QUEUE_CREATED,
       organizationId: queue.organizationId,
       queueId: queue.id,
@@ -48,8 +84,8 @@ export function emitQueueCreated(queue: Queue & Record<string, unknown>): Promis
 }
 
 export function emitQueueUpdated(queue: Queue & Record<string, unknown>): Promise<void> {
-  return guarded(() => {
-    emitToRoom(organizationRoom(queue.organizationId), SOCKET_EVENTS.QUEUE_UPDATED, {
+  return guarded(async () => {
+    emitToRooms(await staffRoomsForQueue(queue.id, queue.organizationId, queue.adminId), SOCKET_EVENTS.QUEUE_UPDATED, {
       type: SOCKET_EVENTS.QUEUE_UPDATED,
       organizationId: queue.organizationId,
       queueId: queue.id,
@@ -59,14 +95,14 @@ export function emitQueueUpdated(queue: Queue & Record<string, unknown>): Promis
 }
 
 export function emitQueueStatusChanged(queue: Queue & Record<string, unknown>): Promise<void> {
-  return guarded(() => {
+  return guarded(async () => {
     const base = {
       type: SOCKET_EVENTS.QUEUE_STATUS_CHANGED,
       organizationId: queue.organizationId,
       queueId: queue.id,
     } as const;
 
-    emitToRoom(organizationRoom(queue.organizationId), SOCKET_EVENTS.QUEUE_STATUS_CHANGED, {
+    emitToRooms(await staffRoomsForQueue(queue.id, queue.organizationId, queue.adminId), SOCKET_EVENTS.QUEUE_STATUS_CHANGED, {
       ...base,
       data: queue,
     });
@@ -85,8 +121,8 @@ export function emitQueueStatusChanged(queue: Queue & Record<string, unknown>): 
 // ---------------------------------------------------------------------------
 
 function emitCounterEvent(type: SocketEventType, counter: Counter, organizationId: string): Promise<void> {
-  return guarded(() => {
-    emitToRoom(organizationRoom(organizationId), type, {
+  return guarded(async () => {
+    emitToRooms(await staffRoomsForQueue(counter.queueId, organizationId), type, {
       type,
       organizationId,
       queueId: counter.queueId,
@@ -120,7 +156,7 @@ function emitTokenLifecycleEvent(type: SocketEventType, tokenId: string): Promis
     const organizationId = staffView.organizationId;
     const queueId = staffView.queueId;
 
-    emitToRoom(organizationRoom(organizationId), type, {
+    emitToRooms(await staffRoomsForQueue(queueId, organizationId), type, {
       type,
       organizationId,
       queueId,
@@ -151,6 +187,11 @@ export const emitTokenCompleted = (tokenId: string) =>
   emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_COMPLETED, tokenId);
 export const emitTokenSkipped = (tokenId: string) =>
   emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_SKIPPED, tokenId);
+/** ADR-070: a journey step finished and the person waits for the next. */
+export async function emitTokenStepCompleted(tokenId: string): Promise<void> {
+  await emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_STEP_COMPLETED, tokenId);
+  await emitTokenLifecycleEvent(SOCKET_EVENTS.TOKEN_COMPLETED, tokenId);
+}
 /** V2 Checkpoint 7 (ADR-029) — mirrors every other lifecycle emitter exactly
  * (staff-full to the org room, customer-safe to the token room), both of
  * which are already guaranteed OTP-free by toStaffView/toCustomerView. */
@@ -182,6 +223,8 @@ export function broadcastQueueEtaUpdate(
     if (!io) return; // skip the recompute query entirely when nothing is listening
 
     const positions = await tokenService.listWaitingTokenPositions(queueId);
+    const staffRooms =
+      positions.length > 0 ? await staffRoomsForQueue(queueId, positions[0]!.organizationId) : [];
 
     for (const entry of positions) {
       const base = {
@@ -208,7 +251,7 @@ export function broadcastQueueEtaUpdate(
         ...(reason ? { reason } : {}),
       };
 
-      emitToRoom(organizationRoom(entry.organizationId), SOCKET_EVENTS.TOKEN_POSITION_CHANGED, {
+      emitToRooms(staffRooms, SOCKET_EVENTS.TOKEN_POSITION_CHANGED, {
         ...base,
         data,
       });

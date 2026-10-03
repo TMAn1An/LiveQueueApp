@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma';
+import { publicRecommendedJourney } from './journey.service';
 import { AppError } from '../utils/AppError';
 import { describeJoinRequirements, resolveQueueTimezone } from './queueIdentityPolicy.service';
 import { describePublicSchedule } from './queueSchedule.service';
@@ -19,7 +20,7 @@ export async function getPublicQueueConfig(queueId: string) {
   }
 
   const timezone = resolveQueueTimezone(queue, queue.organization);
-  const [services, formFields, schedule] = await Promise.all([
+  const [services, formFields, schedule, recommendedJourney] = await Promise.all([
     prisma.queueService.findMany({
       where: { queueId, isActive: true },
       orderBy: { serviceName: 'asc' },
@@ -29,6 +30,7 @@ export async function getPublicQueueConfig(queueId: string) {
       orderBy: { sortOrder: 'asc' },
     }),
     describePublicSchedule(queue, timezone),
+    publicRecommendedJourney(queueId),
   ]);
 
   return {
@@ -66,7 +68,12 @@ export async function getPublicQueueConfig(queueId: string) {
       serviceName: service.serviceName,
       description: service.description,
       durationMinutes: service.durationMinutes,
+      /** ADR-070: how often this service may appear in one journey. */
+      maxOccurrencesPerJourney: service.maxOccurrencesPerJourney,
     })),
+    /** ADR-070: the order the service chooser starts from (service ids, may
+     * repeat). Empty when the queue has none. */
+    recommendedJourney,
     formFields: formFields.map((field) => ({
       id: field.id,
       key: field.key,

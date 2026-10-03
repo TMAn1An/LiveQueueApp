@@ -99,7 +99,28 @@ export const createQueueSchema = {
       .max(60)
       .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
       .optional(),
-    tokenPrefix: z.string().trim().min(1, 'Token prefix is required.').max(10),
+    // ADR-069: optional — basic creation asks only for a name; the server
+    // derives a prefix from it when none is given.
+    tokenPrefix: z.string().trim().min(1, 'Token prefix is required.').max(10).optional(),
+    /** ADR-069: the Organization Head names the Admin whose queue this is;
+     * an Admin's queue is always their own. */
+    adminId: z.string().uuid('adminId must be a valid id.').optional(),
+    /** ADR-069: every new queue starts with one working counter. Omitted
+     * means "Counter 1", operated by the queue's Admin. */
+    firstCounter: z
+      .object({
+        name: z
+          .string()
+          .trim()
+          .min(1, 'Counter name is required.')
+          .max(120)
+          .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE)
+          .optional(),
+        /** Null/omitted: the queue's Admin ("Assign myself"). Otherwise
+         * one of that Admin's Executives. */
+        operatorStaffId: z.string().uuid('operatorStaffId must be a valid id.').nullable().optional(),
+      })
+      .optional(),
     startingNumber: z.number().int().positive().default(1),
     baseTimeMinutes: z.number().int().positive().default(5),
     defaultNotificationMinutes: queueReminderMinutes.default(10),
@@ -184,5 +205,37 @@ export const updateQueueStatusSchema = {
   params: queueIdParams,
   body: z.object({
     status: queueStatus,
+  }),
+};
+
+/** ADR-069: optional Admin filter for the Organization Head and Managers. */
+export const listQueuesSchema = {
+  query: z.object({ adminId: z.string().uuid('adminId must be a valid id.').optional() }),
+};
+
+/** ADR-069 D8: a queue is never removed without saying why. */
+export const deleteQueueSchema = {
+  params: queueIdParams,
+  body: z.object({
+    reason: z
+      .string({ error: 'Say why this queue is being deleted.' })
+      .trim()
+      .min(1, 'Say why this queue is being deleted.')
+      .max(500)
+      .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE),
+  }),
+};
+
+/** ADR-069 D2: the Organization Head assigns a queue without an Admin. */
+export const assignQueueAdminSchema = {
+  params: queueIdParams,
+  body: z.object({ adminId: z.string().uuid('adminId must be a valid id.') }),
+};
+
+/** ADR-070: the recommended journey — ordered service ids (may repeat). */
+export const setRecommendedJourneySchema = {
+  params: queueIdParams,
+  body: z.object({
+    serviceIds: z.array(z.string().uuid('each service id must be a valid id.')).max(20),
   }),
 };

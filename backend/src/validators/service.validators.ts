@@ -27,6 +27,8 @@ export const createServiceSchema = {
       .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE)
       .optional(),
     durationMinutes: z.number().int().positive('durationMinutes must be a positive integer.'),
+    /** ADR-070: how often this service may appear in one journey. */
+    maxOccurrencesPerJourney: z.number().int().min(1).max(10).default(2),
     isActive: z.boolean().default(true),
   }),
 };
@@ -48,6 +50,7 @@ export const updateServiceSchema = {
       .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE)
       .optional(),
     durationMinutes: z.number().int().positive().optional(),
+    maxOccurrencesPerJourney: z.number().int().min(1).max(10).optional(),
   }),
 };
 

@@ -3,7 +3,8 @@ import * as serviceHistoryService from '../services/serviceHistory.service';
 import type { ServiceHistoryStatus } from '../services/serviceHistory.service';
 
 export async function list(req: Request, res: Response) {
-  const { page, pageSize, search, queueId, status, from, to } = req.query as unknown as {
+  const { page, pageSize, search, queueId, status, from, to, adminId } = req.query as unknown as {
+    adminId?: string;
     page: number;
     pageSize: number;
     search?: string;
@@ -15,7 +16,8 @@ export async function list(req: Request, res: Response) {
 
   // organizationId always comes from the authenticated context, never from
   // the request — CLAUDE.md section 3.
-  const result = await serviceHistoryService.listServiceHistory(req.auth!.organizationId, {
+  const result = await serviceHistoryService.listServiceHistory(req.auth!, {
+    adminId,
     page,
     pageSize,
     search,

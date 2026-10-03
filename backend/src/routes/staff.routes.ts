@@ -11,15 +11,17 @@ import {
   listStaffSchema,
   removalRequestIdOnlySchema,
   reviewRemovalRequestSchema,
+  setExecutiveWorkspaceSchema,
   staffIdOnlySchema,
   updateStaffSchema,
 } from '../validators/staff.validators';
 
 const router = Router();
 
-// Any authenticated staff member of the organization may read (matching the
-// Phase 2 read-permission convention — only mutations require manage_staff,
-// and only mutations get the sensitive rate limiter below).
+// Any authenticated staff member may read (matching the Phase 2
+// read-permission convention — only mutations require manage_staff, and only
+// mutations get the sensitive rate limiter below). ADR-069: what each person
+// sees is narrowed to their workspace scope in the service.
 router.get('/', authenticate, validate(listStaffSchema), staffController.list);
 router.post(
   '/',
@@ -68,6 +70,15 @@ router.post(
   staffController.cancelRemovalRequest,
 );
 
+// ADR-069 D3: the Organization Head moves an Executive between workspaces.
+router.patch(
+  '/:staffId/workspace',
+  sensitiveRateLimiter,
+  authenticate,
+  requirePermission('manage_admins'),
+  validate(setExecutiveWorkspaceSchema),
+  staffController.setWorkspace,
+);
 router.get('/:staffId', authenticate, validate(staffIdOnlySchema), staffController.get);
 router.put(
   '/:staffId',

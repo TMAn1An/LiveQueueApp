@@ -25,7 +25,7 @@ import {
   requireClaimCounter,
   type CounterActor,
 } from './counterAccess.service';
-import { requireOwnedQueue } from '../utils/tenantScope';
+import { requireVisibleQueue, visibleQueueWhere, type WorkspaceActor } from './workspaceScope.service';
 import { registerDevice } from './device.service';
 import {
   computeEligibleAgainAt,
@@ -55,10 +55,22 @@ import {
   computeEffectiveDurationMinutes,
   computeEffectiveEndTime,
   minutesUntil,
-  simulateWaitingTokenEtas,
-  type CounterOccupancy,
-  type WaitingTokenInput,
+  simulateRoutedEtas,
+  type RoutedCounter,
+  type RoutedWaitingToken,
 } from './queueEtaEngine';
+import {
+  counterServes,
+  customerJourneyView,
+  headForCounter,
+  loadCallableTokens,
+  loadDispatchCounters,
+  loadQueueServices,
+  staffedCounterIdsOf,
+  validateJourneySteps,
+  waitingEligibility,
+  type DispatchCounter,
+} from './journey.service';
 
 const QUEUE_ARCHIVED_MSG = 'This queue has been archived and can no longer accept new tokens.';
 const QUEUE_NOT_ACTIVE_MSG = 'This queue is currently not accepting new arrivals.';
@@ -225,7 +237,10 @@ export interface CreateTokenInput {
 
 /** The shape every idempotency comparison needs — the existing token's full
  * selected-service set, not just its legacy primary Token.serviceId. */
-type TokenWithServices = Token & { tokenServices: { serviceId: string }[] };
+type TokenWithServices = Token & {
+  tokenServices: { serviceId: string }[];
+  journeySteps?: { stepNumber: number; serviceId: string }[];
+};
 
 interface QueueLockRow {
   id: string;
@@ -245,8 +260,12 @@ interface QueueLockRow {
  * denormalized at creation from queue.organizationId) — never authorize
  * using tokenId alone (CLAUDE.md Rule 4).
  */
-async function findTokenScoped(organizationId: string, tokenId: string): Promise<Token> {
-  const token = await prisma.token.findFirst({ where: { id: tokenId, organizationId } });
+async function findTokenScoped(actor: WorkspaceActor, tokenId: string): Promise<Token> {
+  // ADR-069: a token in a queue outside the actor's workspace scope is "not
+  // found" — its operational details belong to that workspace.
+  const token = await prisma.token.findFirst({
+    where: { id: tokenId, organizationId: actor.organizationId, queue: visibleQueueWhere(actor) },
+  });
   if (!token) {
     throw new AppError(404, 'TOKEN_NOT_FOUND', 'Token not found.');
   }
@@ -390,11 +409,22 @@ function assertIdempotentPayloadMatches(
   input: CreateTokenInput,
   validatedFormData: Record<string, unknown>,
 ): void {
-  const existingServiceIds = existing.tokenServices.map((ts) => ts.serviceId).sort();
-  const inputServiceIds = [...input.serviceIds].sort();
-  const sameServices =
-    existingServiceIds.length === inputServiceIds.length &&
-    existingServiceIds.every((id, i) => id === inputServiceIds[i]);
+  // ADR-070: a journey is ordered, so the same key must carry the same
+  // steps in the same order. A token from before journeys keeps the old
+  // set comparison.
+  const steps = existing.journeySteps ?? [];
+  let sameServices: boolean;
+  if (steps.length > 0) {
+    const ordered = [...steps].sort((a, b) => a.stepNumber - b.stepNumber).map((s) => s.serviceId);
+    sameServices =
+      ordered.length === input.serviceIds.length && ordered.every((id, i) => id === input.serviceIds[i]);
+  } else {
+    const existingServiceIds = existing.tokenServices.map((ts) => ts.serviceId).sort();
+    const inputServiceIds = [...input.serviceIds].sort();
+    sameServices =
+      existingServiceIds.length === inputServiceIds.length &&
+      existingServiceIds.every((id, i) => id === inputServiceIds[i]);
+  }
 
   const same = existing.queueId === input.queueId && sameServices && deepEqual(existing.formData, validatedFormData);
 
@@ -428,31 +458,15 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     throw new AppError(409, 'QUEUE_NOT_ACTIVE', QUEUE_NOT_ACTIVE_MSG);
   }
 
-  // V2 Checkpoint 5 (ADR-027): every selected service must belong to this
-  // exact queue and be active — checked as a set, never trusting a
-  // client-supplied duration or count. `services.length !== serviceIds.length`
-  // catches both "doesn't exist at all" and "belongs to a different queue"
-  // in one comparison, matching the existing single-service 404 semantics.
-  const services = await prisma.queueService.findMany({
-    where: { id: { in: input.serviceIds }, queueId: input.queueId },
+  // ADR-070: `serviceIds` is the person's ordered journey. Every step must
+  // be an active service of this exact queue (another queue's service is
+  // "not found"), never the same service twice in a row, and each service
+  // within its repeat limit. V2 Checkpoint 6's single-service queues allow
+  // exactly one step. The legacy singular `serviceId` shape is a one-step
+  // journey. Never trusts a client-supplied duration or count.
+  validateJourneySteps(input.serviceIds, await loadQueueServices(prisma, input.queueId), {
+    allowMultipleServices: queue.allowMultipleServices,
   });
-  if (services.length !== input.serviceIds.length) {
-    throw new AppError(404, 'SERVICE_NOT_FOUND', 'One or more selected services could not be found.');
-  }
-  if (services.some((s) => !s.isActive)) {
-    throw new AppError(409, 'SERVICE_NOT_ACTIVE', 'One or more selected services are not currently available.');
-  }
-  // V2 Checkpoint 6: a static queue-configuration gate, not a resource
-  // allocation — needs no transactional lock (unlike the checks below).
-  // The legacy singular `serviceId` shape already normalizes to a
-  // 1-element serviceIds array, so it always satisfies this unchanged.
-  if (!queue.allowMultipleServices && input.serviceIds.length !== 1) {
-    throw new AppError(
-      409,
-      'MULTIPLE_SERVICES_NOT_ALLOWED',
-      'This queue only allows selecting a single service.',
-    );
-  }
 
   const device = await registerDevice(input.deviceIdentifier);
   // OrganizationDeviceBlock, not device.status, is authoritative — a device
@@ -481,7 +495,10 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   // authoritative check happens again below, inside the transaction.
   const preCheck = await prisma.token.findUnique({
     where: { deviceId_idempotencyKey: { deviceId: device.id, idempotencyKey } },
-    include: { tokenServices: { select: { serviceId: true } } },
+    include: {
+      tokenServices: { select: { serviceId: true } },
+      journeySteps: { select: { stepNumber: true, serviceId: true } },
+    },
   });
   if (preCheck) {
     assertIdempotentPayloadMatches(preCheck, input, formData);
@@ -515,7 +532,10 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
     // that no token ends up using (no gaps under a duplicate-key race).
     const existing = await tx.token.findUnique({
       where: { deviceId_idempotencyKey: { deviceId: device.id, idempotencyKey } },
-      include: { tokenServices: { select: { serviceId: true } } },
+      include: {
+        tokenServices: { select: { serviceId: true } },
+        journeySteps: { select: { stepNumber: true, serviceId: true } },
+      },
     });
     if (existing) {
       assertIdempotentPayloadMatches(existing, input, formData);
@@ -629,7 +649,13 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
         assignedSessionStartMinute: sessionAssignment?.assignedSessionStartMinute ?? null,
         assignedSessionEndMinute: sessionAssignment?.assignedSessionEndMinute ?? null,
         assignedSessionStartsAt: sessionAssignment?.assignedSessionStartsAt ?? null,
-        tokenServices: { create: input.serviceIds.map((serviceId) => ({ serviceId })) },
+        // The distinct set, for every reader of the pre-journey shape.
+        tokenServices: { create: [...new Set(input.serviceIds)].map((serviceId) => ({ serviceId })) },
+        // ADR-070: the ordered journey, fixed from here on.
+        currentStepNumber: 1,
+        journeySteps: {
+          create: input.serviceIds.map((serviceId, i) => ({ stepNumber: i + 1, serviceId })),
+        },
       },
     });
 
@@ -729,7 +755,7 @@ async function simulateQueue(
   now: Date,
   withNewArrival: boolean,
 ): Promise<{ entries: QueueEtaEntry[]; probeReadyAt: Date | null }> {
-  const [activeCounters, waitingTokens] = await Promise.all([
+  const [activeCounters, waitingTokens, staffedCounters] = await Promise.all([
     prisma.counter.findMany({
       where: { queueId, status: 'ACTIVE' },
       include: {
@@ -739,16 +765,25 @@ async function simulateQueue(
         // just how the data is actually shaped.
         tokens: {
           where: { status: { in: ['CALLED', 'IN_PROGRESS'] } },
-          include: { tokenServices: { include: { service: true } } },
+          include: { tokenServices: { include: { service: true } }, ...JOURNEY_STEPS_INCLUDE },
         },
+        // ADR-070: which services this counter handles (none = all).
+        services: { select: { serviceId: true } },
       },
     }),
     prisma.token.findMany({
       where: { queueId, status: 'WAITING' },
       orderBy: { sequenceNumber: 'asc' },
-      include: { tokenServices: { include: { service: true } } },
+      include: { tokenServices: { include: { service: true } }, ...JOURNEY_STEPS_INCLUDE },
+    }),
+    // ADR-070: a referral binds the person to its target while that counter
+    // is staffed (active or paused).
+    prisma.counter.findMany({
+      where: { queueId, staffId: { not: null }, status: { in: ['ACTIVE', 'ON_BREAK'] } },
+      select: { id: true },
     }),
   ]);
+  const staffedIds = new Set(staffedCounters.map((c) => c.id));
 
   // ADR-048: a token whose assigned session has not started yet is not in
   // the callable line at all — it has no position, cannot be called, and is
@@ -788,10 +823,25 @@ async function simulateQueue(
     return { entries, probeReadyAt: null };
   }
 
-  const counterOccupancy: CounterOccupancy[] = activeCounters.map((counter) => {
+  const counterOccupancy: RoutedCounter[] = activeCounters.map((counter) => {
+    const routing = {
+      id: counter.id,
+      serviceIds: counter.services.length > 0 ? new Set(counter.services.map((s) => s.serviceId)) : null,
+    };
     const occupying = counter.tokens[0];
     if (!occupying) {
-      return { freeAt: now };
+      return { ...routing, freeAt: now };
+    }
+    // ADR-070: on a journey only the current step is at this counter — its
+    // own service's time, from when that step was called/started.
+    const step = currentStepOf(occupying);
+    if (step) {
+      const stepDuration = computeEffectiveDurationMinutes(
+        occupying.requiredDurationMinutes,
+        step.service.durationMinutes,
+      );
+      const stepAnchor = step.startedAt ?? step.calledAt ?? now;
+      return { ...routing, freeAt: computeEffectiveEndTime(stepAnchor, stepDuration, now) };
     }
     // V2 Checkpoint 5 (ADR-027): the base (pre-override) duration is now
     // the sum of every selected service's own duration, not one service's
@@ -806,17 +856,31 @@ async function simulateQueue(
     // CALLED-but-not-yet-started anchors from calledAt as the best
     // available approximation of "about to start."
     const anchor = occupying.startedAt ?? occupying.calledAt ?? now;
-    return { freeAt: computeEffectiveEndTime(anchor, durationMinutes, now) };
+    return { ...routing, freeAt: computeEffectiveEndTime(anchor, durationMinutes, now) };
   });
 
-  const waitingInputs: WaitingTokenInput[] = callable.map((token) => ({
-    id: token.id,
-    durationMinutes: sumServiceDurations(token.tokenServices),
-  }));
+  const waitingInputs: RoutedWaitingToken[] = callable.map((token) => {
+    const step = currentStepOf(token);
+    return {
+      id: token.id,
+      // ADR-070: the current step's service time; a pre-journey token keeps
+      // the sum of its selected services, as before.
+      durationMinutes: step ? step.service.durationMinutes : sumServiceDurations(token.tokenServices),
+      serviceId: step?.serviceId ?? null,
+      boundCounterId:
+        step?.referredToCounterId && staffedIds.has(step.referredToCounterId) ? step.referredToCounterId : null,
+      referredAt: step?.referredAt ?? null,
+    };
+  });
 
-  const etaByTokenId = simulateWaitingTokenEtas(
+  const etaByTokenId = simulateRoutedEtas(
     counterOccupancy,
-    withNewArrival ? [...waitingInputs, { id: NEW_ARRIVAL_PROBE_ID, durationMinutes: 0 }] : waitingInputs,
+    withNewArrival
+      ? [
+          ...waitingInputs,
+          { id: NEW_ARRIVAL_PROBE_ID, durationMinutes: 0, serviceId: null, boundCounterId: null, referredAt: null },
+        ]
+      : waitingInputs,
   );
 
   const callableEntries = callable.map((token, index) => {
@@ -917,12 +981,34 @@ function toSelectedServices(token: TokenWithSelectedServices): SelectedService[]
     .map((ts) => ({ id: ts.service.id, name: ts.service.serviceName, durationMinutes: ts.service.durationMinutes }));
 }
 
+/** ADR-070: a token's journey steps with what the views and the ETA need. */
+const JOURNEY_STEPS_INCLUDE = {
+  journeySteps: {
+    orderBy: { stepNumber: 'asc' },
+    include: {
+      service: { select: { id: true, serviceName: true, durationMinutes: true } },
+      counter: { select: { id: true, name: true } },
+      referredToCounter: { select: { id: true, name: true } },
+      referredFromCounter: { select: { id: true, name: true } },
+    },
+  },
+} satisfies Prisma.TokenInclude;
+
+type TokenWithJourney = Token & Prisma.TokenGetPayload<{ include: typeof JOURNEY_STEPS_INCLUDE }>;
+type JourneyStep = TokenWithJourney['journeySteps'][number];
+
+/** The step a token is on now, or undefined for a pre-journey token. */
+function currentStepOf(token: Pick<Token, 'currentStepNumber'> & { journeySteps?: JourneyStep[] }): JourneyStep | undefined {
+  if (token.currentStepNumber == null) return undefined;
+  return token.journeySteps?.find((s) => s.stepNumber === token.currentStepNumber);
+}
+
 const TOKEN_SERVICES_INCLUDE = {
   tokenServices: { include: { service: { select: { id: true, serviceName: true, durationMinutes: true, createdAt: true } } } },
 } satisfies Prisma.TokenInclude;
 
 function toCustomerView(
-  token: Token & { counter?: Counter | null } & TokenWithSelectedServices,
+  token: Token & { counter?: Counter | null } & TokenWithSelectedServices & Partial<Pick<TokenWithJourney, 'journeySteps'>>,
   computed: ComputedFields,
   /** ADR-035: the queue's own zone, so the app can show the queue's clock
    * beside the customer's when they differ. A fact about the queue, never
@@ -935,6 +1021,9 @@ function toCustomerView(
    * responses are guarded against any key mentioning "otp" (ADR-029's leak
    * test), and a derived yes/no has no business weakening that guard. */
   serviceStartVerificationRequired = true,
+  /** ADR-069 D8: the removal reason, only for a token cancelled because its
+   * queue was deleted — the person who was in it may see why. */
+  queueRemovalReason: string | null = null,
 ) {
   return {
     id: token.id,
@@ -987,11 +1076,20 @@ function toCustomerView(
       : null,
     /** ADR-042: staff's optional completion note; null for an ordinary one. */
     completionFeedback: token.completionFeedback,
+    /** ADR-070: the person's ordered journey, read-only — every step, the
+     * current one and the next. Null for visits from before journeys. */
+    journey: customerJourneyView(token.currentStepNumber, token.journeySteps ?? []),
+    /** ADR-069 D8: set only when this visit was cancelled because the queue
+     * was removed. */
+    queueRemoved:
+      token.status === 'CANCELLED' && token.cancelReasonCode === 'QUEUE_REMOVED'
+        ? { reason: queueRemovalReason }
+        : null,
   };
 }
 
 function toStaffView(
-  token: Token & { counter?: Counter | null } & TokenWithSelectedServices,
+  token: Token & { counter?: Counter | null } & TokenWithSelectedServices & Partial<Pick<TokenWithJourney, 'journeySteps'>>,
   computed: ComputedFields,
 ) {
   // V2 Checkpoint 7: stripped even from the full staff shape — see
@@ -1012,10 +1110,12 @@ export async function getTokenCustomerView(tokenId: string) {
     include: {
       counter: true,
       ...TOKEN_SERVICES_INCLUDE,
+      ...JOURNEY_STEPS_INCLUDE,
       queue: {
         select: {
           timezone: true,
           requireServiceStartOtp: true,
+          deletionReason: true,
           organization: { select: { timezone: true } },
         },
       },
@@ -1027,6 +1127,7 @@ export async function getTokenCustomerView(tokenId: string) {
     computed,
     resolveQueueTimezone(token.queue, token.queue.organization),
     token.queue.requireServiceStartOtp,
+    token.queue.deletionReason,
   );
 }
 
@@ -1040,7 +1141,7 @@ export async function getTokenCustomerView(tokenId: string) {
 export async function getTokenStaffView(tokenId: string) {
   const token = await prisma.token.findUniqueOrThrow({
     where: { id: tokenId },
-    include: { counter: true, ...TOKEN_SERVICES_INCLUDE },
+    include: { counter: true, ...TOKEN_SERVICES_INCLUDE, ...JOURNEY_STEPS_INCLUDE },
   });
   const computed = await computeComputedFields(token);
   return toStaffView(token, computed);
@@ -1058,7 +1159,8 @@ export async function getToken(tokenId: string, auth?: AuthContext) {
     include: {
       counter: true,
       ...TOKEN_SERVICES_INCLUDE,
-      queue: { select: { requireServiceStartOtp: true } },
+      ...JOURNEY_STEPS_INCLUDE,
+      queue: { select: { requireServiceStartOtp: true, deletionReason: true } },
     },
   });
   if (!token) {
@@ -1070,10 +1172,15 @@ export async function getToken(tokenId: string, auth?: AuthContext) {
   // The queue relation was loaded only for the flag; it never rides along
   // in either response shape.
   const { queue, ...tokenRow } = token;
+  // ADR-069: the staff view only for someone whose workspace scope covers
+  // this token's queue; anyone else gets what the person holding it sees.
   if (auth && auth.organizationId === token.organizationId) {
-    return toStaffView(tokenRow, computed);
+    const visible = await prisma.queue.count({
+      where: { AND: [{ id: token.queueId }, visibleQueueWhere(auth)] },
+    });
+    if (visible > 0) return toStaffView(tokenRow, computed);
   }
-  return toCustomerView(tokenRow, computed, null, queue.requireServiceStartOtp);
+  return toCustomerView(tokenRow, computed, null, queue.requireServiceStartOtp, queue.deletionReason);
 }
 
 export async function getTokenStatus(tokenId: string) {
@@ -1101,7 +1208,7 @@ export async function callToken(
   tokenId: string,
   requestedCounterId?: string | null,
 ) {
-  const token = await findTokenScoped(actor.organizationId, tokenId);
+  const token = await findTokenScoped(actor, tokenId);
   // ADR-064: the counter is the caller's own, never one named by the client.
   const counter = await requireClaimCounter(actor, requestedCounterId);
   const counterId = counter.id;
@@ -1136,9 +1243,17 @@ export async function callToken(
       throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Your counter is not active.');
     }
 
+    // ADR-070: calls and journey-step advances on one queue are serialized
+    // by its row (share vs. update lock): a token can return to WAITING
+    // between steps, so "who is first" must not change under this check.
+    await tx.$queryRaw`SELECT id FROM queues WHERE id = ${token.queueId} FOR SHARE`;
+
     // V2 Checkpoint 3 (ADR-025): strict FCFS — a manually chosen tokenId
     // must be the earliest WAITING token in its queue, or staff could bypass
     // arrival order entirely (the exact V1 gap this checkpoint closes).
+    // ADR-070 refines "earliest": the person this counter would call next —
+    // its own referrals first, then the earliest-joined person whose current
+    // step it handles (journey.service.ts headForCounter).
     //
     // A plain (non-locking) EXISTS read is sufficient here, not a race: a
     // token's sequenceNumber is assigned once at creation and never reused,
@@ -1156,22 +1271,7 @@ export async function callToken(
     // exclusion is monotonic in the same way: a scheduled token can only
     // join the callable set as time passes, and it does so with its own
     // (fixed) sequence number, so this check stays race-free.
-    const earlierWaitingRows = await tx.$queryRaw<{ exists: boolean }[]>`
-      SELECT EXISTS (
-        SELECT 1 FROM tokens
-        WHERE queue_id = ${token.queueId}
-          AND status = 'WAITING'
-          AND sequence_number < ${token.sequenceNumber}
-          AND (assigned_session_starts_at IS NULL OR assigned_session_starts_at <= (${now} AT TIME ZONE 'UTC'))
-      ) AS "exists"
-    `;
-    if (earlierWaitingRows[0]?.exists) {
-      throw new AppError(
-        409,
-        'FCFS_VIOLATION',
-        'Someone who joined earlier is still waiting. The earliest eligible person must be called first.',
-      );
-    }
+    await assertIsNextForCounter(tx, token.queueId, counterId, tokenId, now);
 
     const busy = await tx.token.findFirst({
       where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] }, id: { not: tokenId } },
@@ -1185,16 +1285,8 @@ export async function callToken(
     // (ADR-041). A queue that does not gets no code at all.
     const requiresCode = await readRequireServiceStartOtp(tx, token.queueId);
 
-    const result = await tx.token.updateMany({
-      where: { id: tokenId, status: token.status },
-      data: {
-        status: 'CALLED',
-        counterId,
-        calledAt: new Date(),
-        ...serviceStartCodeFields(tokenId, requiresCode),
-      },
-    });
-    if (result.count === 0) {
+    const claimed = await claimForCounter(tx, tokenId, counterId, actor.staffId, requiresCode);
+    if (!claimed) {
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
     }
 
@@ -1255,41 +1347,29 @@ export async function getWaitingTokenActionEligibility(
     return { eligible: false, reason: 'SESSION_NOT_STARTED' };
   }
 
-  const earlierWaitingRows = await client.$queryRaw<{ exists: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1 FROM tokens
-      WHERE queue_id = ${token.queueId}
-        AND status = 'WAITING'
-        AND sequence_number < ${token.sequenceNumber}
-        AND (assigned_session_starts_at IS NULL OR assigned_session_starts_at <= (${now} AT TIME ZONE 'UTC'))
-    ) AS "exists"
-  `;
-  if (earlierWaitingRows[0]?.exists) {
-    return { eligible: false, reason: 'EARLIER_WAITING' };
-  }
-
-  // "Free" means active, staffed, and not already serving a CALLED/IN_PROGRESS
-  // token — the same occupancy rule callToken's busy-check applies to one
-  // counter. ADR-064: an unassigned counter cannot claim anyone, so it is
-  // not capacity.
-  const freeCounterRows = await client.$queryRaw<{ exists: boolean }[]>`
-    SELECT EXISTS (
-      SELECT 1 FROM counters c
-      WHERE c.queue_id = ${token.queueId}
-        AND c.status = 'ACTIVE'
-        AND c.staff_id IS NOT NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM tokens t
-          WHERE t.counter_id = c.id
-            AND t.status IN ('CALLED', 'IN_PROGRESS')
-        )
-    ) AS "exists"
-  `;
-  if (!freeCounterRows[0]?.exists) {
+  // ADR-070: exactly the "Serve next" rule — eligible when this person is
+  // whom some free counter would call now (its referrals first, then the
+  // earliest-joined person whose current step it handles).
+  const counters = await loadDispatchCounters(client, token.queueId);
+  const callable = await loadCallableTokens(client, token.queueId, now);
+  const verdict = waitingEligibility(counters, callable).get(token.id);
+  if (!verdict) {
     return { eligible: false, reason: 'NO_AVAILABLE_COUNTER' };
   }
+  return verdict;
+}
 
-  return { eligible: true, reason: null };
+/**
+ * ADR-070: the same rule for every callable token of one queue at once — what
+ * the live queue table shows on each row. Display only; the API re-decides
+ * inside the transaction that acts.
+ */
+export async function waitingEligibilityForQueue(queueId: string, now: Date = new Date()) {
+  const [counters, callable] = await Promise.all([
+    loadDispatchCounters(prisma, queueId),
+    loadCallableTokens(prisma, queueId, now),
+  ]);
+  return waitingEligibility(counters, callable);
 }
 
 /** Queue-level half of the eligibility rule, for read-only display paths
@@ -1373,8 +1453,10 @@ async function transitionToken(
   /** ADR-042: written in the same compare-and-swap as the status, so a
    * skip reason or completion note exists exactly when its status does. */
   terminalNote: Prisma.TokenUpdateManyMutationInput = {},
+  /** ADR-070: further writes in the same transaction (journey steps). */
+  onTransition?: (tx: Prisma.TransactionClient, token: Token) => Promise<void>,
 ): Promise<{ token: SafeToken; previousStatus: TokenStatus }> {
-  const token = await findTokenScoped(actor.organizationId, tokenId);
+  const token = await findTokenScoped(actor, tokenId);
   // Access first: someone at another counter learns nothing about the
   // person's state, only that they are not theirs.
   await assertMayActOnToken(actor, token);
@@ -1397,6 +1479,10 @@ async function transitionToken(
       throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
     }
 
+    if (onTransition) {
+      await onTransition(tx, token);
+    }
+
     // COMPLETED spends the customer's repeat entitlement, SKIPPED releases
     // it — both settled here so the claim can never disagree with the status
     // that caused it (ADR-034).
@@ -1414,17 +1500,202 @@ async function transitionToken(
  * only allows this from IN_PROGRESS, so a queue that requires the
  * service-start code (ADR-041) can still never be completed without it.
  */
-export const completeToken = (actor: CounterActor, tokenId: string, feedback?: string) => {
-  const completionFeedback = resolveCompletionFeedback(feedback);
-  return transitionToken(
-    actor,
-    tokenId,
-    'COMPLETED',
-    'completedAt',
-    undefined,
-    completionFeedback ? { completionFeedback } : {},
-  );
-};
+export interface CompleteStepOptions {
+  feedback?: string;
+  /** ADR-070: send the person's next step to this counter (a referral). */
+  referToCounterId?: string;
+  referralNote?: string;
+}
+
+export interface CompleteResult {
+  token: SafeToken;
+  previousStatus: TokenStatus;
+  /** ADR-070: true when a journey step finished and the person is waiting
+   * for their next step; false when the whole visit is complete. */
+  advanced: boolean;
+  referredToCounterId: string | null;
+}
+
+/**
+ * ADR-042: completion stays one step. Feedback is optional — blank or absent
+ * is an ordinary completion and stores nothing — and never changes the
+ * resulting status, which is COMPLETED either way. The state machine still
+ * only allows this from IN_PROGRESS, so a queue that requires the
+ * service-start code (ADR-041) can still never be completed without it.
+ *
+ * ADR-070: on a journey with steps left, completing finishes the current
+ * step only. The person goes back to WAITING for their next step — in the
+ * same token, never a new one — and, with `referToCounterId`, that step is
+ * referred to a specific counter (ahead of its normal line, never ahead of
+ * the person it is serving). The visit is COMPLETED (and the repeat
+ * entitlement spent) only when its last step is.
+ */
+export async function completeToken(
+  actor: CounterActor,
+  tokenId: string,
+  options: CompleteStepOptions | string = {},
+): Promise<CompleteResult> {
+  const opts: CompleteStepOptions = typeof options === 'string' ? { feedback: options } : options;
+  const completionFeedback = resolveCompletionFeedback(opts.feedback);
+  const token = await findTokenScoped(actor, tokenId);
+  const steps = await prisma.tokenServiceStep.findMany({
+    where: { tokenId },
+    orderBy: { stepNumber: 'asc' },
+    select: { stepNumber: true, serviceId: true },
+  });
+  const current = token.currentStepNumber;
+  const hasNextStep = current != null && steps.some((step) => step.stepNumber === current + 1);
+
+  if (!hasNextStep) {
+    if (opts.referToCounterId) {
+      throw new AppError(409, 'NO_NEXT_STEP', 'This is the last step of this visit; there is nothing to refer.');
+    }
+    const done = await transitionToken(
+      actor,
+      tokenId,
+      'COMPLETED',
+      'completedAt',
+      undefined,
+      completionFeedback ? { completionFeedback } : {},
+      async (tx, row) => {
+        if (row.currentStepNumber != null) {
+          await tx.tokenServiceStep.updateMany({
+            where: { tokenId, stepNumber: row.currentStepNumber, status: 'IN_PROGRESS' },
+            data: { status: 'COMPLETED', completedAt: new Date() },
+          });
+        }
+      },
+    );
+    return { ...done, advanced: false, referredToCounterId: null };
+  }
+
+  await assertMayActOnToken(actor, token);
+  assertValidTransition(token.status, 'COMPLETED');
+  const nextStep = steps.find((step) => step.stepNumber === current! + 1)!;
+
+  return prisma.$transaction(async (tx) => {
+    // Serialized with calls on this queue: the person rejoins the line.
+    await tx.$queryRaw`SELECT id FROM queues WHERE id = ${token.queueId} FOR UPDATE`;
+
+    let referral: { toCounterId: string; fromCounterId: string } | null = null;
+    if (opts.referToCounterId) {
+      referral = await validateReferral(tx, token, nextStep.serviceId, opts.referToCounterId);
+    }
+
+    const now = new Date();
+    const result = await tx.token.updateMany({
+      where: { id: tokenId, status: 'IN_PROGRESS', currentStepNumber: current },
+      data: {
+        status: 'WAITING',
+        counterId: null,
+        currentStepNumber: current! + 1,
+        // A staff duration override was for the step just finished.
+        requiredDurationMinutes: null,
+        serviceStartOtpCipher: null,
+        serviceStartOtpExpiresAt: null,
+        serviceStartOtpFailedAttempts: 0,
+      },
+    });
+    if (result.count === 0) {
+      throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+    }
+    await tx.tokenServiceStep.updateMany({
+      where: { tokenId, stepNumber: current!, status: 'IN_PROGRESS' },
+      data: { status: 'COMPLETED', completedAt: now },
+    });
+    if (referral) {
+      await tx.tokenServiceStep.updateMany({
+        where: { tokenId, stepNumber: nextStep.stepNumber, status: 'PENDING' },
+        data: {
+          referredToCounterId: referral.toCounterId,
+          referredFromCounterId: referral.fromCounterId,
+          referredByStaffId: actor.staffId,
+          referredAt: now,
+          referralNote: opts.referralNote?.trim() || null,
+        },
+      });
+    }
+    const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
+    return {
+      token: omitInternalFields(updated),
+      previousStatus: token.status,
+      advanced: true,
+      referredToCounterId: referral?.toCounterId ?? null,
+    };
+  });
+}
+
+/**
+ * ADR-070: a referral is allowed only when it is real — the next step's
+ * service is one the referring counter does not handle — and the target can
+ * take it: another counter of the same queue, active, with an operator, that
+ * handles that service. Anything else is refused with its own code.
+ */
+async function validateReferral(
+  tx: Prisma.TransactionClient,
+  token: Token,
+  nextServiceId: string,
+  targetCounterId: string,
+): Promise<{ toCounterId: string; fromCounterId: string }> {
+  const counters = await loadDispatchCounters(tx, token.queueId);
+  const own = counters.find((c) => c.id === token.counterId);
+  if (!own) {
+    throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+  }
+  if (counterServes(own, nextServiceId)) {
+    throw new AppError(
+      409,
+      'REFERRAL_NOT_NEEDED',
+      'Your counter handles the next service. Complete this step instead of referring.',
+    );
+  }
+  const target = counters.find((c) => c.id === targetCounterId);
+  if (!target || target.id === own.id) {
+    // Another queue's (or another workspace's) counter is simply not here.
+    throw new AppError(404, 'COUNTER_NOT_FOUND', 'Counter not found.');
+  }
+  if (target.status !== 'ACTIVE' || !target.staffId) {
+    throw new AppError(409, 'REFERRAL_TARGET_UNAVAILABLE', 'That counter is not open with an operator right now.');
+  }
+  if (!counterServes(target, nextServiceId)) {
+    throw new AppError(409, 'REFERRAL_TARGET_CANNOT_SERVE', "That counter doesn't handle the next service.");
+  }
+  return { toCounterId: target.id, fromCounterId: own.id };
+}
+
+/**
+ * ADR-070: what the operator serving this person can do with their next
+ * step: nothing (last step), finish it here (this counter handles it), or
+ * refer it — with the counters that could take it.
+ */
+export async function getReferralOptions(actor: CounterActor, tokenId: string) {
+  const token = await findTokenScoped(actor, tokenId);
+  await assertMayActOnToken(actor, token);
+  const steps = await prisma.tokenServiceStep.findMany({
+    where: { tokenId },
+    orderBy: { stepNumber: 'asc' },
+    include: { service: { select: { serviceName: true } } },
+  });
+  const current = token.currentStepNumber;
+  const next = current == null ? undefined : steps.find((s) => s.stepNumber === current + 1);
+  if (!next) {
+    return { nextStep: null, currentCounterHandlesNext: false, targets: [] };
+  }
+  const counters = await loadDispatchCounters(prisma, token.queueId);
+  const own = counters.find((c) => c.id === token.counterId);
+  const handles = own ? counterServes(own, next.serviceId) : false;
+  const targets = handles
+    ? []
+    : counters.filter(
+        (c: DispatchCounter) =>
+          c.id !== token.counterId && c.status === 'ACTIVE' && c.staffId && counterServes(c, next.serviceId),
+      );
+  return {
+    nextStep: { stepNumber: next.stepNumber, serviceId: next.serviceId, serviceName: next.service.serviceName },
+    currentCounterHandlesNext: handles,
+    targets: targets.map((c) => ({ id: c.id, name: c.name, busy: c.busy })),
+  };
+}
 
 /**
  * Skipping a WAITING customer is gated on exactly the same eligibility that
@@ -1468,6 +1739,20 @@ export const skipToken = (actor: CounterActor, tokenId: string, reason: SkipReas
       );
     },
     { skipReasonCode: resolved.code, skipReasonText: resolved.text },
+    // ADR-070: SKIPPED ends the whole visit (terminal, as before); the step
+    // it happened at is recorded, the rest will never happen.
+    async (tx, row) => {
+      if (row.currentStepNumber != null) {
+        await tx.tokenServiceStep.updateMany({
+          where: { tokenId, stepNumber: row.currentStepNumber, status: { in: ['PENDING', 'CALLED', 'IN_PROGRESS'] } },
+          data: { status: 'SKIPPED' },
+        });
+        await tx.tokenServiceStep.updateMany({
+          where: { tokenId, status: 'PENDING' },
+          data: { status: 'CANCELLED' },
+        });
+      }
+    },
   );
 };
 
@@ -1496,7 +1781,7 @@ export async function startToken(
   tokenId: string,
   verificationCode: string | undefined,
 ) {
-  const token = await findTokenScoped(actor.organizationId, tokenId);
+  const token = await findTokenScoped(actor, tokenId);
   await assertMayActOnToken(actor, token);
   assertValidTransition(token.status, 'IN_PROGRESS');
 
@@ -1505,7 +1790,7 @@ export async function startToken(
     select: { requireServiceStartOtp: true },
   });
   if (!queue.requireServiceStartOtp) {
-    return startWithoutVerification(tokenId, token.status);
+    return startWithoutVerification(tokenId, token.status, token.startedAt);
   }
 
   if (!verificationCode) {
@@ -1583,7 +1868,8 @@ export async function startToken(
     where: { id: tokenId, status: 'CALLED' },
     data: {
       status: 'IN_PROGRESS',
-      startedAt: new Date(),
+      // ADR-070: the visit keeps its first start; each step has its own.
+      startedAt: token.startedAt ?? new Date(),
       serviceStartOtpCipher: null,
       serviceStartOtpExpiresAt: null,
       serviceStartOtpFailedAttempts: 0,
@@ -1598,8 +1884,19 @@ export async function startToken(
     throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
   }
 
+  await markCurrentStepStarted(tokenId);
   const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
   return { token: omitInternalFields(updated), previousStatus: token.status };
+}
+
+/** ADR-070: the current journey step's own start. */
+async function markCurrentStepStarted(tokenId: string): Promise<void> {
+  const row = await prisma.token.findUnique({ where: { id: tokenId }, select: { currentStepNumber: true } });
+  if (row?.currentStepNumber == null) return;
+  await prisma.tokenServiceStep.updateMany({
+    where: { tokenId, stepNumber: row.currentStepNumber, status: 'CALLED' },
+    data: { status: 'IN_PROGRESS', startedAt: new Date() },
+  });
 }
 
 /**
@@ -1609,12 +1906,16 @@ export async function startToken(
  * one unverified start through: either this statement sees the old setting,
  * or it matches nothing and is refused below.
  */
-async function startWithoutVerification(tokenId: string, previousStatus: TokenStatus) {
+async function startWithoutVerification(
+  tokenId: string,
+  previousStatus: TokenStatus,
+  firstStartedAt: Date | null = null,
+) {
   const result = await prisma.token.updateMany({
     where: { id: tokenId, status: 'CALLED', queue: { requireServiceStartOtp: false } },
     data: {
       status: 'IN_PROGRESS',
-      startedAt: new Date(),
+      startedAt: firstStartedAt ?? new Date(),
       serviceStartOtpCipher: null,
       serviceStartOtpExpiresAt: null,
       serviceStartOtpFailedAttempts: 0,
@@ -1639,6 +1940,7 @@ async function startWithoutVerification(tokenId: string, previousStatus: TokenSt
     );
   }
 
+  await markCurrentStepStarted(tokenId);
   const updated = await prisma.token.findUniqueOrThrow({ where: { id: tokenId } });
   return { token: omitInternalFields(updated), previousStatus };
 }
@@ -1700,6 +2002,11 @@ export async function cancelToken(tokenId: string, deviceIdentifier: string) {
     }
 
     await settleIdentityClaim(tx, tokenId, 'CANCELLED');
+    // ADR-070: no step of a cancelled visit will happen.
+    await tx.tokenServiceStep.updateMany({
+      where: { tokenId, status: { in: ['PENDING', 'CALLED'] } },
+      data: { status: 'CANCELLED' },
+    });
 
     const updated = await tx.token.findUniqueOrThrow({ where: { id: tokenId } });
     return { token: omitInternalFields(updated), previousStatus: token.status };
@@ -1841,8 +2148,7 @@ export async function nextToken(
   queueId: string,
   requestedCounterId?: string | null,
 ) {
-  await requireOwnedQueue(actor.organizationId, queueId);
-  // ADR-064: the counter is the caller's own, never one named by the client.
+  await requireVisibleQueue(actor, queueId);
   const counter = await requireClaimCounter(actor, requestedCounterId);
   const counterId = counter.id;
 
@@ -1850,59 +2156,122 @@ export async function nextToken(
     throw new AppError(409, 'COUNTER_QUEUE_MISMATCH', 'Your counter serves a different queue.');
   }
 
-  return prisma.$transaction(async (tx) => {
-    const counterRows = await tx.$queryRaw<{ id: string; status: string; staff_id: string | null }[]>`
-      SELECT id, status, staff_id FROM counters WHERE id = ${counterId} FOR UPDATE
-    `;
-    const lockedCounter = counterRows[0];
-    assertStillAssigned(actor, lockedCounter?.staff_id ?? null);
-    if (!lockedCounter || lockedCounter.status !== 'ACTIVE') {
-      throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Your counter is not active.');
-    }
+  // A concurrent call can take the same person first; the compare-and-swap
+  // below then fails and the next person for this counter is tried.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM queues WHERE id = ${queueId} FOR SHARE`;
+      const counterRows = await tx.$queryRaw<{ id: string; status: string; staff_id: string | null }[]>`
+        SELECT id, status, staff_id FROM counters WHERE id = ${counterId} FOR UPDATE
+      `;
+      const lockedCounter = counterRows[0];
+      assertStillAssigned(actor, lockedCounter?.staff_id ?? null);
+      if (!lockedCounter || lockedCounter.status !== 'ACTIVE') {
+        throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Your counter is not active.');
+      }
 
-    const busy = await tx.token.findFirst({
-      where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] } },
+      const busy = await tx.token.findFirst({
+        where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] } },
+      });
+      if (busy) {
+        throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is already serving another token.');
+      }
+
+      // ADR-070: strict FCFS within this counter's services, referrals to
+      // it first (journey.service.ts headForCounter).
+      const counters = await loadDispatchCounters(tx, queueId);
+      const callable = await loadCallableTokens(tx, queueId, new Date());
+      const self = counters.find((c) => c.id === counterId)!;
+      const eligible = headForCounter(self, callable, staffedCounterIdsOf(counters));
+      if (!eligible) {
+        throw new AppError(404, 'NO_ELIGIBLE_TOKENS', 'No eligible waiting tokens.');
+      }
+
+      const requiresCode = await readRequireServiceStartOtp(tx, queueId);
+      const claimed = await claimForCounter(tx, eligible.id, counterId, actor.staffId, requiresCode);
+      if (!claimed) return null;
+      const updated = await tx.token.findUniqueOrThrow({ where: { id: eligible.id } });
+      return omitInternalFields(updated);
     });
-    if (busy) {
-      throw new AppError(409, 'COUNTER_NOT_AVAILABLE', 'Counter is already serving another token.');
-    }
+    if (result) return result;
+  }
+  throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+}
 
-    // SKIP LOCKED (approved decision 5, scoped only to this selection query
-    // — not the sequence-allocation lock in createToken) lets two counters
-    // calling /next concurrently claim two different waiting tokens without
-    // blocking on each other.
-    // ADR-048: a token scheduled for a session that has not started yet is
-    // passed over — it is not in the callable line until that instant.
-    const eligibleRows = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM tokens
-      WHERE queue_id = ${queueId} AND status = 'WAITING'
-        AND (assigned_session_starts_at IS NULL OR assigned_session_starts_at <= (${new Date()} AT TIME ZONE 'UTC'))
-      ORDER BY sequence_number ASC
-      LIMIT 1
-      FOR UPDATE SKIP LOCKED
-    `;
-    const eligible = eligibleRows[0];
-    if (!eligible) {
-      throw new AppError(404, 'NO_ELIGIBLE_TOKENS', 'No eligible waiting tokens.');
-    }
-
-    // ADR-041: /next enters CALLED exactly like /call, so it issues the
-    // service-start code on the same terms. Before this it issued none, which
-    // left a code-requiring queue's token waiting on a customer reissue.
-    const requiresCode = await readRequireServiceStartOtp(tx, queueId);
-
-    const updated = await tx.token.update({
-      where: { id: eligible.id },
-      data: {
-        status: 'CALLED',
-        counterId,
-        calledAt: new Date(),
-        ...serviceStartCodeFields(eligible.id, requiresCode),
-      },
-    });
-    // Staff response: the cipher must never leave, same as every other path.
-    return omitInternalFields(updated);
+/**
+ * WAITING -> CALLED for one token at one counter, as a compare-and-swap.
+ * The visit keeps its first call time (reports measure the wait to it);
+ * ADR-070: the current journey step records this call — counter, operator
+ * and time — so every step's handling is kept.
+ */
+async function claimForCounter(
+  tx: Prisma.TransactionClient,
+  tokenId: string,
+  counterId: string,
+  staffId: string,
+  requiresCode: boolean,
+): Promise<boolean> {
+  const now = new Date();
+  const current = await tx.token.findUnique({
+    where: { id: tokenId },
+    select: { calledAt: true, currentStepNumber: true },
   });
+  const result = await tx.token.updateMany({
+    where: { id: tokenId, status: 'WAITING' },
+    data: {
+      status: 'CALLED',
+      counterId,
+      calledAt: current?.calledAt ?? now,
+      ...serviceStartCodeFields(tokenId, requiresCode),
+    },
+  });
+  if (result.count === 0) return false;
+  if (current?.currentStepNumber != null) {
+    await tx.tokenServiceStep.updateMany({
+      where: { tokenId, stepNumber: current.currentStepNumber, status: 'PENDING' },
+      data: { status: 'CALLED', counterId, staffId, calledAt: now },
+    });
+  }
+  return true;
+}
+
+/**
+ * ADR-070: may this counter call this person now? Exactly when they are the
+ * person "Serve next" would give it. Otherwise says why, so a crafted request
+ * learns no more than the dashboard shows.
+ */
+async function assertIsNextForCounter(
+  tx: Prisma.TransactionClient,
+  queueId: string,
+  counterId: string,
+  tokenId: string,
+  now: Date,
+): Promise<void> {
+  const counters = await loadDispatchCounters(tx, queueId);
+  const callable = await loadCallableTokens(tx, queueId, now);
+  const self = counters.find((c) => c.id === counterId);
+  const target = callable.find((t) => t.id === tokenId);
+  if (!self || !target) {
+    throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
+  }
+  const staffed = staffedCounterIdsOf(counters);
+  if (target.referredToCounterId && staffed.has(target.referredToCounterId) && target.referredToCounterId !== counterId) {
+    throw new AppError(409, 'REFERRED_TO_ANOTHER_COUNTER', 'This person has been referred to another counter.');
+  }
+  if (!counterServes(self, target.serviceId)) {
+    throw new AppError(
+      409,
+      'SERVICE_NOT_AT_THIS_COUNTER',
+      "Your counter doesn't handle this person's current service.",
+    );
+  }
+  if (headForCounter(self, callable, staffed)?.id !== tokenId) {
+    throw new AppError(
+      409,
+      'FCFS_VIOLATION',
+      'Someone who joined earlier is still waiting. The earliest eligible person must be called first.',
+    );
+  }
 }
 
 /**
@@ -1957,7 +2326,7 @@ export async function setRequiredDuration(
   tokenId: string,
   requiredDurationMinutes: number,
 ) {
-  const token = await findTokenScoped(actor.organizationId, tokenId);
+  const token = await findTokenScoped(actor, tokenId);
 
   if (token.status !== 'CALLED' && token.status !== 'IN_PROGRESS') {
     throw new AppError(

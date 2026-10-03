@@ -76,6 +76,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
     // Derived from role, never trusted from the stored `permissions` column
     // (frozen RBAC policy) — see getEffectivePermissions's doc comment.
     permissions: getEffectivePermissions(staff.role),
+    workspaceAdminId: staff.workspaceAdminId,
   };
 
   next();

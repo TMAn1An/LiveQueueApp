@@ -14,6 +14,10 @@ export const SOCKET_EVENTS = {
   TOKEN_COMPLETED: 'token.completed',
   TOKEN_SKIPPED: 'token.skipped',
   TOKEN_CANCELLED: 'token.cancelled',
+  /** ADR-070: a journey step finished; the person waits for their next
+   * step (status WAITING). Sent together with token.completed carrying the
+   * same payload, so apps from before journeys update from it too. */
+  TOKEN_STEP_COMPLETED: 'token.step_completed',
   TOKEN_POSITION_CHANGED: 'token.position_changed',
   COUNTER_CREATED: 'counter.created',
   COUNTER_UPDATED: 'counter.updated',

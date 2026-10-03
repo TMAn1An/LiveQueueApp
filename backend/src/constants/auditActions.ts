@@ -28,6 +28,8 @@ export const AUDIT_ACTIONS = [
   'token_called',
   'token_skipped',
   'token_completed',
+  // ADR-070: a journey step sent to another counter.
+  'token_referred',
   'token_duration_updated',
   'organization_deletion_requested',
   'blocked_device_changed',

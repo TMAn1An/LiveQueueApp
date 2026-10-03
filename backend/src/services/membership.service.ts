@@ -1,6 +1,7 @@
 import { Prisma, type MembershipRemovalRequest, type Staff, type StaffRole } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { assertNoActiveServiceForStaff } from './counterAccess.service';
+import { releaseOperatorCounter } from './counter.service';
 import { AppError } from '../utils/AppError';
 
 /**
@@ -72,7 +73,11 @@ function assertMayRemoveDirectly(actor: MembershipActor, target: Staff): void {
     throw new AppError(403, 'CANNOT_DELETE_OWNER', 'The organization owner cannot be deleted.');
   }
   if (actor.role === 'OWNER') return;
-  if (actor.role === 'ADMIN' && target.role === 'STAFF') return;
+  // ADR-069: an Admin removes only the Executives of their own workspace.
+  if (actor.role === 'ADMIN' && target.role === 'STAFF') {
+    if (target.workspaceAdminId === actor.staffId) return;
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+  }
   if (actor.role === 'ADMIN' && target.role === 'ADMIN') {
     throw new AppError(
       403,
@@ -111,6 +116,9 @@ async function endMembership(
   }
   // ADR-064: never orphan a person this member called or is serving.
   await assertNoActiveServiceForStaff(tx, target.id);
+  // ADR-069: their counter is turned off and released before the row goes,
+  // so it is never left active without an operator.
+  await releaseOperatorCounter(tx, target.id);
   // deleteMany, not delete: a concurrent removal that got there first leaves
   // nothing to delete, which is reported as "not found" rather than a 500.
   const { count } = await tx.staff.deleteMany({
@@ -158,8 +166,12 @@ export async function createRemovalRequest(
       'The organization owner cannot be removed.',
     );
   }
-  if (!isSelf && actor.role === 'STAFF') {
-    throw new AppError(403, 'FORBIDDEN', 'Staff members can only request to leave themselves.');
+  if (!isSelf && (actor.role === 'STAFF' || actor.role === 'MANAGER')) {
+    throw new AppError(403, 'FORBIDDEN', 'You can only request to leave yourself.');
+  }
+  if (!isSelf && target.role === 'STAFF' && target.workspaceAdminId !== actor.staffId) {
+    // ADR-069: another workspace's Executive is not this Admin's to remove.
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
   }
   if (!isSelf && target.role === 'STAFF') {
     // An admin removes staff directly; a request would only wait on the owner

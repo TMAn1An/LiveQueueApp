@@ -4,6 +4,8 @@ const reportQueryBase = z.object({
   range: z.enum(['today', 'yesterday', 'last7', 'last30', 'custom']).default('today'),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  /** ADR-069: Head/Manager filter to one Admin's workspace. */
+  adminId: z.string().uuid('adminId must be a valid id.').optional(),
 });
 
 const reportQuery = reportQueryBase.superRefine((value, ctx) => {

@@ -116,3 +116,68 @@ export function simulateWaitingTokenEtas(
 export function minutesUntil(target: Date, now: Date): number {
   return Math.max(0, Math.ceil((target.getTime() - now.getTime()) / 60_000));
 }
+
+export interface RoutedCounter extends CounterOccupancy {
+  id: string;
+  /** null = handles every service. */
+  serviceIds: Set<string> | null;
+}
+
+export interface RoutedWaitingToken extends WaitingTokenInput {
+  /** The current journey step's service; null for a pre-journey token. */
+  serviceId: string | null;
+  /** A referral to a counter in `counters` binds the token to it. */
+  boundCounterId: string | null;
+  referredAt: Date | null;
+}
+
+/**
+ * ADR-070: the same multi-counter simulation, with service routing and
+ * referrals. Repeatedly takes whichever counter frees up first among those
+ * that can still serve someone, and gives it exactly whom "Serve next" would
+ * give it (journey.service.ts headForCounter): its earliest referral, else the
+ * earliest-joined token whose current step it handles and that is not bound
+ * to another counter. With no routing and no referrals this reproduces
+ * simulateWaitingTokenEtas exactly. Tokens no counter can serve get no
+ * estimate. Durations are the current step's only — the estimate is when
+ * the person will next be called.
+ */
+export function simulateRoutedEtas(
+  counters: RoutedCounter[],
+  waitingTokens: RoutedWaitingToken[],
+): Map<string, Date> {
+  const result = new Map<string, Date>();
+  const freeAtMs = counters.map((c) => c.freeAt.getTime());
+  const remaining = [...waitingTokens];
+  const serves = (c: RoutedCounter, t: RoutedWaitingToken) =>
+    t.boundCounterId ? t.boundCounterId === c.id : t.serviceId === null || c.serviceIds === null || c.serviceIds.has(t.serviceId);
+  const pick = (c: RoutedCounter): number => {
+    let best = -1;
+    for (let i = 0; i < remaining.length; i++) {
+      const t = remaining[i]!;
+      if (t.boundCounterId !== c.id) continue;
+      if (best === -1 || (t.referredAt?.getTime() ?? 0) < (remaining[best]!.referredAt?.getTime() ?? 0)) best = i;
+    }
+    if (best !== -1) return best;
+    return remaining.findIndex((t) => serves(c, t));
+  };
+
+  while (remaining.length > 0) {
+    let chosenCounter = -1;
+    let chosenToken = -1;
+    for (let i = 0; i < counters.length; i++) {
+      const tokenIndex = pick(counters[i]!);
+      if (tokenIndex === -1) continue;
+      if (chosenCounter === -1 || freeAtMs[i]! < freeAtMs[chosenCounter]!) {
+        chosenCounter = i;
+        chosenToken = tokenIndex;
+      }
+    }
+    if (chosenCounter === -1) break;
+    const token = remaining.splice(chosenToken, 1)[0]!;
+    const readyAtMs = freeAtMs[chosenCounter]!;
+    result.set(token.id, new Date(readyAtMs));
+    freeAtMs[chosenCounter] = readyAtMs + token.durationMinutes * 60_000;
+  }
+  return result;
+}

@@ -11,6 +11,17 @@ export const PERMISSIONS = [
   'export_reports',
   'manage_blocked_devices',
   'view_audit_logs',
+  // ADR-069
+  /** See the people in the organization (scoped: an Admin sees their own
+   * workspace; the Organization Head and Managers see everyone). */
+  'view_staff',
+  /** Remove a queue, always with a reason (an Admin only their own). */
+  'delete_queues',
+  /** Read every Admin workspace: queues, executives, reports, audit. */
+  'view_all_workspaces',
+  /** Invite or promote Admins, appoint or remove Organization Managers,
+   * and assign legacy queues and executives to Admin workspaces. */
+  'manage_admins',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
@@ -25,8 +36,25 @@ export type Permission = (typeof PERMISSIONS)[number];
 // ADR-064: operate_tokens says a role *may* serve; whether someone actually
 // can is decided by their counter assignment (counterAccess.service.ts).
 // Every role may serve from the one counter assigned to them.
+/** Organization Head: everything (ADR-069 keeps every Owner power). */
 export const OWNER_PERMISSIONS: Permission[] = [...PERMISSIONS];
-export const ADMIN_PERMISSIONS: Permission[] = [...PERMISSIONS];
+/** Admin: full control of their own workspace only — enforced by the scope
+ * checks in workspaceScope.service.ts, not by this list alone. */
+export const ADMIN_PERMISSIONS: Permission[] = PERMISSIONS.filter(
+  (p) => p !== 'view_all_workspaces' && p !== 'manage_admins',
+);
+/** Organization Manager (ADR-069): organization-wide read and queue
+ * deletion with a reason. No configuration, operations, serving or
+ * invitations. */
+export const MANAGER_PERMISSIONS: Permission[] = [
+  'view_staff',
+  'view_reports',
+  'export_reports',
+  'view_audit_logs',
+  'delete_queues',
+  'view_all_workspaces',
+];
+/** Executive: unchanged. */
 export const STAFF_PERMISSIONS: Permission[] = [
   'operate_tokens',
   'view_reports',
@@ -50,5 +78,7 @@ export function getEffectivePermissions(role: StaffRole): Permission[] {
       return ADMIN_PERMISSIONS;
     case 'STAFF':
       return STAFF_PERMISSIONS;
+    case 'MANAGER':
+      return MANAGER_PERMISSIONS;
   }
 }

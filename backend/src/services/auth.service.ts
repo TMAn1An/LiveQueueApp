@@ -52,6 +52,8 @@ function toSafeStaff(staff: Staff) {
     email: staff.email,
     role: staff.role,
     status: staff.status,
+    // ADR-069: an Executive's Admin workspace (null otherwise).
+    workspaceAdminId: staff.workspaceAdminId,
     lastLoginAt: staff.lastLoginAt,
     createdAt: staff.createdAt,
   };

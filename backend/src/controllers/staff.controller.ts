@@ -5,17 +5,18 @@ import * as membershipService from '../services/membership.service';
 import * as realtime from '../realtime/emit';
 
 export async function list(req: Request, res: Response) {
-  const { page, pageSize, search } = req.query as unknown as {
+  const { page, pageSize, search, adminId } = req.query as unknown as {
     page: number;
     pageSize: number;
     search?: string;
+    adminId?: string;
   };
-  const result = await staffService.listStaff(req.auth!.organizationId, page, pageSize, search);
+  const result = await staffService.listStaff(req.auth!, page, pageSize, search, adminId);
   res.status(200).json({ success: true, data: result.data, pagination: result.pagination });
 }
 
 export async function create(req: Request, res: Response) {
-  const staff = await staffService.createStaff(req.auth!.organizationId, req.body);
+  const staff = await staffService.createStaff(req.auth!, req.body);
   res.status(201).json({ success: true, data: staff });
   await auditService.recordAuditEventSafely({
     actor: auditService.actorFromAuth(req.auth!),
@@ -24,19 +25,20 @@ export async function create(req: Request, res: Response) {
     entityId: staff.id,
     // Conservative on purpose: role indicates seniority without duplicating
     // the full permissions array in a second, easily-stale place.
-    metadata: { email: staff.email, role: staff.role },
+    metadata: { email: staff.email, role: staff.role, workspaceAdminId: staff.workspaceAdminId },
+    workspaceAdminId: staff.role === 'STAFF' ? staff.workspaceAdminId : null,
     ipAddress: req.ip,
   });
 }
 
 export async function get(req: Request, res: Response) {
-  const staff = await staffService.getStaff(req.auth!.organizationId, req.params.staffId as string);
+  const staff = await staffService.getStaff(req.auth!, req.params.staffId as string);
   res.status(200).json({ success: true, data: staff });
 }
 
 export async function update(req: Request, res: Response) {
   const staff = await staffService.updateStaff(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.staffId as string,
     req.body,
     { staffId: req.auth!.staffId, role: req.auth!.role },
@@ -189,4 +191,24 @@ export async function resendInvitation(req: Request, res: Response) {
     metadata: { invitationResent: true, emailSent: result.emailSent },
     ipAddress: req.ip,
   });
+}
+
+/** ADR-069 D3: the Organization Head moves an Executive between workspaces. */
+export async function setWorkspace(req: Request, res: Response) {
+  const staff = await staffService.setExecutiveWorkspace(
+    req.auth!,
+    req.params.staffId as string,
+    req.body.adminId,
+  );
+  res.status(200).json({ success: true, data: staff });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'staff_updated',
+    entityType: 'staff',
+    entityId: staff.id,
+    metadata: { changedFields: ['workspaceAdminId'], workspaceAdminId: staff.workspaceAdminId },
+    workspaceAdminId: staff.workspaceAdminId,
+    ipAddress: req.ip,
+  });
+  realtime.disconnectStaff(staff.id);
 }

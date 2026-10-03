@@ -9,6 +9,7 @@ import {
   assignableStaffSchema,
   assignCounterSchema,
   counterIdOnlySchema,
+  setCounterServicesSchema,
   updateCounterSchema,
   updateCounterStatusSchema,
 } from '../validators/counter.validators';
@@ -18,7 +19,7 @@ const router = Router();
 // ADR-064: only OWNER and ADMIN decide who stands at which counter.
 const COUNTER_ASSIGNMENT_DENIAL = {
   code: 'COUNTER_ASSIGNMENT_FORBIDDEN',
-  message: 'Only the organization owner or an admin can manage counter assignments.',
+  message: "Only the queue's Admin or the Organization Head can manage counter assignments.",
 };
 
 // ADR-064: the signed-in person's own counter — the only one they may claim
@@ -54,6 +55,15 @@ router.patch(
   counterController.updateStatus,
 );
 // Who stands at a counter is a staffing decision (manage_staff, OWNER/ADMIN).
+// ADR-070: service routing is counter configuration.
+router.put(
+  '/:counterId/services',
+  authenticate,
+  requireVerified,
+  requirePermission('manage_counters', COUNTER_MANAGEMENT_DENIAL),
+  validate(setCounterServicesSchema),
+  counterController.setServices,
+);
 router.get(
   '/:counterId/available-staff',
   authenticate,

@@ -11,6 +11,8 @@ declare global {
         role: StaffRole;
         status: StaffStatus;
         permissions: Permission[];
+        /** ADR-069: an Executive's Admin workspace (null otherwise). */
+        workspaceAdminId: string | null;
       };
     }
   }

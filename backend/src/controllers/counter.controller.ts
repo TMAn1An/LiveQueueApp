@@ -2,12 +2,10 @@ import type { Request, Response } from 'express';
 import * as counterService from '../services/counter.service';
 import * as auditService from '../services/audit.service';
 import * as realtime from '../realtime/emit';
+import { workspaceOfQueue } from '../services/workspaceScope.service';
 
 export async function list(req: Request, res: Response) {
-  const counters = await counterService.listCounters(
-    req.auth!.organizationId,
-    req.params.queueId as string,
-  );
+  const counters = await counterService.listCounters(req.auth!, req.params.queueId as string);
   res.status(200).json({ success: true, data: counters });
 }
 
@@ -23,7 +21,8 @@ export async function create(req: Request, res: Response) {
     action: 'counter_changed',
     entityType: 'counter',
     entityId: counter.id,
-    metadata: { change: 'created', name: counter.name },
+    metadata: { change: 'created', name: counter.name, operatorStaffId: counter.staffId },
+    workspaceAdminId: await workspaceOfQueue(counter.queueId),
     ipAddress: req.ip,
   });
   await realtime.emitCounterCreated(counter, req.auth!.organizationId);
@@ -42,6 +41,7 @@ export async function update(req: Request, res: Response) {
     entityType: 'counter',
     entityId: counter.id,
     metadata: { change: 'updated', changedFields: Object.keys(req.body as object) },
+    workspaceAdminId: await workspaceOfQueue(counter.queueId),
     ipAddress: req.ip,
   });
   await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
@@ -52,6 +52,7 @@ export async function updateStatus(req: Request, res: Response) {
     req.auth!,
     req.params.counterId as string,
     req.body.status,
+    req.body.operatorStaffId,
   );
   res.status(200).json({ success: true, data: counter });
   await auditService.recordAuditEventSafely({
@@ -59,7 +60,8 @@ export async function updateStatus(req: Request, res: Response) {
     action: 'counter_changed',
     entityType: 'counter',
     entityId: counter.id,
-    metadata: { change: 'status', newStatus: counter.status },
+    metadata: { change: 'status', newStatus: counter.status, operatorStaffId: counter.staffId },
+    workspaceAdminId: await workspaceOfQueue(counter.queueId),
     ipAddress: req.ip,
   });
   await realtime.emitCounterStatusChanged(counter, req.auth!.organizationId);
@@ -89,7 +91,7 @@ export async function remove(req: Request, res: Response) {
 
 export async function assign(req: Request, res: Response) {
   const { movedFromCounterId, ...counter } = await counterService.assignCounter(
-    req.auth!.organizationId,
+    req.auth!,
     req.params.counterId as string,
     req.body.staffId,
     { move: req.body.move === true },
@@ -105,13 +107,14 @@ export async function assign(req: Request, res: Response) {
       assignedStaffId: req.body.staffId,
       ...(movedFromCounterId ? { movedFromCounterId } : {}),
     },
+    workspaceAdminId: await workspaceOfQueue(counter.queueId),
     ipAddress: req.ip,
   });
   // Assignment is a counter update — no dedicated event exists for it in the
   // specification's 12-event list (recommended mapping, readiness review §9).
   await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
   if (movedFromCounterId) {
-    const released = await counterService.findCounterScoped(req.auth!.organizationId, movedFromCounterId);
+    const released = await counterService.findCounterScoped(req.auth!, movedFromCounterId);
     await realtime.emitCounterUpdated(released, req.auth!.organizationId);
   }
 }
@@ -129,9 +132,27 @@ export async function mine(req: Request, res: Response) {
  * cannot offer someone who is no longer free.
  */
 export async function assignableStaff(req: Request, res: Response) {
-  const staff = await counterService.listAssignableStaff(
-    req.auth!.organizationId,
-    req.params.counterId as string,
-  );
+  const staff = await counterService.listAssignableStaff(req.auth!, req.params.counterId as string);
   res.status(200).json({ success: true, data: staff });
+}
+
+/** ADR-070: which services this counter handles (empty = all). */
+export async function setServices(req: Request, res: Response) {
+  const counter = await counterService.setCounterServices(
+    req.auth!,
+    req.params.counterId as string,
+    req.body.serviceIds,
+  );
+  res.status(200).json({ success: true, data: counter });
+  await auditService.recordAuditEventSafely({
+    actor: auditService.actorFromAuth(req.auth!),
+    action: 'counter_changed',
+    entityType: 'counter',
+    entityId: counter.id,
+    metadata: { change: 'services', serviceIds: counter.serviceIds },
+    workspaceAdminId: await workspaceOfQueue(counter.queueId),
+    ipAddress: req.ip,
+  });
+  await realtime.emitCounterUpdated(counter, req.auth!.organizationId);
+  await realtime.broadcastQueueEtaUpdate(counter.queueId);
 }

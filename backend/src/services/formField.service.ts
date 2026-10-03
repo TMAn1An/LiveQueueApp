@@ -1,7 +1,8 @@
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
 import { assertIdentityFieldSurvives } from './queueIdentityPolicy.service';
-import { requireOwnedQueue, assertQueueMutable } from '../utils/tenantScope';
+import { assertQueueMutable } from '../utils/tenantScope';
+import { requireManageableQueue, requireVisibleQueue, type WorkspaceActor } from './workspaceScope.service';
 import type { replaceFormFieldsSchema } from '../validators/formField.validators';
 
 type ReplaceFormFieldsInput = z.infer<typeof replaceFormFieldsSchema.body>;
@@ -15,8 +16,8 @@ type ReplaceFormFieldsInput = z.infer<typeof replaceFormFieldsSchema.body>;
  * public/staff data boundary) — this is the staff-facing equivalent, reusing
  * the same tenant-ownership check as every other nested queue resource.
  */
-export async function getFormFields(organizationId: string, queueId: string) {
-  const queue = await requireOwnedQueue(organizationId, queueId);
+export async function getFormFields(actor: WorkspaceActor, queueId: string) {
+  const queue = await requireVisibleQueue(actor, queueId);
   const fields = await prisma.queueFormField.findMany({
     where: { queueId, version: queue.formVersion },
     orderBy: { sortOrder: 'asc' },
@@ -31,11 +32,11 @@ export async function getFormFields(organizationId: string, queueId: string) {
  * one transaction, so historical versions stay exactly as they were.
  */
 export async function replaceFormFields(
-  organizationId: string,
+  actor: WorkspaceActor,
   queueId: string,
   input: ReplaceFormFieldsInput,
 ) {
-  const queue = await requireOwnedQueue(organizationId, queueId);
+  const queue = await requireManageableQueue(actor, queueId);
   assertQueueMutable(queue);
   // A queue that identifies customers by one of these questions cannot lose
   // it, or have it turned into something that identifies nobody, while that

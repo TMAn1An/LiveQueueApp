@@ -10,6 +10,8 @@ export const listServiceHistorySchema = {
     // is falsy and treated as "no search" by the service layer.
     search: z.string().trim().max(200).optional(),
     queueId: z.string().uuid('queueId must be a valid id.').optional(),
+    /** ADR-069: Head/Manager filter to one Admin's workspace. */
+    adminId: z.string().uuid('adminId must be a valid id.').optional(),
     // Absent means COMPLETED only — a cancelled or skipped visit is never
     // counted as service given unless it is asked for by name.
     status: z.enum(SERVICE_HISTORY_STATUSES).optional(),

@@ -87,6 +87,8 @@ export interface RestrictedStaffContext {
 export async function createStaffWithRole(
   organizationId: string,
   role: Exclude<StaffRole, 'OWNER'>,
+  /** ADR-069: an Executive's Admin workspace (null: organization-level). */
+  options: { workspaceAdminId?: string | null } = {},
 ): Promise<RestrictedStaffContext> {
   const email = `${role.toLowerCase()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
   const password = 'Password123';
@@ -100,6 +102,7 @@ export async function createStaffWithRole(
       role,
       permissions: getEffectivePermissions(role),
       status: 'ACTIVE',
+      workspaceAdminId: role === 'STAFF' ? (options.workspaceAdminId ?? null) : null,
     },
   });
 
@@ -139,10 +142,51 @@ export interface QueueResponse {
   [key: string]: unknown;
 }
 
+/** Who a token belongs to, cached per token (role never changes for one). */
+const tokenIdentity = new Map<string, { role: string; organizationId: string; staffId: string }>();
+async function identityOf(accessToken: string) {
+  const cached = tokenIdentity.get(accessToken);
+  if (cached) return cached;
+  const me = await api().get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`);
+  const identity = {
+    role: me.body?.data?.staff?.role as string,
+    organizationId: (me.body?.data?.organization?.id ?? me.body?.data?.staff?.organizationId) as string,
+    staffId: me.body?.data?.staff?.id as string,
+  };
+  if (me.status === 200) tokenIdentity.set(accessToken, identity);
+  return identity;
+}
+
+/** ADR-069: the Admin each queue created through `createQueue` belongs to,
+ * by queue id — so later helpers can staff its counters from the right
+ * workspace. */
+export const queueAdmins = new Map<string, RestrictedStaffContext>();
+
+/**
+ * ADR-069: every queue belongs to one Admin, and each Admin has one queue.
+ * Suites written before workspaces create queues as the Organization Head;
+ * for those, this helper creates a fresh Admin for each queue and creates the
+ * queue in that Admin's workspace (the Head may manage every queue, so the
+ * suite's later calls with the Head's token keep working).
+ *
+ * Every new queue now starts with one active counter. Suites written before
+ * that assume a queue starts without counters, so — unless
+ * `keepFirstCounter: true` — the helper removes it directly (a setup bypass,
+ * like registerOwner's). Atomic creation itself is covered in
+ * adminWorkspaces.test.ts.
+ */
 export async function createQueue(
   accessToken: string,
-  overrides: Record<string, unknown> = {},
+  overrides: Record<string, unknown> & { keepFirstCounter?: boolean } = {},
 ): Promise<QueueResponse> {
+  const { keepFirstCounter = false, ...rest } = overrides;
+  overrides = rest;
+  const who = await identityOf(accessToken);
+  let admin: RestrictedStaffContext | undefined;
+  if (who.role === 'OWNER' && overrides.adminId === undefined) {
+    admin = await createStaffWithRole(who.organizationId, 'ADMIN');
+    overrides = { ...overrides, adminId: admin.staffId };
+  }
   const res = await api()
     .post('/api/queues')
     .set('Authorization', `Bearer ${accessToken}`)
@@ -159,6 +203,11 @@ export async function createQueue(
 
   if (res.status !== 201) {
     throw new Error(`createQueue failed: ${res.status} ${JSON.stringify(res.body)}`);
+  }
+  const queueId = res.body.data.id as string;
+  if (admin) queueAdmins.set(queueId, admin);
+  if (!keepFirstCounter) {
+    await prisma.counter.deleteMany({ where: { queueId } });
   }
 
   return res.body.data;
@@ -261,13 +310,13 @@ export async function createCounter(
   if (!assignToCreator || counterOperators.has(accessToken)) {
     return res.body.data;
   }
-  const me = await api().get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`);
-  const role = me.body?.data?.staff?.role;
-  const organizationId = me.body?.data?.organization?.id ?? me.body?.data?.staff?.organizationId;
-  if (me.status !== 200 || role === 'STAFF' || !organizationId) {
+  const who = await identityOf(accessToken);
+  if (!who.role || who.role === 'STAFF' || !who.organizationId) {
     return res.body.data;
   }
-  const operator = await createStaffWithRole(organizationId as string, 'STAFF');
+  const operator = await createStaffWithRole(who.organizationId, 'STAFF', {
+    workspaceAdminId: await workspaceAdminOfQueue(queueId),
+  });
   counterOperators.set(accessToken, operator);
   return assignCounterTo(accessToken, res.body.data.id as string, operator.staffId);
 }
@@ -292,12 +341,22 @@ export async function assignCounterTo(
  * A STAFF member assigned to the given counter — the person who operates it.
  * For tests that need more than one counter serving at once.
  */
+/** ADR-069: an Executive must belong to the queue's Admin workspace to
+ * operate its counters. */
+async function workspaceAdminOfQueue(queueId: string): Promise<string | null> {
+  const queue = await prisma.queue.findUnique({ where: { id: queueId }, select: { adminId: true } });
+  return queue?.adminId ?? null;
+}
+
 export async function createCounterOperator(
   ownerAccessToken: string,
   organizationId: string,
   counterId: string,
 ): Promise<RestrictedStaffContext> {
-  const operator = await createStaffWithRole(organizationId, 'STAFF');
+  const counter = await prisma.counter.findUniqueOrThrow({ where: { id: counterId }, select: { queueId: true } });
+  const operator = await createStaffWithRole(organizationId, 'STAFF', {
+    workspaceAdminId: await workspaceAdminOfQueue(counter.queueId),
+  });
   await assignCounterTo(ownerAccessToken, counterId, operator.staffId);
   return operator;
 }

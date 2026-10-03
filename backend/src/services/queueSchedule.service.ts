@@ -7,7 +7,13 @@ import {
   resolveLocalMoment,
   type QueueLocalMoment,
 } from '../utils/customerIdentity';
-import { assertQueueMutable, requireOwnedQueue } from '../utils/tenantScope';
+import { assertQueueMutable } from '../utils/tenantScope';
+import {
+  requireManageableQueue,
+  requireVisibleQueue,
+  visibleQueueWhere,
+  type WorkspaceActor,
+} from './workspaceScope.service';
 
 /**
  * Phase 4: optional per-queue weekly schedule + session capacity.
@@ -446,21 +452,22 @@ export function serializeSession(session: QueueSession) {
  * queue-nested resource in this codebase (see service.service.ts).
  */
 async function findSessionScoped(
-  organizationId: string,
+  actor: WorkspaceActor,
   sessionId: string,
 ): Promise<QueueSession & { queue: Queue }> {
   const session = await prisma.queueSession.findFirst({
-    where: { id: sessionId, queue: { organizationId } },
+    where: { id: sessionId, queue: visibleQueueWhere(actor) },
     include: { queue: true },
   });
   if (!session) {
     throw new AppError(404, 'SESSION_NOT_FOUND', 'Session not found.');
   }
+  await requireManageableQueue(actor, session.queueId);
   return session;
 }
 
-export async function listQueueSessions(organizationId: string, queueId: string) {
-  await requireOwnedQueue(organizationId, queueId);
+export async function listQueueSessions(actor: WorkspaceActor, queueId: string) {
+  await requireVisibleQueue(actor, queueId);
   const sessions = await prisma.queueSession.findMany({
     where: { queueId },
     orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }],
@@ -469,11 +476,11 @@ export async function listQueueSessions(organizationId: string, queueId: string)
 }
 
 export async function createQueueSession(
-  organizationId: string,
+  actor: WorkspaceActor,
   queueId: string,
   input: QueueSessionInput,
 ) {
-  const queue = await requireOwnedQueue(organizationId, queueId);
+  const queue = await requireManageableQueue(actor, queueId);
   assertQueueMutable(queue);
   validateSessionInput(input);
 
@@ -494,11 +501,11 @@ export async function createQueueSession(
 }
 
 export async function updateQueueSession(
-  organizationId: string,
+  actor: WorkspaceActor,
   sessionId: string,
   input: QueueSessionInput,
 ) {
-  const session = await findSessionScoped(organizationId, sessionId);
+  const session = await findSessionScoped(actor, sessionId);
   assertQueueMutable(session.queue);
   validateSessionInput(input);
 
@@ -527,8 +534,8 @@ export async function updateQueueSession(
  * onDelete: SetNull). Capacity accounting for that already-elapsed date is
  * likewise unaffected — it counts tokens, never the session row itself.
  */
-export async function deleteQueueSession(organizationId: string, sessionId: string): Promise<void> {
-  const session = await findSessionScoped(organizationId, sessionId);
+export async function deleteQueueSession(actor: WorkspaceActor, sessionId: string): Promise<void> {
+  const session = await findSessionScoped(actor, sessionId);
   assertQueueMutable(session.queue);
   await prisma.queueSession.delete({ where: { id: sessionId } });
 }
