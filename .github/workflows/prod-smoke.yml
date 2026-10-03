@@ -1,0 +1,44 @@
+name: Production smoke (read-only, scratch branch)
+
+# Read-only checks of production from a GitHub runner. Lives only on the
+# scratch branch claude/compassionate-franklin-q5m1be; never merged.
+on:
+  push:
+    branches: [claude/compassionate-franklin-q5m1be]
+
+permissions:
+  contents: read
+
+env:
+  API: https://livequeueapp.onrender.com
+  WEB: https://livequeue-dashboard.pages.dev
+  EXPECTED_VAPID_PUBLIC_KEY: BKHTEwquCGeSX70dPFo2YbCwKJtl1MSZz1U4usyL3uq3BsQttyj8AEn4gGUaSnHDCuJL1VKhBsuRA91EZbnLwnY
+  ORG_CODE: ${{ vars.SMOKE_ORG_CODE }}
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for the new backend (web-push config route)
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /tmp/cfg.json -m 60 -w '%{http_code}' "$API/api/public/web-push/config" || true)
+            echo "attempt $i: HTTP $code"
+            [ "$code" = 200 ] && break
+            sleep 20
+          done
+          [ "$code" = 200 ] || { echo "::error::new backend not live"; exit 1; }
+      - name: Smoke checks
+        run: node .github/prod-smoke/api.mjs
+  browser:
+    needs: api
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm i --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
+      - run: node .github/prod-smoke/browser.mjs
