@@ -3,16 +3,7 @@ import QRCode from 'qrcode';
 import { Button } from './Button';
 import { Card } from './Card';
 import { SectionHeading } from './SectionHeading';
-
-/** Where the public portal lives: its own origin when configured, else this one. */
-export function organizationQrUrl(publicCode: string, origin = portalOrigin()): string {
-  return `${origin.replace(/\/+$/, '')}/visit/${publicCode}`;
-}
-
-function portalOrigin(): string {
-  const configured = (import.meta.env.VITE_PUBLIC_PORTAL_URL as string | undefined)?.trim();
-  return configured || window.location.origin;
-}
+import { organizationQrUrl } from '../utils/organizationQrUrl';
 
 /**
  * ADR-068: the organization's one QR code. It opens a page listing every

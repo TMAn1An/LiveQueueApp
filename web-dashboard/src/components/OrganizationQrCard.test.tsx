@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { OrganizationQrCard, organizationQrUrl } from './OrganizationQrCard';
+import { OrganizationQrCard } from './OrganizationQrCard';
+import { organizationQrUrl } from '../utils/organizationQrUrl';
 
 vi.mock('qrcode', () => ({ default: { toCanvas: vi.fn(async () => undefined) } }));
 

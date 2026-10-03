@@ -186,6 +186,21 @@ Order does not matter between them, and the previous backend release runs unchan
 
 ADR-068. **Additive.** Adds `organizations.public_code` (every existing organization gets a distinct random 12-character code from the column default while the column is added, then the unique index is built), `queues.listed_on_organization_page` (default `true`, so every existing queue appears on its organization's page until someone hides it), and the `web_push_subscriptions` table. The previous backend release runs unchanged against the migrated schema. Existing printed queue-only QR codes keep working for the Android app. The dashboard is served by Cloudflare Pages; `public/_redirects` routes `/visit/*` to the portal entry, so no host setting changes. Optional build variable `VITE_PUBLIC_PORTAL_URL` (origin the organization QR points at; defaults to the dashboard's own origin).
 
+#### Production Web Push configuration (ADR-068)
+
+Set on the Render backend service (2026-10-03), values never in the repository:
+
+| Variable | Sensitivity | Production value |
+|---|---|---|
+| `WEB_PUSH_VAPID_PUBLIC_KEY` | public (served to browsers by `GET /api/public/web-push/config`) | set on Render |
+| `WEB_PUSH_VAPID_PRIVATE_KEY` | **secret** — Render only | set on Render |
+| `WEB_PUSH_SUBJECT` | public | `https://livequeue-dashboard.pages.dev` |
+
+- The private key is never committed, never put in a dashboard build, and never logged.
+- The key pair is permanent. Rotating it invalidates every existing browser subscription (people must enable notifications again), so rotate only if the private key is compromised.
+- Android push is Firebase Cloud Messaging and is separate and unchanged; these variables do not affect it.
+- On iPhone/iPad, background Web Push works only for the portal added to the Home Screen (iOS/iPadOS 16.4+). A normal Safari tab gets live Socket.io updates only while the page is open.
+
 #### Unique organization names (`20261001000131_add_organization_name_key`)
 
 ADR-051. Adds `organizations.name_key` (`NOT NULL`, unique) — the lower-case,
