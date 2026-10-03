@@ -208,7 +208,7 @@ void main() {
       fakeScanner.emitBarcode(_validQr);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.widgetWithText(CheckboxListTile, 'General Inquiry'));
+      await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry'));
       await tester.pump();
 
       final next = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next'));

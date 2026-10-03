@@ -22,8 +22,9 @@ import 'package:mobile_app/services/token_api_service.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// V2 Checkpoint 5 (ADR-027): checkbox-style multi-selection — proves the
-/// actual tap interaction, not a pixel snapshot.
+/// V2 Checkpoint 5 (ADR-027), ADR-070: a multi-service visit is an ordered
+/// journey built from "Add" chips — proves the actual tap interaction, not a
+/// pixel snapshot.
 ///
 /// ADR-063: this is also the first screen after a scan, so everything the
 /// removed Queue Details screen used to say and to refuse is covered here.
@@ -95,9 +96,9 @@ void main() {
     final nextButtonBefore = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next'));
     expect(nextButtonBefore.onPressed, isNull);
 
-    await tester.tap(find.widgetWithText(CheckboxListTile, 'General Inquiry'));
+    await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry'));
     await tester.pump();
-    await tester.tap(find.widgetWithText(CheckboxListTile, 'Document Check'));
+    await tester.tap(find.widgetWithText(ActionChip, 'Document Check'));
     await tester.pump();
 
     expect(find.text('Estimated service time: 12 minutes'), findsOneWidget);
@@ -105,21 +106,76 @@ void main() {
     expect(nextButtonAfter.onPressed, isNotNull);
   });
 
-  testWidgets('unchecking a service removes only that one from the total', (tester) async {
+  testWidgets('removing a step removes only that one from the total', (tester) async {
     final provider = await _buildLoadedProvider();
     await pump(tester, provider);
 
-    await tester.tap(find.widgetWithText(CheckboxListTile, 'General Inquiry'));
+    await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry'));
     await tester.pump();
-    await tester.tap(find.widgetWithText(CheckboxListTile, 'Document Check'));
+    await tester.tap(find.widgetWithText(ActionChip, 'Document Check'));
     await tester.pump();
     expect(find.text('Estimated service time: 12 minutes'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(CheckboxListTile, 'General Inquiry'));
+    await tester.tap(find.byTooltip('Remove step 1, General Inquiry'));
     await tester.pump();
 
     expect(find.text('Estimated service time: 7 minutes'), findsOneWidget);
-    expect(provider.selectedServiceIds, {'service-2'});
+    expect(provider.journeySteps, ['service-2']);
+  });
+
+  // ADR-070: a multi-service visit is an ordered journey.
+  group('ordered journey', () {
+    testWidgets('steps are numbered in the order added and can be reordered with the arrows', (tester) async {
+      final provider = await _buildLoadedProvider();
+      await pump(tester, provider);
+
+      await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry'));
+      await tester.pump();
+      await tester.tap(find.widgetWithText(ActionChip, 'Document Check'));
+      await tester.pump();
+      expect(provider.journeySteps, ['service-1', 'service-2']);
+
+      await tester.tap(find.byTooltip('Move Document Check up'));
+      await tester.pump();
+      expect(provider.journeySteps, ['service-2', 'service-1']);
+      expect(find.bySemanticsLabel(RegExp(r'^Step 1 of 2: Document Check')), findsOneWidget);
+    });
+
+    testWidgets('a service may repeat, but never twice in a row and never past its limit', (tester) async {
+      final provider = await _buildLoadedProvider({
+        'services': [
+          {..._twoServices[0], 'maxOccurrencesPerJourney': 2},
+          {..._twoServices[1], 'maxOccurrencesPerJourney': 1},
+        ],
+      });
+      await pump(tester, provider);
+
+      await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry'));
+      await tester.pump();
+      // Right after itself: not offered.
+      expect(tester.widget<ActionChip>(find.widgetWithText(ActionChip, 'General Inquiry (1/2)')).onPressed, isNull);
+      await tester.tap(find.widgetWithText(ActionChip, 'Document Check'));
+      await tester.pump();
+      // Document Check's limit is 1.
+      expect(tester.widget<ActionChip>(find.widgetWithText(ActionChip, 'Document Check (1/1)')).onPressed, isNull);
+      await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry (1/2)'));
+      await tester.pump();
+      expect(provider.journeySteps, ['service-1', 'service-2', 'service-1']);
+      expect(tester.widget<ActionChip>(find.widgetWithText(ActionChip, 'General Inquiry (2/2)')).onPressed, isNull);
+
+      // Removing the middle step brings the two equal steps together: refused.
+      await tester.tap(find.byTooltip('Remove step 2, Document Check'));
+      await tester.pump();
+      expect(find.text("General Inquiry can't be two steps in a row."), findsOneWidget);
+      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next')).onPressed, isNull);
+    });
+
+    testWidgets("starts from the queue's recommended order", (tester) async {
+      final provider = await _buildLoadedProvider({'recommendedJourney': ['service-2', 'service-1']});
+      await pump(tester, provider);
+      expect(provider.journeySteps, ['service-2', 'service-1']);
+      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next')).onPressed, isNotNull);
+    });
   });
 
   group('the queue itself, shown above its services', () {
@@ -149,11 +205,11 @@ void main() {
       });
       await pump(tester, provider);
 
-      expect(find.widgetWithText(CheckboxListTile, 'General Inquiry'), findsOneWidget);
+      expect(find.widgetWithText(ActionChip, 'General Inquiry'), findsOneWidget);
       expect(provider.selectedServiceIds, isEmpty);
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next')).onPressed, isNull);
 
-      await tester.tap(find.widgetWithText(CheckboxListTile, 'General Inquiry'));
+      await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry'));
       await tester.pump();
 
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next')).onPressed, isNotNull);
@@ -263,7 +319,7 @@ void main() {
 
       expect(find.text(note), findsOneWidget);
       expect(find.text("Today's hours: 09:00–12:00, 14:00–17:00"), findsOneWidget);
-      expect(find.widgetWithText(CheckboxListTile, 'General Inquiry'), findsOneWidget);
+      expect(find.widgetWithText(ActionChip, 'General Inquiry'), findsOneWidget);
       expect(find.widgetWithText(FilledButton, 'Next'), findsOneWidget);
     });
 
@@ -274,7 +330,7 @@ void main() {
       await pump(tester, provider);
 
       expect(find.text('Each person may use this queue once.'), findsOneWidget);
-      expect(find.widgetWithText(CheckboxListTile, 'General Inquiry'), findsOneWidget);
+      expect(find.widgetWithText(ActionChip, 'General Inquiry'), findsOneWidget);
     });
 
     testWidgets('a wait between visits', (tester) async {

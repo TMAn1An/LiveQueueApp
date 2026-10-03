@@ -25,7 +25,13 @@ class QueueConfig {
     this.identity = const QueueIdentityRequirements(),
     this.timezone,
     this.schedule = const QueueScheduleStatus(),
+    this.recommendedJourney = const [],
   });
+
+  /// ADR-070: the order the queue suggests services be taken in (service
+  /// ids, may repeat). The join flow starts from it; empty when none is set
+  /// or from a backend that predates it.
+  final List<String> recommendedJourney;
 
   final String id;
   final String name;
@@ -74,6 +80,9 @@ class QueueConfig {
         (json['identity'] as Map<String, dynamic>?) ?? const {},
       ),
       schedule: QueueScheduleStatus.fromJson(json['schedule'] as Map<String, dynamic>?),
+      recommendedJourney: (json['recommendedJourney'] as List<dynamic>? ?? const [])
+          .whereType<String>()
+          .toList(),
       services: (json['services'] as List<dynamic>? ?? const [])
           .map((e) => ServiceOption.fromJson(e as Map<String, dynamic>))
           .toList(),

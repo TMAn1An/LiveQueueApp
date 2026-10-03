@@ -200,6 +200,39 @@ void main() {
       expect(Set<String>.from(capturedBody!['serviceIds'] as List), {'service-1', 'service-2'});
     });
 
+    test('ADR-070: sends the ordered journey, repeats included, exactly as arranged', () async {
+      Map<String, dynamic>? capturedBody;
+      final mockClient = MockClient((request) async {
+        if (request.url.path.contains('/config')) {
+          return http.Response(jsonEncode({'success': true, 'data': _queueJson()}), 200);
+        }
+        if (request.url.path == '/api/devices/register') {
+          return http.Response(jsonEncode({'success': true, 'data': {'id': 'device-1'}}), 201);
+        }
+        capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(jsonEncode({'success': true, 'data': _tokenJson()}), 201);
+      });
+      final provider = _buildProvider(mockClient);
+      await provider.loadQueueById('queue-1');
+
+      provider.addStep('service-2');
+      provider.addStep('service-2'); // refused: twice in a row
+      provider.addStep('service-1');
+      provider.addStep('service-2');
+      expect(provider.journeySteps, ['service-2', 'service-1', 'service-2']);
+      provider.moveStep(1, 0);
+      expect(provider.journeySteps, ['service-1', 'service-2', 'service-2']);
+      expect(provider.isJourneyValid, isFalse); // now two equal steps meet
+      provider.moveStep(2, 0);
+      expect(provider.journeySteps, ['service-2', 'service-1', 'service-2']);
+      expect(provider.isJourneyValid, isTrue);
+      expect(provider.selectedTotalDurationMinutes, 19); // 7 + 5 + 7
+      provider.updateFormField('fullName', 'Jane Doe');
+
+      expect(await provider.submitJoin(), isTrue);
+      expect(capturedBody!['serviceIds'], ['service-2', 'service-1', 'service-2']);
+    });
+
     test('maps QUEUE_NOT_ACTIVE to a user-friendly message', () async {
       final mockClient = MockClient((request) async {
         if (request.url.path.contains('/config')) {

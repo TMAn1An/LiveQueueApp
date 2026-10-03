@@ -1,4 +1,5 @@
 import 'counter_info.dart';
+import 'token_journey.dart';
 import 'queue_schedule_status.dart';
 
 /// Mirrors the backend's TokenStatus enum exactly (backend/prisma/schema.prisma).
@@ -59,7 +60,19 @@ class LiveQueueToken {
     this.completionFeedback,
     this.assignedSession,
     this.reminderSent = false,
+    this.journey,
+    this.queueRemovedReason,
+    this.queueRemoved = false,
   });
+
+  /// ADR-070: the ordered steps; null for a single-step or pre-journey visit
+  /// from an older backend.
+  final TokenJourney? journey;
+
+  /// ADR-069: true only when this visit ended because its queue was deleted
+  /// — then [queueRemovedReason] is what the organization gave as the reason.
+  final bool queueRemoved;
+  final String? queueRemovedReason;
 
   /// ADR-062: whether the backend has already pushed this token's "almost
   /// your turn" reminder. The app's own reminder — the one it raises while
@@ -188,6 +201,9 @@ class LiveQueueToken {
           ? null
           : QueueSessionWindow.fromJson(json['assignedSession'] as Map<String, dynamic>),
       reminderSent: json['reminderSent'] as bool? ?? false,
+      journey: TokenJourney.fromJson(json['journey'] as Map<String, dynamic>?),
+      queueRemoved: json['queueRemoved'] != null,
+      queueRemovedReason: _nonBlank((json['queueRemoved'] as Map<String, dynamic>?)?['reason'] as String?),
     );
   }
 
@@ -235,6 +251,9 @@ class LiveQueueToken {
       completionFeedback: completionFeedback,
       assignedSession: assignedSession,
       reminderSent: reminderSent,
+      journey: journey,
+      queueRemoved: queueRemoved,
+      queueRemovedReason: queueRemovedReason,
     );
   }
 }

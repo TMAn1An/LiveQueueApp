@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/queue_config.dart';
 import '../providers/queue_join_provider.dart';
+import '../widgets/journey_builder.dart';
 import '../widgets/queue_join_summary.dart';
 import 'dynamic_form_screen.dart';
 
@@ -64,27 +65,20 @@ class _QueueServices extends StatelessWidget {
             padding: EdgeInsets.symmetric(vertical: 24),
             child: Center(child: Text('No services are currently available.')),
           ),
-        if (canJoin)
+        // ADR-070: a multi-service visit is an ordered journey.
+        if (canJoin && allowMultiple && services.isNotEmpty) JourneyBuilder(services: services),
+        if (canJoin && !allowMultiple)
           for (final service in services)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Card(
                 margin: EdgeInsets.zero,
-                child: allowMultiple
-                    ? CheckboxListTile(
-                        value: selectedIds.contains(service.id),
-                        onChanged: (_) =>
-                            context.read<QueueJoinProvider>().toggleService(service.id),
-                        title: Text(service.serviceName),
-                        subtitle: service.description != null ? Text(service.description!) : null,
-                        secondary: Text('${service.durationMinutes} min'),
-                      )
-                    : RadioListTile<String>(
-                        value: service.id,
-                        title: Text(service.serviceName),
-                        subtitle: service.description != null ? Text(service.description!) : null,
-                        secondary: Text('${service.durationMinutes} min'),
-                      ),
+                child: RadioListTile<String>(
+                  value: service.id,
+                  title: Text(service.serviceName),
+                  subtitle: service.description != null ? Text(service.description!) : null,
+                  secondary: Text('${service.durationMinutes} min'),
+                ),
               ),
             ),
       ],
@@ -125,7 +119,7 @@ class _QueueServices extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: selectedIds.isEmpty
+                    onPressed: selectedIds.isEmpty || (allowMultiple && !provider.isJourneyValid)
                         ? null
                         : () {
                             Navigator.of(context).push(

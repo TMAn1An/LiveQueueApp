@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../models/live_queue_token.dart';
 import '../providers/token_tracking_provider.dart';
 import '../theme/app_colors.dart';
+import '../widgets/journey_progress.dart';
 import '../widgets/connection_indicator.dart';
 import '../widgets/eta_update_dialog.dart';
 import '../widgets/reminder_caution.dart';
@@ -200,6 +201,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                   ],
                   if (token.status == TokenStatus.called && token.counter != null)
                     _InfoRow(label: 'Counter', value: token.counter!.name),
+                  // ADR-070: a multi-step visit shows its steps, read-only.
+                  if (token.journey != null && token.journey!.totalSteps > 1) ...[
+                    const SizedBox(height: 12),
+                    JourneyProgress(journey: token.journey!),
+                    const SizedBox(height: 8),
+                  ],
                   // ADR-063: the queue's own details — hours, repeat-visit
                   // rule, services — are one tap away here, now that they are
                   // no longer a screen the customer passes through to join.
@@ -254,7 +261,17 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
                     ),
                   ],
                   if (!token.isActive) ...[
-                    Text(_terminalStatusMessage(token.status)),
+                    Text(
+                      token.queueRemoved
+                          ? 'This queue has been closed, so your place was cancelled.'
+                          : _terminalStatusMessage(token.status),
+                    ),
+                    // ADR-069 (D8): only the people whose place was cancelled
+                    // see why the queue was removed.
+                    if (token.queueRemoved && token.queueRemovedReason != null) ...[
+                      const SizedBox(height: 12),
+                      _TerminalNote(label: 'Reason', text: token.queueRemovedReason!),
+                    ],
                     // ADR-042: staff's own words about how the visit ended —
                     // shown only when there are some, never as an empty box.
                     if (token.status == TokenStatus.skipped && token.skipReasonDisplay != null) ...[

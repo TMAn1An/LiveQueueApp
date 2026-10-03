@@ -1,3 +1,4 @@
+import '../utils/journey_rules.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/history_entry.dart';
@@ -51,7 +52,14 @@ class QueueJoinProvider extends ChangeNotifier {
   /// the corresponding [ServiceOption]s are looked up from [queueConfig] on
   /// demand ([selectedServices]) rather than duplicated here, so this never
   /// drifts from the queue's actual service list.
-  Set<String> selectedServiceIds = {};
+  /// ADR-070: the services chosen, in the order the person will take them.
+  /// May repeat (never twice in a row). Fixed once the token is created.
+  List<String> journeySteps = [];
+
+  /// The distinct services chosen, for code that only cares which ones.
+  /// Setting it replaces the journey with those services in that order.
+  Set<String> get selectedServiceIds => journeySteps.toSet();
+  set selectedServiceIds(Set<String> ids) => journeySteps = ids.toList();
   Map<String, dynamic> formData = {};
   Map<String, String> formErrors = {};
   LiveQueueToken? createdToken;
@@ -102,11 +110,29 @@ class QueueJoinProvider extends ChangeNotifier {
 
   bool get canSubmitJoin => !requiresEmailVerification || isEmailVerified;
 
+  /// One entry per journey step, in order (a repeated service appears once
+  /// per step).
   List<ServiceOption> get selectedServices {
     final config = queueConfig;
     if (config == null) return const [];
-    return config.services.where((s) => selectedServiceIds.contains(s.id)).toList();
+    final byId = {for (final s in config.services) s.id: s};
+    return [
+      for (final id in journeySteps)
+        if (byId[id] != null) byId[id]!,
+    ];
   }
+
+  List<JourneyServiceRule> get journeyRules => [
+        for (final s in queueConfig?.services ?? const <ServiceOption>[])
+          JourneyServiceRule(id: s.id, name: s.serviceName, maxOccurrences: s.maxOccurrencesPerJourney),
+      ];
+
+  /// What is wrong with the arranged steps, if anything (ADR-070).
+  List<JourneyProblem> get journeyProblemList => journeyProblems(journeySteps, journeyRules);
+
+  bool get isJourneyValid => journeySteps.isNotEmpty && journeyProblemList.isEmpty;
+
+  bool canAddStep(String serviceId) => canAppendStep(journeySteps, serviceId, journeyRules);
 
   /// UX only — the backend recalculates and is authoritative for the total
   /// used in the actual ETA engine (V2 Checkpoint 5 requirement).
@@ -168,7 +194,7 @@ class QueueJoinProvider extends ChangeNotifier {
     // Choosing a different queue from an organization's list: what was
     // picked for the previous one does not carry over.
     if (queueConfig?.id != queueId) {
-      selectedServiceIds = {};
+      journeySteps = [];
       formData = {};
       formErrors = {};
       _pendingIdempotencyKey = null;
@@ -177,6 +203,7 @@ class QueueJoinProvider extends ChangeNotifier {
 
     try {
       queueConfig = await _queueRepository.getQueueConfig(queueId);
+      _prefillRecommendedJourney();
     } on ApiException catch (e) {
       errorMessage = e.code == 'QUEUE_NOT_FOUND'
           ? 'This queue could not be found. Please check the QR code and try again.'
@@ -203,19 +230,57 @@ class QueueJoinProvider extends ChangeNotifier {
   /// enforcement point regardless of this client-side shortcut.
   void toggleService(String serviceId) {
     final allowMultiple = queueConfig?.allowMultipleServices ?? true;
-    Set<String> updated;
     if (allowMultiple) {
-      updated = Set<String>.from(selectedServiceIds);
-      if (!updated.remove(serviceId)) {
-        updated.add(serviceId);
-      }
+      // Untick removes every step of that service; tick adds it at the end.
+      journeySteps = journeySteps.contains(serviceId)
+          ? journeySteps.where((id) => id != serviceId).toList()
+          : [...journeySteps, serviceId];
     } else {
-      updated = selectedServiceIds.contains(serviceId) ? {} : {serviceId};
+      journeySteps = journeySteps.contains(serviceId) ? [] : [serviceId];
     }
-    selectedServiceIds = updated;
+    _journeyChanged();
+  }
+
+  /// ADR-070: add [serviceId] as the last step (ignored if that would break
+  /// a rule — the UI disables it then anyway).
+  void addStep(String serviceId) {
+    if (!canAddStep(serviceId)) return;
+    journeySteps = [...journeySteps, serviceId];
+    _journeyChanged();
+  }
+
+  void removeStepAt(int index) {
+    if (index < 0 || index >= journeySteps.length) return;
+    journeySteps = [...journeySteps]..removeAt(index);
+    _journeyChanged();
+  }
+
+  /// Moves the step at [from] to position [to] (both 0-based, [to] being
+  /// the final index).
+  void moveStep(int from, int to) {
+    final moved = reorderStep(journeySteps, from, to);
+    if (identical(moved, journeySteps)) return;
+    journeySteps = moved;
+    _journeyChanged();
+  }
+
+  void _journeyChanged() {
     formData = {};
     formErrors = {};
     notifyListeners();
+  }
+
+  /// ADR-070: a multi-service queue's join starts from its suggested order,
+  /// keeping only services that are on offer now.
+  void _prefillRecommendedJourney() {
+    final config = queueConfig;
+    if (config == null || !config.allowMultipleServices || journeySteps.isNotEmpty) return;
+    final offered = {for (final s in config.services) s.id};
+    final steps = <String>[];
+    for (final id in config.recommendedJourney) {
+      if (offered.contains(id) && (steps.isEmpty || steps.last != id)) steps.add(id);
+    }
+    journeySteps = steps;
   }
 
   /// Typing a different address invalidates whatever was verified before —
@@ -372,7 +437,8 @@ class QueueJoinProvider extends ChangeNotifier {
       _pendingIdempotencyKey ??= generateUuidV4();
       final token = await _tokenRepository.createToken(
         queueId: config.id,
-        serviceIds: services.map((s) => s.id).toList(),
+        // ADR-070: the ordered journey, repeats included.
+        serviceIds: List<String>.from(journeySteps),
         deviceIdentifier: deviceIdentifier,
         formData: formData,
         idempotencyKey: _pendingIdempotencyKey!,
@@ -483,7 +549,7 @@ class QueueJoinProvider extends ChangeNotifier {
     errorMessage = null;
     queueConfig = null;
     organization = null;
-    selectedServiceIds = {};
+    journeySteps = [];
     formData = {};
     formErrors = {};
     createdToken = null;
