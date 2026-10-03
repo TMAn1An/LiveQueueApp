@@ -38,4 +38,3 @@ CREATE UNIQUE INDEX "organizations_public_code_key" ON "organizations"("public_c
 
 -- AddForeignKey
 ALTER TABLE "web_push_subscriptions" ADD CONSTRAINT "web_push_subscriptions_device_id_fkey" FOREIGN KEY ("device_id") REFERENCES "devices"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
