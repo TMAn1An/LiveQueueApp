@@ -1,0 +1,6 @@
+# ADR-068: the iPhone/iPad Safari portal is its own page in the build.
+# Static files (portal-sw.js, portal.webmanifest) live outside /visit/ so
+# this rewrite never shadows them. Everything else keeps Cloudflare Pages'
+# single-page fallback to index.html (the staff dashboard).
+/visit /portal.html 200
+/visit/* /portal.html 200

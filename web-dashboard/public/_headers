@@ -1,0 +1,7 @@
+# ADR-068: the portal's service worker must always be revalidated, so a new
+# version reaches people promptly, and is limited to the portal's scope.
+/portal-sw.js
+  Cache-Control: no-cache
+  Content-Type: application/javascript; charset=utf-8
+/portal.webmanifest
+  Content-Type: application/manifest+json; charset=utf-8

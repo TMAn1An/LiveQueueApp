@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
@@ -40,12 +41,46 @@ function requireApiBaseUrl(mode: string): void {
   }
 }
 
+/**
+ * ADR-068: the iPhone/iPad Safari portal is a second page (portal.html) in
+ * the same build, served for every /visit/* path. In production that is
+ * public/_redirects (Cloudflare Pages); this does the same for the dev and
+ * preview servers.
+ */
+function portalRoutes(): Plugin {
+  const rewrite = (url: string | undefined) =>
+    url && (url === '/visit' || url.startsWith('/visit/') || url.startsWith('/visit?')) ? '/portal.html' : url
+  return {
+    name: 'livequeue-portal-routes',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        req.url = rewrite(req.url)
+        next()
+      })
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        req.url = rewrite(req.url)
+        next()
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ command, mode }) => {
   if (command === 'build') requireApiBaseUrl(mode)
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), portalRoutes()],
+    build: {
+      rollupOptions: {
+        input: {
+          main: resolve(import.meta.dirname, 'index.html'),
+          portal: resolve(import.meta.dirname, 'portal.html'),
+        },
+      },
+    },
     test: {
       environment: 'jsdom',
       environmentOptions: { jsdom: { url: 'http://localhost:3000' } },
