@@ -182,11 +182,13 @@ jobs:
           unzip -p "$apk" lib/arm64-v8a/libapp.so | strings | grep -F "$API_BASE_URL" >/dev/null \
             || { echo "::error::production API_BASE_URL not compiled into the APK"; exit 1; }
 
-          out="$RUNNER_TEMP/LiveQueue-$TAG.apk"
+          apk_name="LiveQueue-$TAG-build$VERSION_CODE-production.apk"
+          out="$RUNNER_TEMP/$apk_name"
           cp "$apk" "$out"
           sha=$(sha256sum "$out" | cut -d' ' -f1)
           size=$(stat -c %s "$out")
           echo "APK_PATH=$out" >> "$GITHUB_ENV"
+          echo "APK_NAME=$apk_name" >> "$GITHUB_ENV"
           echo "APK_SHA256=$sha" >> "$GITHUB_ENV"
           echo "CERT_SHA256=$cert" >> "$GITHUB_ENV"
           {
@@ -195,7 +197,7 @@ jobs:
             echo "| Commit | \`$(git rev-parse HEAD)\` |"
             echo "| Package | \`$PACKAGE_ID\` |"
             echo "| Version | $VERSION_NAME ($VERSION_CODE) |"
-            echo "| APK | LiveQueue-$TAG.apk, $size bytes |"
+            echo "| APK | $apk_name, $size bytes |"
             echo "| APK SHA-256 | \`$sha\` |"
             echo "| Signing cert SHA-256 | \`$cert\` |"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -223,10 +225,12 @@ jobs:
           {
             echo
             echo "### APK"
-            echo "- File: \`LiveQueue-$TAG.apk\`"
-            echo "- Version: $VERSION_NAME ($VERSION_CODE)"
+            echo "- File: \`$APK_NAME\`"
+            echo "- Android version: $VERSION_NAME"
+            echo "- Build: $VERSION_CODE"
+            echo "- Package: \`$PACKAGE_ID\`"
             echo "- SHA-256: \`$APK_SHA256\`"
-            echo "- Signing certificate SHA-256: \`$CERT_SHA256\`"
+            echo "- Signing certificate SHA-256: \`$(sed 's/../&:/g; s/:$//' <<<"$CERT_SHA256" | tr 'a-f' 'A-F')\`"
           } >> "$RUNNER_TEMP/notes.md"
           git tag "$TAG" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG"

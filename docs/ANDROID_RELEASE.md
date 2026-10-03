@@ -63,7 +63,7 @@ first run's summary. From then on, any build signed by a different key fails.
    release tags always follow the app version). First run with `publish`
    unticked to check the build, then again with `publish` ticked.
 3. The run summary lists the APK SHA-256 and signing certificate. The release
-   gets `LiveQueue-<tag>.apk` attached.
+   gets `LiveQueue-<tag>-build<versionCode>-production.apk` attached (e.g. `LiveQueue-v1.0.4-build5-production.apk`).
 
 ## Local release builds
 
