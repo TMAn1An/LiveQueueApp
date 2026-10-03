@@ -12,10 +12,16 @@ enum OrganizationStatus {
   SUSPENDED
 }
 
+/// Shown to people as: OWNER = Organization Head, MANAGER = Organization
+/// Manager, ADMIN = Admin, STAFF = Executive (ADR-069). The stored values
+/// stay stable; only the labels changed.
 enum StaffRole {
   OWNER
   ADMIN
   STAFF
+  /// ADR-069: organization-wide governance (read everything, delete a queue
+  /// with a reason). No queue operations, no invitations, no serving.
+  MANAGER
 }
 
 enum StaffStatus {
@@ -186,11 +192,22 @@ model Staff {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// ADR-069: the Admin whose workspace this Executive (STAFF) belongs to.
+  /// Null for every other role, and for Executives who predate workspaces
+  /// (organization-level until the Organization Head assigns them — never
+  /// guessed). If the Admin leaves, their Executives return to
+  /// organization-level rather than disappearing.
+  workspaceAdminId String? @map("workspace_admin_id")
+  workspaceAdmin   Staff?  @relation("WorkspaceExecutives", fields: [workspaceAdminId], references: [id], onDelete: SetNull)
+
   sessions            Session[]
   counters            Counter[]
   passwordResetTokens PasswordResetToken[]
+  executives          Staff[]              @relation("WorkspaceExecutives")
+  adminQueues         Queue[]              @relation("QueueAdmin")
 
   @@index([organizationId])
+  @@index([workspaceAdminId])
   @@map("staff")
 }
 
@@ -321,11 +338,27 @@ model Queue {
   /// a join failed.
   scheduleVisibleToCustomers Boolean @default(true) @map("schedule_visible_to_customers")
 
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  /// ADR-069: the Admin whose workspace this queue is — one live queue per
+  /// Admin (partial unique index queues_admin_live_key). Null only for
+  /// queues that predate workspaces ("Head-managed" until the Organization
+  /// Head assigns them) or whose Admin has left; a new queue is never
+  /// created without one.
+  adminId String? @map("admin_id")
+  admin   Staff?  @relation("QueueAdmin", fields: [adminId], references: [id], onDelete: SetNull)
+
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+  deletedAt        DateTime?  @map("deleted_at")
+  /// ADR-069: who removed the queue and why. Snapshotted (not foreign keys)
+  /// so the record survives the person later leaving the organization.
+  /// Null on queues deleted before this was recorded.
+  deletedByStaffId String?    @map("deleted_by_staff_id")
+  deletedByEmail   String?    @map("deleted_by_email")
+  deletedByRole    StaffRole? @map("deleted_by_role")
+  deletionReason   String?    @map("deletion_reason")
 
   services           QueueService[]
+  recommendedSteps   QueueRecommendedStep[]
   counters           Counter[]
   formFields         QueueFormField[]
   tokens             Token[]
@@ -335,6 +368,7 @@ model Queue {
   emailVerifications CustomerEmailVerification[]
 
   @@index([organizationId])
+  @@index([adminId])
   @@map("queues")
 }
 
@@ -343,10 +377,13 @@ model QueueService {
   queueId String @map("queue_id")
   queue   Queue  @relation(fields: [queueId], references: [id], onDelete: Cascade)
 
-  serviceName     String  @map("service_name")
-  description     String?
-  durationMinutes Int     @map("duration_minutes")
-  isActive        Boolean @default(true) @map("is_active")
+  serviceName              String  @map("service_name")
+  description              String?
+  durationMinutes          Int     @map("duration_minutes")
+  isActive                 Boolean @default(true) @map("is_active")
+  /// ADR-070: how many times this service may appear in one person's
+  /// ordered journey (never twice in a row, whatever this says).
+  maxOccurrencesPerJourney Int     @default(2) @map("max_occurrences_per_journey")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -355,9 +392,13 @@ model QueueService {
   /// / ADR-027. Kept alongside `tokenServices` during the transition; do not
   /// remove without first confirming every Token.serviceId read site has
   /// moved to the full `tokenServices` set.
-  tokens        Token[]
+  tokens           Token[]
   /// The authoritative multi-service selection (V2 Checkpoint 5, ADR-027).
-  tokenServices TokenService[]
+  tokenServices    TokenService[]
+  /// ADR-070: the ordered journey steps that use this service.
+  journeySteps     TokenServiceStep[]
+  counterServices  CounterService[]
+  recommendedSteps QueueRecommendedStep[]
 
   @@index([queueId])
   @@map("queue_services")
@@ -421,7 +462,13 @@ model Counter {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  tokens Token[]
+  tokens        Token[]
+  /// ADR-070: the services this counter handles. None = every service of
+  /// its queue (the simple default).
+  services      CounterService[]
+  journeySteps  TokenServiceStep[] @relation("StepCounter")
+  referralsTo   TokenServiceStep[] @relation("StepReferredTo")
+  referralsFrom TokenServiceStep[] @relation("StepReferredFrom")
 
   @@index([queueId])
   @@index([staffId])
@@ -588,6 +635,14 @@ model Token {
   /// an in-memory Set).
   reminderSentAt DateTime? @map("reminder_sent_at")
 
+  /// ADR-070: which step of the ordered journey this token is on (1-based).
+  /// Null for tokens created before journeys existed — those keep their
+  /// original single-visit behaviour and are never converted.
+  currentStepNumber Int?    @map("current_step_number")
+  /// ADR-069: why a CANCELLED token was cancelled when it was not the
+  /// person themselves — currently only QUEUE_REMOVED. Null otherwise.
+  cancelReasonCode  String? @map("cancel_reason_code")
+
   /// ADR-034: the identity this token was admitted under, kept on the token
   /// itself because the claim row does not survive the whole lifecycle — a
   /// skip deletes it (the customer was not served, so they may rejoin), and
@@ -646,6 +701,8 @@ model Token {
   /// Token.serviceId at migration time. Always non-empty for every token,
   /// old and new alike.
   tokenServices           TokenService[]
+  /// ADR-070: the ordered journey (empty for pre-journey tokens).
+  journeySteps            TokenServiceStep[]
 
   @@unique([queueId, sequenceNumber])
   @@unique([deviceId, idempotencyKey])
@@ -776,15 +833,21 @@ model AuditLog {
   staffId        String @map("staff_id")
   staffEmail     String @map("staff_email")
 
-  action     String
-  entityType String  @map("entity_type")
-  entityId   String? @map("entity_id")
-  metadata   Json?
-  ipAddress  String? @map("ip_address")
+  action           String
+  entityType       String  @map("entity_type")
+  entityId         String? @map("entity_id")
+  metadata         Json?
+  ipAddress        String? @map("ip_address")
+  /// ADR-069: the Admin workspace the event belongs to — what an Admin's
+  /// audit view is limited to. Null for organization-level events and for
+  /// every event recorded before workspaces existed (those stay visible to
+  /// the Organization Head and Managers only; never attributed by guess).
+  workspaceAdminId String? @map("workspace_admin_id")
 
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([organizationId, createdAt])
+  @@index([organizationId, workspaceAdminId, createdAt])
   @@map("audit_logs")
 }
 
@@ -1081,4 +1144,82 @@ model PasswordResetToken {
 
   @@index([staffId, createdAt])
   @@map("password_reset_tokens")
+}
+
+/// ADR-070: which services a counter handles. A counter with no rows handles
+/// every service of its queue, so routing is opt-in per counter.
+model CounterService {
+  counterId String       @map("counter_id")
+  counter   Counter      @relation(fields: [counterId], references: [id], onDelete: Cascade)
+  serviceId String       @map("service_id")
+  service   QueueService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@id([counterId, serviceId])
+  @@index([serviceId])
+  @@map("counter_services")
+}
+
+/// ADR-070: the queue's recommended journey, prefilled for people choosing
+/// their services. Positions are 1-based and contiguous; the same service may
+/// appear more than once (never twice in a row).
+model QueueRecommendedStep {
+  id        String       @id @default(uuid())
+  queueId   String       @map("queue_id")
+  queue     Queue        @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  position  Int
+  serviceId String       @map("service_id")
+  service   QueueService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([queueId, position])
+  @@map("queue_recommended_steps")
+}
+
+/// ADR-070: the state of one step of a journey.
+enum JourneyStepStatus {
+  PENDING
+  CALLED
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+  CANCELLED
+}
+
+/// ADR-070: one step of a person's ordered service journey. The list of
+/// (stepNumber, serviceId) is fixed when the token is created and never
+/// edited; only each step's progress (status, who served it, a referral to
+/// another counter) is recorded as it happens.
+model TokenServiceStep {
+  id         String            @id @default(uuid())
+  tokenId    String            @map("token_id")
+  token      Token             @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  stepNumber Int               @map("step_number")
+  serviceId  String            @map("service_id")
+  service    QueueService      @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  status     JourneyStepStatus @default(PENDING)
+
+  /// Who handled the step (set when it is called).
+  counterId   String?   @map("counter_id")
+  counter     Counter?  @relation("StepCounter", fields: [counterId], references: [id], onDelete: SetNull)
+  staffId     String?   @map("staff_id")
+  calledAt    DateTime? @map("called_at")
+  startedAt   DateTime? @map("started_at")
+  completedAt DateTime? @map("completed_at")
+
+  /// A referral sends this step to a specific counter, ahead of that
+  /// counter's normal line (never ahead of the person it is serving).
+  referredToCounterId   String?   @map("referred_to_counter_id")
+  referredToCounter     Counter?  @relation("StepReferredTo", fields: [referredToCounterId], references: [id], onDelete: SetNull)
+  referredFromCounterId String?   @map("referred_from_counter_id")
+  referredFromCounter   Counter?  @relation("StepReferredFrom", fields: [referredFromCounterId], references: [id], onDelete: SetNull)
+  referredByStaffId     String?   @map("referred_by_staff_id")
+  referredAt            DateTime? @map("referred_at")
+  referralNote          String?   @map("referral_note")
+
+  @@unique([tokenId, stepNumber])
+  @@index([serviceId])
+  @@index([referredToCounterId])
+  @@index([counterId])
+  @@map("token_service_steps")
 }
