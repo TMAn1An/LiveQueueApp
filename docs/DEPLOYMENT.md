@@ -182,6 +182,10 @@ ADR-055/057/058. **All three are additive and touch no existing row.**
 
 Order does not matter between them, and the previous backend release runs unchanged against the migrated schema (it never reads the new table/column, and it writes `require_service_start_otp` explicitly). Rolling the code back needs no schema change. Forgot-password needs the same `RESEND_API_KEY`, `EMAIL_FROM` and `APP_BASE_URL` as verification emails; reset links point at `APP_BASE_URL/reset-password`. Optional: `PASSWORD_RESET_TTL_MINUTES` (default `30`, max `240`).
 
+#### Organization QR and Web Push (`20261003000000_org_public_code_and_web_push`)
+
+ADR-068. **Additive.** Adds `organizations.public_code` (every existing organization gets a distinct random 12-character code from the column default while the column is added, then the unique index is built), `queues.listed_on_organization_page` (default `true`, so every existing queue appears on its organization's page until someone hides it), and the `web_push_subscriptions` table. The previous backend release runs unchanged against the migrated schema. Existing printed queue-only QR codes keep working for the Android app. The dashboard is served by Cloudflare Pages; `public/_redirects` routes `/visit/*` to the portal entry, so no host setting changes. Optional build variable `VITE_PUBLIC_PORTAL_URL` (origin the organization QR points at; defaults to the dashboard's own origin).
+
 #### Unique organization names (`20261001000131_add_organization_name_key`)
 
 ADR-051. Adds `organizations.name_key` (`NOT NULL`, unique) — the lower-case,
@@ -383,6 +387,7 @@ deliberately rather than trusting `/health`.
 | `EMAIL_FROM` | `LiveQueue <onboarding@resend.dev>` | **Delivers only to the email address that owns the Resend account.** `onboarding@resend.dev` is Resend's shared sandbox sender: every send to any other recipient is rejected by the provider (typically a 403 "you can only send testing emails to your own email address"), so real signups silently never receive their link. Set this to a sender on a domain verified in Resend. |
 | `EMAIL_REPLY_TO` | unset → no Reply-To header | Optional. A monitored mailbox on the sending domain; a small positive deliverability signal and somewhere for recipients to reply. A blank value is treated as unset. |
 | `FIREBASE_CREDENTIALS` *or* `FIREBASE_SERVICE_ACCOUNT_PATH` | unset → push disabled | No push notifications (reminders, lifecycle). See §6 — **on Render, use `FIREBASE_CREDENTIALS`**. |
+| `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, `WEB_PUSH_SUBJECT` | unset → Web Push disabled | The iPhone/iPad portal (ADR-068) says notifications are unavailable; everything else, Android FCM included, is unaffected. **All three or none** — a partial or malformed set is refused at startup. Generate once with `npx web-push generate-vapid-keys` on a trusted machine; the public key is public, the **private key is a secret** (Render environment only, never committed, never in a dashboard build). `WEB_PUSH_SUBJECT` is `mailto:…` or `https://…`. Rotating the pair silently invalidates every existing browser subscription (people re-enable notifications), so keep it stable. Allow outbound HTTPS to `*.push.apple.com` (and `fcm.googleapis.com`, `*.push.services.mozilla.com`, `*.notify.windows.com` for non-Apple browsers). |
 | `MOBILE_ANDROID_STORE_URL` | `''` | Only matters once you raise the minimum app version — the Update Required screen then has no store to send users to. See §11. |
 
 ### 3b-i. "The verification email never arrives"
