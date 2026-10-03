@@ -65,6 +65,8 @@ export interface Queue {
   /** Whether the mobile app may show today's hours / the customer's assigned
    * session. Join-failure reasons are shown to the customer either way. */
   scheduleVisibleToCustomers: boolean;
+  /** ADR-068: shown on the organization's public page (organization QR). */
+  listedOnOrganizationPage?: boolean;
   formVersion: number;
   qrCodeUri: string;
   deletedAt: string | null;

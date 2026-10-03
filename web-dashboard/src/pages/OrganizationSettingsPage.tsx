@@ -13,6 +13,7 @@ import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PageHeader } from '../components/PageHeader';
+import { OrganizationQrCard } from '../components/OrganizationQrCard';
 import { OrganizationNameStatus } from '../components/OrganizationNameStatus';
 import { FieldError } from '../components/FieldError';
 import { latinNameError } from '../utils/latinText';
@@ -177,6 +178,11 @@ export function OrganizationSettingsPage() {
           <p className="mt-3 text-xs text-faint">Only the organization owner can edit these settings.</p>
         )}
       </Card>
+
+      {/* ADR-068: one QR for every queue of the organization. */}
+      {organization.publicCode && (
+        <OrganizationQrCard organizationName={organization.name} publicCode={organization.publicCode} />
+      )}
 
       {/* Owner Guided Tour / Setup Guide */}
       {isOwner && (

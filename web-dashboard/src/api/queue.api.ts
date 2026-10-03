@@ -49,6 +49,7 @@ export interface CreateQueueInput {
   scheduleEnabled?: boolean;
   scheduleDailyCapacity?: number | null;
   scheduleVisibleToCustomers?: boolean;
+  listedOnOrganizationPage?: boolean;
 }
 
 export function createQueue(input: CreateQueueInput) {

@@ -1,7 +1,8 @@
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { PermissionGate } from '../components/PermissionGate';
 import { useAuth } from '../context/AuthContext';
-import { useQueue } from '../hooks/useQueues';
+import { useQueue, useUpdateQueue } from '../hooks/useQueues';
+import { Switch } from '../components/Switch';
 import { Card } from '../components/Card';
 import { ButtonLink } from '../components/Button';
 import { TabBar } from '../components/TabBar';
@@ -44,6 +45,7 @@ export function QueueDetailsPage() {
 
   const { organization } = useAuth();
   const { data: queue, isLoading } = useQueue(queueId);
+  const updateQueue = useUpdateQueue(queueId ?? '');
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
 
@@ -174,7 +176,22 @@ export function QueueDetailsPage() {
       {/* SECTION: QR Code & Customer Entry */}
       {showQr && (
         <Card>
-          <SectionHeading title="QR Code" help="Display or print this QR code at your location. People scan it to join the queue themselves." />
+          <SectionHeading
+            title="QR Code"
+            help="Your organization has one QR code for all its queues (Organization Settings) — that is the one to print. This queue-only code opens this queue directly in the Android app and keeps working for codes already printed."
+          />
+          <div className="mb-4 space-y-2">
+            <Switch
+              id="listed-on-organization-page"
+              checked={queue.listedOnOrganizationPage !== false}
+              onChange={(next) => void updateQueue.mutateAsync({ listedOnOrganizationPage: next })}
+              label="Show on the organization page"
+              help="When on, this queue appears when people scan your organization's QR code. Turn it off to keep a queue out of that list; its own queue-only code still works."
+            />
+            <Link to="/organization" className="inline-block text-sm font-semibold text-brand-fg underline">
+              Organization QR code
+            </Link>
+          </div>
           <QrCodeDisplay
             qrCodeUri={queue.qrCodeUri}
             organizationName={organization?.name ?? ''}

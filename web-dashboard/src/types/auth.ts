@@ -44,6 +44,8 @@ export interface Organization {
   /** V2 Product Completion checkpoint, Part C: null means the owner has not
    * finished the first-time dashboard tutorial — that is what triggers it. */
   onboardingCompletedAt?: string | null;
+  /** ADR-068: the code in the organization's one public QR (/visit/{code}). */
+  publicCode?: string;
   createdAt?: string;
   updatedAt?: string;
 }
