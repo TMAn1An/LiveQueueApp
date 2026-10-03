@@ -4,10 +4,14 @@ import 'package:provider/provider.dart';
 
 import '../providers/queue_join_provider.dart';
 import '../widgets/error_banner.dart';
+import 'organization_queues_screen.dart';
 import 'service_selection_screen.dart';
 
 /// Spec section 7.15: scan -> validate format -> extract queue id -> request
 /// public config -> display queue details.
+///
+/// ADR-068: an organization's QR (`https://…/visit/{code}`) opens its queue
+/// list first; a legacy queue-only code still goes straight to the queue.
 class QrScannerScreen extends StatefulWidget {
   const QrScannerScreen({super.key});
 
@@ -45,7 +49,12 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
       await provider.loadQueueFromScannedQr(raw);
 
       if (!mounted) return;
-      if (provider.queueConfig != null) {
+      if (provider.organization != null) {
+        navigated = true;
+        await Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const OrganizationQueuesScreen()),
+        );
+      } else if (provider.queueConfig != null) {
         navigated = true;
         // Straight to the services (ADR-063): the queue's own details and
         // any reason it cannot be joined are shown at the top of that
@@ -119,7 +128,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                   children: [
                     CircularProgressIndicator(color: Colors.white),
                     SizedBox(height: 12),
-                    Text('Loading queue…', style: TextStyle(color: Colors.white)),
+                    Text('Loading…', style: TextStyle(color: Colors.white)),
                   ],
                 ),
               ),

@@ -14,6 +14,7 @@ import 'package:mobile_app/repositories/email_verification_repository.dart';
 import 'package:mobile_app/repositories/history_repository.dart';
 import 'package:mobile_app/repositories/queue_repository.dart';
 import 'package:mobile_app/repositories/token_repository.dart';
+import 'package:mobile_app/screens/organization_queues_screen.dart';
 import 'package:mobile_app/screens/qr_scanner_screen.dart';
 import 'package:mobile_app/screens/service_selection_screen.dart';
 import 'package:mobile_app/services/api_client.dart';
@@ -212,6 +213,119 @@ void main() {
 
       final next = tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next'));
       expect(next.onPressed, isNotNull);
+    });
+  });
+
+  // ADR-068: the organization's one QR → its queues → a queue's services.
+  group('an organization QR', () {
+    const orgQr = 'https://app.livequeue.example/visit/a1b2c3d4e5f6';
+    Map<String, dynamic> orgJson() => {
+          'organization': {'name': 'City Clinic', 'publicCode': 'a1b2c3d4e5f6'},
+          'queues': [
+            {
+              'id': '3f2504e0-4f89-11d3-9a0c-0305e82c3301',
+              'name': 'Customer Service',
+              'description': null,
+              'availability': 'JOINABLE',
+              'closedReason': null,
+              'message': null,
+              'waitingCount': 3,
+              'estimatedWaitMinutes': 12,
+            },
+            {
+              'id': '9b2c1d0e-4f89-11d3-9a0c-0305e82c3302',
+              'name': 'Pharmacy',
+              'description': null,
+              'availability': 'CLOSED',
+              'closedReason': 'SCHEDULE',
+              'message': 'Opens tomorrow at 09:00.',
+              'waitingCount': 0,
+              'estimatedWaitMinutes': null,
+            },
+          ],
+        };
+
+    late List<String> paths;
+    QueueJoinProvider orgProvider({int orgStatus = 200}) {
+      paths = [];
+      return _buildProvider(MockClient((request) async {
+        paths.add(request.url.path);
+        if (request.url.path.startsWith('/api/public/organizations/')) {
+          if (orgStatus != 200) {
+            return http.Response(
+              jsonEncode({
+                'success': false,
+                'error': {'code': 'ORGANIZATION_NOT_FOUND', 'message': 'Not found.'},
+              }),
+              orgStatus,
+            );
+          }
+          return http.Response(jsonEncode({'success': true, 'data': orgJson()}), 200);
+        }
+        return http.Response(jsonEncode({'success': true, 'data': _queueJson()}), 200);
+      }));
+    }
+
+    testWidgets('lists the queues with waiting counts, and which are closed', (tester) async {
+      final provider = orgProvider();
+      await _pumpScannerOverHome(tester, provider);
+
+      fakeScanner.emitBarcode(orgQr);
+      await tester.pumpAndSettle();
+
+      expect(paths, ['/api/public/organizations/a1b2c3d4e5f6']);
+      expect(find.byType(OrganizationQueuesScreen), findsOneWidget);
+      expect(find.text('City Clinic'), findsOneWidget);
+      expect(find.text('3 people waiting · about 12 min'), findsOneWidget);
+      expect(find.text('Opens tomorrow at 09:00.'), findsOneWidget);
+    });
+
+    testWidgets('a closed queue cannot be opened; a joinable one leads to its services',
+        (tester) async {
+      final provider = orgProvider();
+      await _pumpScannerOverHome(tester, provider);
+      fakeScanner.emitBarcode(orgQr);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Pharmacy'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ServiceSelectionScreen), findsNothing);
+
+      await tester.tap(find.text('Customer Service'));
+      await tester.pumpAndSettle();
+      expect(find.byType(ServiceSelectionScreen), findsOneWidget);
+      expect(find.text('General Inquiry'), findsOneWidget);
+      expect(paths, contains('/api/public/queues/3f2504e0-4f89-11d3-9a0c-0305e82c3301/config'));
+
+      // Back returns to the list, refreshed from the backend.
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.byType(OrganizationQueuesScreen), findsOneWidget);
+      expect(paths.where((p) => p.startsWith('/api/public/organizations/')).length, 2);
+    });
+
+    testWidgets('an unknown organization is explained and the scanner keeps working',
+        (tester) async {
+      final provider = orgProvider(orgStatus: 404);
+      await _pumpScanner(tester, provider);
+
+      fakeScanner.emitBarcode(orgQr);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('organization could not be found'), findsOneWidget);
+      expect(find.byType(OrganizationQueuesScreen), findsNothing);
+      expect(fakeScanner.isRunning, isTrue);
+    });
+
+    testWidgets('a legacy queue-only code still goes straight to the services', (tester) async {
+      final provider = orgProvider();
+      await _pumpScannerOverHome(tester, provider);
+
+      fakeScanner.emitBarcode(_validQr);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(OrganizationQueuesScreen), findsNothing);
+      expect(find.byType(ServiceSelectionScreen), findsOneWidget);
     });
   });
 

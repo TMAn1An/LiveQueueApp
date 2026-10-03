@@ -49,7 +49,47 @@ void main() {
     });
   });
 
+  _organizationTests();
   _contractTests();
+}
+
+/// ADR-068: the organization's one QR, which is also the iPhone portal link.
+void _organizationTests() {
+  group('QrParser.parse — organization QR', () {
+    test('reads the code from the portal link, whatever the host', () {
+      for (final raw in [
+        'https://app.livequeue.example/visit/a1b2c3d4e5f6',
+        'https://another.host/visit/a1b2c3d4e5f6/',
+        '  https://app.livequeue.example/visit/A1B2C3D4E5F6\n',
+      ]) {
+        final parsed = QrParser.parse(raw);
+        expect(parsed, isA<OrganizationQr>(), reason: raw);
+        expect((parsed as OrganizationQr).publicCode, 'a1b2c3d4e5f6');
+      }
+    });
+
+    test('still reads a legacy queue-only code', () {
+      const queueId = '7f1c2b3a-9d4e-4c6f-8a1b-2c3d4e5f6a7b';
+      final parsed = QrParser.parse('livequeue://queue/$queueId');
+      expect(parsed, isA<QueueQr>());
+      expect((parsed as QueueQr).queueId, queueId);
+    });
+
+    test('rejects a malformed code, other portal pages, and non-https links', () {
+      for (final raw in [
+        'https://app.livequeue.example/visit/ab',
+        'https://app.livequeue.example/visit/abc-def-ghi',
+        'https://app.livequeue.example/visit/token/abc123',
+        'https://app.livequeue.example/visit',
+        'http://app.livequeue.example/visit/a1b2c3d4e5f6',
+        'https://example.com/some/other/page',
+        'livequeue://organization/a1b2c3d4-e5f6-4789-a123-b1c2d3e4f5a6',
+        '',
+      ]) {
+        expect(() => QrParser.parse(raw), throwsA(isA<QrParseException>()), reason: raw);
+      }
+    });
+  });
 }
 
 

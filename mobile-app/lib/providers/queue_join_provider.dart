@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/history_entry.dart';
 import '../models/live_queue_token.dart';
+import '../models/organization_directory.dart';
 import '../models/queue_config.dart';
 import '../models/service_option.dart';
 import '../repositories/device_repository.dart';
@@ -42,6 +43,10 @@ class QueueJoinProvider extends ChangeNotifier {
   bool isSubmitting = false;
   String? errorMessage;
   QueueConfig? queueConfig;
+
+  /// ADR-068: set when the scanned code was an organization's — the screen
+  /// then lists its queues instead of opening one.
+  OrganizationDirectory? organization;
   /// V2 Checkpoint 5 (ADR-027): checkbox-style multi-selection — ids only;
   /// the corresponding [ServiceOption]s are looked up from [queueConfig] on
   /// demand ([selectedServices]) rather than duplicated here, so this never
@@ -119,10 +124,40 @@ class QueueJoinProvider extends ChangeNotifier {
 
   Future<void> loadQueueFromScannedQr(String rawQrData) async {
     try {
-      final queueId = QrParser.parseQueueId(rawQrData);
-      await loadQueueById(queueId);
+      switch (QrParser.parse(rawQrData)) {
+        case QueueQr(:final queueId):
+          organization = null;
+          await loadQueueById(queueId);
+        case OrganizationQr(:final publicCode):
+          queueConfig = null;
+          await loadOrganization(publicCode);
+      }
     } on QrParseException catch (e) {
       errorMessage = e.message;
+      notifyListeners();
+    }
+  }
+
+  /// ADR-068: the organization's queue list. Also how the list refreshes
+  /// when the customer comes back to it — counts and opening state are
+  /// always the backend's, never kept from an earlier look.
+  Future<void> loadOrganization(String publicCode) async {
+    isLoadingQueue = true;
+    errorMessage = null;
+    notifyListeners();
+
+    try {
+      organization = await _queueRepository.getOrganization(publicCode);
+    } on ApiException catch (e) {
+      errorMessage = e.code == 'ORGANIZATION_NOT_FOUND'
+          ? 'This organization could not be found. Please check the QR code and try again.'
+          : e.message;
+      organization = null;
+    } catch (_) {
+      errorMessage = 'Unable to load this organization right now. Please try again.';
+      organization = null;
+    } finally {
+      isLoadingQueue = false;
       notifyListeners();
     }
   }
@@ -130,6 +165,14 @@ class QueueJoinProvider extends ChangeNotifier {
   Future<void> loadQueueById(String queueId) async {
     isLoadingQueue = true;
     errorMessage = null;
+    // Choosing a different queue from an organization's list: what was
+    // picked for the previous one does not carry over.
+    if (queueConfig?.id != queueId) {
+      selectedServiceIds = {};
+      formData = {};
+      formErrors = {};
+      _pendingIdempotencyKey = null;
+    }
     notifyListeners();
 
     try {
@@ -439,6 +482,7 @@ class QueueJoinProvider extends ChangeNotifier {
     isSubmitting = false;
     errorMessage = null;
     queueConfig = null;
+    organization = null;
     selectedServiceIds = {};
     formData = {};
     formErrors = {};
