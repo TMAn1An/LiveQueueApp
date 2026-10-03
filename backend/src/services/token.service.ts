@@ -707,6 +707,28 @@ interface QueueEtaEntry {
  * every real call site uses the default.
  */
 async function computeQueueEtas(queueId: string, now: Date = new Date()): Promise<QueueEtaEntry[]> {
+  return (await simulateQueue(queueId, now, false)).entries;
+}
+
+/** Stands for "someone joining now" in {@link estimateWaitForNewArrival}. */
+const NEW_ARRIVAL_PROBE_ID = '__new_arrival__';
+
+/**
+ * ADR-068: the wait someone joining this queue now would be shown — the
+ * same simulation, with one more person at the end of the callable line.
+ * (Their own service length does not affect when they are called.) Null
+ * when no counter is open, exactly as for people already waiting.
+ */
+export async function estimateWaitForNewArrival(queueId: string, now: Date = new Date()): Promise<number | null> {
+  const { probeReadyAt } = await simulateQueue(queueId, now, true);
+  return probeReadyAt ? minutesUntil(probeReadyAt, now) : null;
+}
+
+async function simulateQueue(
+  queueId: string,
+  now: Date,
+  withNewArrival: boolean,
+): Promise<{ entries: QueueEtaEntry[]; probeReadyAt: Date | null }> {
   const [activeCounters, waitingTokens] = await Promise.all([
     prisma.counter.findMany({
       where: { queueId, status: 'ACTIVE' },
@@ -750,7 +772,7 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
     // No meaningful denominator — an estimate here would imply active
     // service that isn't happening (approved product decision, carried
     // forward unchanged from the pre-Checkpoint-4 design).
-    return [
+    const entries = [
       ...callable.map((token, index) => ({
         id: token.id,
         organizationId: token.organizationId,
@@ -763,6 +785,7 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
       })),
       ...scheduledEntries,
     ];
+    return { entries, probeReadyAt: null };
   }
 
   const counterOccupancy: CounterOccupancy[] = activeCounters.map((counter) => {
@@ -791,7 +814,10 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
     durationMinutes: sumServiceDurations(token.tokenServices),
   }));
 
-  const etaByTokenId = simulateWaitingTokenEtas(counterOccupancy, waitingInputs);
+  const etaByTokenId = simulateWaitingTokenEtas(
+    counterOccupancy,
+    withNewArrival ? [...waitingInputs, { id: NEW_ARRIVAL_PROBE_ID, durationMinutes: 0 }] : waitingInputs,
+  );
 
   const callableEntries = callable.map((token, index) => {
     const estimatedReadyAt = etaByTokenId.get(token.id) ?? null;
@@ -809,7 +835,10 @@ async function computeQueueEtas(queueId: string, now: Date = new Date()): Promis
       etaUnavailableReason: null,
     };
   });
-  return [...callableEntries, ...scheduledEntries];
+  return {
+    entries: [...callableEntries, ...scheduledEntries],
+    probeReadyAt: withNewArrival ? (etaByTokenId.get(NEW_ARRIVAL_PROBE_ID) ?? null) : null,
+  };
 }
 
 async function computeComputedFields(token: Token): Promise<ComputedFields> {

@@ -3,7 +3,7 @@ import { AppError } from '../utils/AppError';
 import { describeJoinRequirements, resolveQueueTimezone } from './queueIdentityPolicy.service';
 import { describePublicSchedule } from './queueSchedule.service';
 import { countWaitingByQueue } from './queue.service';
-import { listWaitingTokenPositions } from './token.service';
+import { estimateWaitForNewArrival } from './token.service';
 
 /**
  * ADR-068: the organization's one public page — what scanning its QR
@@ -79,17 +79,12 @@ export async function getPublicOrganization(rawCode: string, now: Date = new Dat
         message = 'Not open to join yet.';
       }
 
-      // An estimate for someone joining now: when the last person already
-      // in line is expected to be called. Null when there is no one ahead
-      // or no counter is open — never an invented number.
-      let estimatedWaitMinutes: number | null = null;
-      if (availability === 'JOINABLE' && waitingCount > 0) {
-        const positions = await listWaitingTokenPositions(queue.id);
-        const estimates = positions
-          .map((entry) => entry.estimatedWaitMinutes)
-          .filter((value): value is number => value !== null);
-        estimatedWaitMinutes = estimates.length > 0 ? Math.max(...estimates) : null;
-      }
+      // The wait someone joining now would be shown on their own token —
+      // the same ETA engine, with one more person at the end of the line.
+      // Null when no counter is open (never an invented number), and only
+      // offered while the queue can actually be joined.
+      const estimatedWaitMinutes =
+        availability === 'JOINABLE' ? await estimateWaitForNewArrival(queue.id, now) : null;
 
       return {
         id: queue.id,

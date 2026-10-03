@@ -148,8 +148,20 @@ describe('GET /api/public/organizations/:publicCode', () => {
 
     const [listed] = (await visit(code)).body.data.queues;
     expect(listed.waitingCount).toBe(2);
-    expect(listed.estimatedWaitMinutes).toEqual(expect.any(Number));
-    expect(listed.estimatedWaitMinutes).toBeGreaterThanOrEqual(0);
+    // One open counter, two people of 10 minutes ahead: a new arrival is
+    // called in about 20 — what their own token would then show.
+    expect(listed.estimatedWaitMinutes).toBe(20);
+  });
+
+  it('gives no wait estimate while no counter is open', async () => {
+    const { owner, code } = await org();
+    const q = await createQueue(owner.accessToken, { name: 'Emergency', tokenPrefix: 'E' });
+    const service = await createService(owner.accessToken, q.id, { durationMinutes: 10 });
+    await createToken({ queueId: q.id, serviceId: service.id, formData: {} });
+
+    const [listed] = (await visit(code)).body.data.queues;
+    expect(listed.waitingCount).toBe(1);
+    expect(listed.estimatedWaitMinutes).toBeNull();
   });
 
   it('exposes nothing private: no staff, counters, devices, form answers or internal ids', async () => {
