@@ -2,5 +2,7 @@
 # Static files (portal-sw.js, portal.webmanifest) live outside /visit/ so
 # this rewrite never shadows them. Everything else keeps Cloudflare Pages'
 # single-page fallback to index.html (the staff dashboard).
-/visit /portal.html 200
-/visit/* /portal.html 200
+# The target is extensionless: Pages serves portal.html for /portal, whereas
+# /portal.html itself answers with a redirect to /portal.
+/visit /portal 200
+/visit/* /portal 200
