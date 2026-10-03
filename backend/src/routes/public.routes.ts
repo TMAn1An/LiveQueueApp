@@ -16,7 +16,11 @@ import {
   startCustomerEmailVerificationSchema,
 } from '../validators/customerEmailVerification.validators';
 import { validate } from '../middleware/validate';
-import { appVersionPolicySchema, publicQueueConfigSchema } from '../validators/public.validators';
+import {
+  appVersionPolicySchema,
+  publicOrganizationSchema,
+  publicQueueConfigSchema,
+} from '../validators/public.validators';
 
 const router = Router();
 
@@ -26,6 +30,21 @@ router.get(
   validate(publicQueueConfigSchema),
   publicController.getQueueConfig,
 );
+
+// ADR-068: the organization's one public QR resolves here — its listed
+// queues and whether each can be joined now. Same public trust model and
+// limiter as the queue config: no auth, no PII, rate-limited against
+// enumeration of the (random, non-sequential) public codes.
+router.get(
+  '/organizations/:publicCode',
+  publicRateLimiter,
+  validate(publicOrganizationSchema),
+  publicController.getOrganization,
+);
+
+// ADR-068: whether Web Push is configured, and the public VAPID key the
+// portal needs to subscribe. The private key never leaves the server.
+router.get('/web-push/config', publicRateLimiter, publicController.getWebPushConfig);
 
 // V2 Checkpoint 9 (ADR-031): server-authoritative mobile version policy —
 // same public trust model as the queue-config endpoint above (no auth, no

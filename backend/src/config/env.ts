@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
-const envSchema = z.object({
+export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
 
@@ -165,7 +165,56 @@ const envSchema = z.object({
   MOBILE_ANDROID_UPDATE_MESSAGE: z
     .string()
     .default('A new version of LiveQueue is available.'),
+
+  // ADR-068: standards-based Web Push (VAPID, RFC 8292) for the iPhone/iPad
+  // Safari portal. All three or none: unset means Web Push is simply off —
+  // the portal still works with live updates while open, and Android FCM is
+  // untouched. The private key is a secret and is never logged; validation
+  // messages below name the variable, never its value.
+  WEB_PUSH_VAPID_PUBLIC_KEY: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => value || undefined)
+    .refine((value) => value === undefined || isBase64UrlOfLength(value, 65), {
+      message: 'must be the base64url-encoded 65-byte uncompressed P-256 public key',
+    }),
+  WEB_PUSH_VAPID_PRIVATE_KEY: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => value || undefined)
+    .refine((value) => value === undefined || isBase64UrlOfLength(value, 32), {
+      message: 'must be the base64url-encoded 32-byte P-256 private key',
+    }),
+  // RFC 8292 `sub`: a mailto: or https: contact for the push services.
+  // Apple rejects any other form (BadJwtToken).
+  WEB_PUSH_SUBJECT: z
+    .string()
+    .trim()
+    .optional()
+    .transform((value) => value || undefined)
+    .refine((value) => value === undefined || /^(mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(value), {
+      message: 'must be a mailto: address or an https: URL',
+    }),
+}).superRefine((value, ctx) => {
+  const set = [value.WEB_PUSH_VAPID_PUBLIC_KEY, value.WEB_PUSH_VAPID_PRIVATE_KEY, value.WEB_PUSH_SUBJECT].filter(
+    Boolean,
+  ).length;
+  if (set !== 0 && set !== 3) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['WEB_PUSH_VAPID_PUBLIC_KEY'],
+      message:
+        'WEB_PUSH_VAPID_PUBLIC_KEY, WEB_PUSH_VAPID_PRIVATE_KEY and WEB_PUSH_SUBJECT must be set together (or all left unset)',
+    });
+  }
 });
+
+function isBase64UrlOfLength(value: string, bytes: number): boolean {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return false;
+  return Buffer.from(value, 'base64url').length === bytes;
+}
 
 function loadEnv() {
   const parsed = envSchema.safeParse(process.env);

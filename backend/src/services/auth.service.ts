@@ -67,6 +67,8 @@ function toSafeOrganization(organization: Organization) {
     // timezone set" — and whether the owner's first-run guide is finished.
     timezone: organization.timezone,
     onboardingCompletedAt: organization.onboardingCompletedAt,
+    // ADR-068: the code in the organization's one public QR (/visit/{code}).
+    publicCode: organization.publicCode,
   };
 }
 

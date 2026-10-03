@@ -21,6 +21,8 @@ function serializeOrganization(organization: Organization) {
     /// V2 Product Completion checkpoint, Part C: null is the trigger for
     /// the dashboard to show the first-time tutorial.
     onboardingCompletedAt: organization.onboardingCompletedAt,
+    // ADR-068: the code in the organization's one public QR (/visit/{code}).
+    publicCode: organization.publicCode,
     createdAt: organization.createdAt,
     updatedAt: organization.updatedAt,
   };

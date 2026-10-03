@@ -10,6 +10,8 @@ import {
   listDevicesSchema,
   registerDeviceSchema,
   registerFcmTokenSchema,
+  registerWebPushSubscriptionSchema,
+  unregisterWebPushSubscriptionSchema,
 } from '../validators/device.validators';
 
 const router = Router();
@@ -23,6 +25,21 @@ router.post(
   publicRateLimiter,
   validate(registerFcmTokenSchema),
   deviceController.registerFcmToken,
+);
+
+// ADR-068: the Safari portal's Web Push subscription — public, same trust
+// model as /fcm-token (the browser installation id is the capability).
+router.post(
+  '/web-push-subscription',
+  publicRateLimiter,
+  validate(registerWebPushSubscriptionSchema),
+  deviceController.registerWebPushSubscription,
+);
+router.delete(
+  '/web-push-subscription',
+  publicRateLimiter,
+  validate(unregisterWebPushSubscriptionSchema),
+  deviceController.unregisterWebPushSubscription,
 );
 
 // Staff-only. Device identity itself is global (ADR-011/ADR-016 decision 6),

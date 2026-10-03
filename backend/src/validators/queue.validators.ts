@@ -64,6 +64,8 @@ export const queueIdParams = z.object({
  * via PUT /:queueId and the /:queueId/sessions endpoints.
  */
 const scheduleFields = {
+  // ADR-068: whether this queue appears on the organization's public page.
+  listedOnOrganizationPage: z.boolean().optional(),
   scheduleEnabled: z.boolean().optional(),
   scheduleDailyCapacity: z.number().int().positive().max(100_000).nullable().optional(),
   scheduleVisibleToCustomers: z.boolean().optional(),

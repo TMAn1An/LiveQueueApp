@@ -1,7 +1,7 @@
 import type { TokenStatus } from '@prisma/client';
 import { prisma } from '../config/prisma';
 import { logger } from '../config/logger';
-import * as fcmService from './fcm.service';
+import { deliverToDevice } from './notificationDelivery.service';
 import { androidChannelId } from '../utils/notificationChannel';
 
 /**
@@ -55,14 +55,6 @@ export async function notifyTokenStatusChange(tokenId: string): Promise<void> {
       return;
     }
 
-    const fcmRecord = await prisma.deviceFcmToken.findUnique({ where: { deviceId: token.deviceId } });
-    if (!fcmRecord) {
-      // No registered FCM token for this device — not an error. The state
-      // transition already succeeded; Socket.io was already attempted;
-      // there is simply nowhere to push to.
-      return;
-    }
-
     // ADR-062: the customer's sound/vibration choice for this token, when
     // the app has registered one. Without it the push goes to Android's
     // default channel, as it always did.
@@ -71,14 +63,17 @@ export async function notifyTokenStatusChange(tokenId: string): Promise<void> {
       select: { soundEnabled: true, vibrationEnabled: true },
     });
 
-    const result = await fcmService.sendNotification(fcmRecord.fcmToken, {
+    // ADR-068: one message, delivered over every transport the device has —
+    // the Android app's FCM token and/or the Safari portal's Web Push
+    // subscriptions. A device with neither is simply not pushed to; the
+    // transition already succeeded and Socket.io was already attempted.
+    await deliverToDevice(token.deviceId, {
       title: text.title,
       body: text.body,
-      data: {
-        type: 'token_status_changed',
-        tokenId: token.id,
-        status: token.status,
-      },
+      type: 'token_status_changed',
+      tokenId: token.id,
+      fcmData: { status: token.status },
+      urgency: token.status === 'CALLED' ? 'high' : 'normal',
       ...(preference
         ? {
             androidChannelId: androidChannelId(
@@ -88,12 +83,6 @@ export async function notifyTokenStatusChange(tokenId: string): Promise<void> {
           }
         : {}),
     });
-
-    if (!result.ok && result.invalidToken) {
-      // Same dead-token cleanup reminderDispatch.service.ts already performs
-      // on the exact same classification — never broadened here.
-      await prisma.deviceFcmToken.deleteMany({ where: { deviceId: token.deviceId } });
-    }
   } catch (err) {
     logger.error({ err, tokenId }, 'Token status-change FCM dispatch failed');
   }
@@ -170,27 +159,13 @@ export async function notifyQueueEtaUpdated(queueId: string): Promise<void> {
       return;
     }
 
-    const fcmRecords = await prisma.deviceFcmToken.findMany({
-      where: { deviceId: { in: tokens.map((token) => token.deviceId) } },
-    });
-    const tokenByDevice = new Map(tokens.map((token) => [token.deviceId, token.id]));
-
-    for (const record of fcmRecords) {
-      const tokenId = tokenByDevice.get(record.deviceId);
-      if (!tokenId) continue;
-
-      const result = await fcmService.sendNotification(record.fcmToken, {
+    for (const token of tokens) {
+      await deliverToDevice(token.deviceId, {
         title: 'Estimated time updated',
         body: 'Your estimated waiting time has changed. Open LiveQueue to see the new time.',
-        data: {
-          type: 'token_eta_updated',
-          tokenId,
-        },
+        type: 'token_eta_updated',
+        tokenId: token.id,
       });
-
-      if (!result.ok && result.invalidToken) {
-        await prisma.deviceFcmToken.deleteMany({ where: { deviceId: record.deviceId } });
-      }
     }
   } catch (err) {
     logger.error({ err, queueId }, 'Queue ETA-update FCM dispatch failed');

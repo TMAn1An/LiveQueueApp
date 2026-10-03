@@ -1,7 +1,7 @@
 import { prisma } from '../config/prisma';
 import { logger } from '../config/logger';
 import { listWaitingTokenPositions } from './token.service';
-import * as fcmService from './fcm.service';
+import { deliverToDevice } from './notificationDelivery.service';
 import { androidChannelId } from '../utils/notificationChannel';
 import { effectiveReminderMinutes } from '../utils/reminderMinutes';
 
@@ -24,7 +24,8 @@ export interface ReminderDispatchSummary {
  *  - has a NotificationPreference row with notificationsEnabled = true —
  *    absence of a row is the opt-out signal (INNER-JOIN-shaped filter, no
  *    row means never selected), not defaulted to "enabled"
- *  - the device has a registered DeviceFcmToken
+ *  - the device has a push transport: an Android FCM token or, for the
+ *    Safari portal, a Web Push subscription (ADR-068)
  *
  * estimatedWaitMinutes is never stored or treated as a fixed timestamp —
  * it's recomputed fresh on every run via listWaitingTokenPositions (the
@@ -52,11 +53,12 @@ export async function dispatchReminders(): Promise<ReminderDispatchSummary> {
       status: 'WAITING',
       reminderSentAt: null,
       notificationPreferences: { some: { notificationsEnabled: true } },
-      device: { fcmToken: { isNot: null } },
+      device: {
+        OR: [{ fcmToken: { isNot: null } }, { webPushSubscriptions: { some: {} } }],
+      },
     },
     include: {
       notificationPreferences: { where: { notificationsEnabled: true } },
-      device: { include: { fcmToken: true } },
       queue: { select: { defaultNotificationMinutes: true } },
     },
   });
@@ -78,8 +80,7 @@ export async function dispatchReminders(): Promise<ReminderDispatchSummary> {
   for (const token of candidates) {
     try {
       const preference = token.notificationPreferences[0];
-      const fcmToken = token.device.fcmToken;
-      if (!preference || !fcmToken) {
+      if (!preference) {
         summary.skipped++;
         continue;
       }
@@ -107,22 +108,23 @@ export async function dispatchReminders(): Promise<ReminderDispatchSummary> {
         continue;
       }
 
-      const result = await fcmService.sendNotification(fcmToken.fcmToken, {
+      const result = await deliverToDevice(token.deviceId, {
         title: "It's almost your turn",
         body: `Token ${token.serialNumber} — about ${estimatedWaitMinutes} minute(s) left.`,
         // Lets an open app recognise this as the reminder for this token and
         // not announce the same thing a second time itself. Never treated as
         // state — only {type, tokenId}, like every other push.
-        data: { type: 'token_reminder', tokenId: token.id },
+        type: 'token_reminder',
+        tokenId: token.id,
         androidChannelId: androidChannelId('queue_updates', preference),
       });
 
-      if (result.ok) {
+      if (result.delivered) {
         summary.sent++;
       } else {
         summary.failed++;
-        // Firebase refused the push, so nobody was reminded — and the app is
-        // told `reminderSent` from this very column and keeps its own
+        // No transport accepted the push, so nobody was reminded — and the
+        // app is told `reminderSent` from this very column and keeps its own
         // reminder quiet on the strength of it (ADR-062). Give the claim
         // back: the app's fallback stays available, and the next run tries
         // again. Only this run's own claim is released, never a later one.
@@ -130,8 +132,7 @@ export async function dispatchReminders(): Promise<ReminderDispatchSummary> {
           where: { id: token.id, reminderSentAt: claimedAt },
           data: { reminderSentAt: null },
         });
-        if (result.invalidToken) {
-          await prisma.deviceFcmToken.deleteMany({ where: { deviceId: token.deviceId } });
+        if (result.fcmTokenRemoved) {
           summary.invalidTokensRemoved++;
         }
       }

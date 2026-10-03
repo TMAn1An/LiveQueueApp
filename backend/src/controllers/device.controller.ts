@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import * as deviceService from '../services/device.service';
+import * as webPushSubscriptionService from '../services/webPushSubscription.service';
 import * as auditService from '../services/audit.service';
 
 export async function register(req: Request, res: Response) {
@@ -63,4 +64,19 @@ export async function unblock(req: Request, res: Response) {
     metadata: { newStatus: device.status, deviceIdentifier: device.deviceIdentifier },
     ipAddress: req.ip,
   });
+}
+
+/** ADR-068: the Safari portal registers (or refreshes) its Web Push subscription. */
+export async function registerWebPushSubscription(req: Request, res: Response) {
+  const data = await webPushSubscriptionService.registerSubscription(
+    req.body.deviceIdentifier,
+    req.body.subscription,
+  );
+  res.status(200).json({ success: true, data });
+}
+
+/** ADR-068: the portal turned notifications off, or the browser dropped the subscription. */
+export async function unregisterWebPushSubscription(req: Request, res: Response) {
+  await webPushSubscriptionService.unregisterSubscription(req.body.deviceIdentifier, req.body.endpoint);
+  res.status(204).send();
 }

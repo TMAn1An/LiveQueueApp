@@ -13,3 +13,11 @@ export const appVersionPolicySchema = {
     platform: z.enum(['android']),
   }),
 };
+
+// ADR-068: the organization's public QR code. Validated loosely here (the
+// service normalises case and rejects anything unknown with one 404).
+export const publicOrganizationSchema = {
+  params: z.object({
+    publicCode: z.string().trim().min(1).max(64),
+  }),
+};
