@@ -32,9 +32,15 @@ rec(login.status === 401 || login.status === 400 || login.status === 422, `login
 const sock = await get(`${API}/socket.io/?EIO=4&transport=polling`);
 rec(sock.status === 200 && /"sid"/.test(sock.text), `Socket.io handshake ${sock.status}`);
 
+const rootHtml = (await get(`${WEB}/`)).text;
+const rootScript = (rootHtml.match(/src="(\/assets\/main-[^"]+\.js)"/) || [])[1];
 for (const page of ['/', '/login', '/register', '/visit/zzzz00000000']) {
   const r = await get(`${WEB}${page}`);
-  rec(r.status === 200 && /<script/.test(r.text), `Pages ${page} -> ${r.status}`);
+  const script = (r.text.match(/src="(\/assets\/[^"]+\.js)"/) || [])[1];
+  const sameApp = page.startsWith('/visit') ? /portal/.test(r.text) : script === rootScript;
+  // Deep links are served by the SPA fallback (404.html = index.html), so the
+  // status may be 404 while the page is the app itself.
+  rec((r.status === 200 || r.status === 404) && Boolean(script) && sameApp, `Pages ${page} -> ${r.status}, serves ${script} ${sameApp ? '(current app)' : '(UNEXPECTED)'}`);
 }
 const html = (await get(`${WEB}/login`)).text;
 const js = [...html.matchAll(/src="(\/assets\/[^"]+\.js)"/g)].map((m) => m[1]);
