@@ -2,6 +2,7 @@ name: Production post-reset smoke (read-only, scratch branch)
 
 # Scratch branch only; never merged. No writes to production.
 on:
+  workflow_dispatch:
   push:
     branches: [claude/compassionate-franklin-q5m1be]
     paths: ['.github/prod-smoke/postreset.mjs', '.github/workflows/prod-postreset-smoke.yml']
