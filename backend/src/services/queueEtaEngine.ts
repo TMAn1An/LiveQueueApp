@@ -126,8 +126,11 @@ export interface RoutedCounter extends CounterOccupancy {
 export interface RoutedWaitingToken extends WaitingTokenInput {
   /** The current journey step's service; null for a pre-journey token. */
   serviceId: string | null;
-  /** A referral to a counter in `counters` binds the token to it. */
+  /** A referral to an open counter in `counters` binds the token to it. */
   boundCounterId: string | null;
+  /** Set for a referral: it goes ahead of normal arrival order — at its
+   * bound counter, or (unbound: its target is not open) at any counter that
+   * handles the step. */
   referredAt: Date | null;
   /** Arrival order (lower = earlier). Entries are kept in this order. */
   sequence?: number;
@@ -170,6 +173,7 @@ export function simulateRoutedEtas(
     .map(({ t }) => ({ ...t, readyMs: t.availableAt?.getTime() ?? -Infinity, rest: [...(t.laterSteps ?? [])] }));
   const serves = (c: RoutedCounter, t: Entry) =>
     t.boundCounterId ? t.boundCounterId === c.id : t.serviceId === null || c.serviceIds === null || c.serviceIds.has(t.serviceId);
+  const isReferral = (t: Entry) => t.referredAt !== null;
 
   /** Whom counter `c`, free at `freeMs`, calls next, and when. */
   const pick = (c: RoutedCounter, freeMs: number): { index: number; startMs: number } | null => {
@@ -180,7 +184,7 @@ export function simulateRoutedEtas(
       const t = remaining[i]!;
       if (!serves(c, t)) continue;
       if (t.readyMs <= freeMs) {
-        if (t.boundCounterId === c.id) {
+        if (isReferral(t)) {
           if (referral === -1 || (t.referredAt?.getTime() ?? 0) < (remaining[referral]!.referredAt?.getTime() ?? 0)) {
             referral = i;
           }

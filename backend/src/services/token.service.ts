@@ -66,7 +66,7 @@ import {
   loadCallableTokens,
   loadDispatchCounters,
   loadQueueServices,
-  staffedCounterIdsOf,
+  openCounterIdsOf,
   validateJourneySteps,
   waitingEligibility,
   type DispatchCounter,
@@ -777,9 +777,9 @@ async function simulateQueue(
       include: { tokenServices: { include: { service: true } }, ...JOURNEY_STEPS_INCLUDE },
     }),
     // ADR-070: a referral binds the person to its target while that counter
-    // is staffed (active or paused).
+    // is open (ACTIVE with an operator); otherwise it is rerouted.
     prisma.counter.findMany({
-      where: { queueId, staffId: { not: null }, status: { in: ['ACTIVE', 'ON_BREAK'] } },
+      where: { queueId, staffId: { not: null }, status: 'ACTIVE' },
       select: { id: true },
     }),
   ]);
@@ -2223,7 +2223,7 @@ export async function nextToken(
       const counters = await loadDispatchCounters(tx, queueId);
       const callable = await loadCallableTokens(tx, queueId, new Date());
       const self = counters.find((c) => c.id === counterId)!;
-      const eligible = headForCounter(self, callable, staffedCounterIdsOf(counters));
+      const eligible = headForCounter(self, callable, openCounterIdsOf(counters));
       if (!eligible) {
         throw new AppError(404, 'NO_ELIGIBLE_TOKENS', 'No eligible waiting tokens.');
       }
@@ -2295,8 +2295,9 @@ async function assertIsNextForCounter(
   if (!self || !target) {
     throw new AppError(409, 'TOKEN_STATE_CHANGED', 'Token state changed concurrently. Please retry.');
   }
-  const staffed = staffedCounterIdsOf(counters);
-  if (target.referredToCounterId && staffed.has(target.referredToCounterId) && target.referredToCounterId !== counterId) {
+  const open = openCounterIdsOf(counters);
+  // ADR-070: a referral is bound to its target while that counter is open.
+  if (target.referredToCounterId && open.has(target.referredToCounterId) && target.referredToCounterId !== counterId) {
     throw new AppError(409, 'REFERRED_TO_ANOTHER_COUNTER', 'This person has been referred to another counter.');
   }
   if (!counterServes(self, target.serviceId)) {
@@ -2306,7 +2307,7 @@ async function assertIsNextForCounter(
       "Your counter doesn't handle this person's current service.",
     );
   }
-  if (headForCounter(self, callable, staffed)?.id !== tokenId) {
+  if (headForCounter(self, callable, open)?.id !== tokenId) {
     throw new AppError(
       409,
       'FCFS_VIOLATION',

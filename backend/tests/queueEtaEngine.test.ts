@@ -160,6 +160,19 @@ describe('simulateRoutedEtas (ADR-070)', () => {
     expect(result.get('b')).toEqual(now);
   });
 
+  it('an unbound referral (target not open) keeps priority at any counter that handles its step', () => {
+    const result = simulateRoutedEtas(
+      [free('pay2', ['P'])],
+      [
+        waiting('a', 'P', 5, { sequence: 1 }),
+        // Referred to a counter that is not open: unbound, still a referral.
+        waiting('x', 'P', 5, { sequence: 2, boundCounterId: null, referredAt: now }),
+      ],
+    );
+    expect(result.get('x')).toEqual(now);
+    expect(result.get('a')).toEqual(at(5));
+  });
+
   it('puts a referral first at its counter, and gives no estimate to whom no counter can serve', () => {
     const result = simulateRoutedEtas(
       [free('pay', ['P'])],

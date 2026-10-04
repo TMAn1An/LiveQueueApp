@@ -122,6 +122,35 @@ describe('Counter CRUD', () => {
 });
 
 describe('Counter staff assignment', () => {
+  // ADR-069: OFF → operator assigned → PAUSED. Never ACTIVE by itself.
+  it('assigning an operator to an OFF counter makes it PAUSED, not ACTIVE; opening stays explicit', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    const counter = await createCounter(ctx.accessToken, queue.id);
+    expect(counter.status).toBe('OFFLINE');
+    const worker = await executiveOf(ctx, queue);
+
+    const assigned = await api()
+      .patch(`/api/counters/${counter.id}/assign`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ staffId: worker.staffId });
+    expect(assigned.status).toBe(200);
+    expect(assigned.body.data).toMatchObject({ status: 'ON_BREAK', staffId: worker.staffId });
+
+    const opened = await api()
+      .patch(`/api/counters/${counter.id}/status`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ status: 'ACTIVE' });
+    expect(opened.body.data).toMatchObject({ status: 'ACTIVE', staffId: worker.staffId });
+
+    // Turning it off releases the operator again.
+    const off = await api()
+      .patch(`/api/counters/${counter.id}/status`)
+      .set('Authorization', `Bearer ${ctx.accessToken}`)
+      .send({ status: 'OFFLINE' });
+    expect(off.body.data).toMatchObject({ status: 'OFFLINE', staffId: null });
+  });
+
   it('assigns a counter to a staff member in the same organization', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);

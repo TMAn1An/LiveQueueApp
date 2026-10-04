@@ -19,10 +19,14 @@ import { requireManageableQueue, requireVisibleQueue, type WorkspaceActor } from
  * counters may call the person.
  *
  * Who a counter calls next ("Serve next"), in order:
- *  1. People referred to this counter, earliest referral first — a referral
- *     waits for the counter's current visit to finish; it never interrupts.
+ *  1. Referrals, earliest referral first: people referred to this counter,
+ *     and people whose referral target is no longer open (OFF, paused,
+ *     without an operator, or removed) and whose step this counter handles —
+ *     the referral keeps its priority and is rerouted rather than dropped.
+ *     A referral waits for the counter's current visit to finish; it never
+ *     interrupts. With no open counter that handles the step, it waits.
  *  2. Otherwise the earliest-joined callable person whose current step this
- *     counter handles and who is not referred to another (staffed) counter.
+ *     counter handles and who has no referral.
  * Strict first-come-first-served within the counter's eligible services; no
  * manual dispatch, no picking a later person.
  */
@@ -203,13 +207,25 @@ export function counterServes(counter: Pick<DispatchCounter, 'serviceIds'>, serv
   return serviceId === null || counter.serviceIds === null || counter.serviceIds.has(serviceId);
 }
 
-/** A referral binds the person to its target while that counter is staffed
- * (active or paused). If the target is turned off, the person is not
- * stranded: they rejoin the normal line for their step. */
-function boundCounterId(token: DispatchToken, staffedCounterIds: Set<string>): string | null {
-  return token.referredToCounterId && staffedCounterIds.has(token.referredToCounterId)
+export function isReferral(token: Pick<DispatchToken, 'referredAt'>): boolean {
+  return token.referredAt !== null;
+}
+
+/** A referral binds the person to its target while that counter is open
+ * (ACTIVE with an operator). Otherwise the referral is unbound: it keeps its
+ * priority and any open counter of the same queue that handles the step may
+ * take it (see headForCounter). */
+export function boundCounterId(token: DispatchToken, openCounterIds: Set<string>): string | null {
+  return token.referredToCounterId && openCounterIds.has(token.referredToCounterId)
     ? token.referredToCounterId
     : null;
+}
+
+/** Whether `counter` may take this referral now: its own, or an unbound one
+ * for a step it handles. */
+function mayTakeReferral(counter: DispatchCounter, token: DispatchToken, openCounterIds: Set<string>): boolean {
+  const bound = boundCounterId(token, openCounterIds);
+  return bound ? bound === counter.id : counterServes(counter, token.serviceId);
 }
 
 /**
@@ -219,22 +235,20 @@ function boundCounterId(token: DispatchToken, staffedCounterIds: Set<string>): s
 export function headForCounter(
   counter: DispatchCounter,
   callable: DispatchToken[],
-  staffedCounterIds: Set<string>,
+  openCounterIds: Set<string>,
 ): DispatchToken | undefined {
   const referred = callable
-    .filter((t) => boundCounterId(t, staffedCounterIds) === counter.id)
+    .filter((t) => isReferral(t) && mayTakeReferral(counter, t, openCounterIds))
     .sort((a, b) => (a.referredAt?.getTime() ?? 0) - (b.referredAt?.getTime() ?? 0));
   if (referred.length > 0) return referred[0];
-  return callable.find((t) => {
-    const bound = boundCounterId(t, staffedCounterIds);
-    return bound === null && counterServes(counter, t.serviceId);
-  });
+  return callable.find((t) => !isReferral(t) && counterServes(counter, t.serviceId));
 }
 
-export function staffedCounterIdsOf(counters: DispatchCounter[]): Set<string> {
-  return new Set(
-    counters.filter((c) => c.staffId && (c.status === 'ACTIVE' || c.status === 'ON_BREAK')).map((c) => c.id),
-  );
+/** Counters that can receive a referral now: ACTIVE with an operator. Every
+ * counter here belongs to the one queue being dispatched, so a referral is
+ * never routed to another queue or another Admin's workspace. */
+export function openCounterIdsOf(counters: DispatchCounter[]): Set<string> {
+  return new Set(counters.filter((c) => c.staffId && c.status === 'ACTIVE').map((c) => c.id));
 }
 
 export async function loadDispatchCounters(
@@ -311,10 +325,10 @@ export function waitingEligibility(
   counters: DispatchCounter[],
   callable: DispatchToken[],
 ): Map<string, { eligible: boolean; reason: WaitingBlockedReason | null }> {
-  const staffed = staffedCounterIdsOf(counters);
+  const open = openCounterIdsOf(counters);
   const free = counters.filter((c) => c.status === 'ACTIVE' && c.staffId && !c.busy);
   const heads = new Set(
-    free.map((c) => headForCounter(c, callable, staffed)?.id).filter((id): id is string => !!id),
+    free.map((c) => headForCounter(c, callable, open)?.id).filter((id): id is string => !!id),
   );
   const result = new Map<string, { eligible: boolean; reason: WaitingBlockedReason | null }>();
   for (const t of callable) {
@@ -322,8 +336,9 @@ export function waitingEligibility(
       result.set(t.id, { eligible: true, reason: null });
       continue;
     }
-    const bound = boundCounterId(t, staffed);
-    const someoneCould = free.some((c) => (bound ? c.id === bound : counterServes(c, t.serviceId)));
+    const someoneCould = free.some((c) =>
+      isReferral(t) ? mayTakeReferral(c, t, open) : counterServes(c, t.serviceId),
+    );
     result.set(t.id, { eligible: false, reason: someoneCould ? 'EARLIER_WAITING' : 'NO_AVAILABLE_COUNTER' });
   }
   return result;

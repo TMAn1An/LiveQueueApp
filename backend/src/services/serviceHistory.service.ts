@@ -194,6 +194,11 @@ export async function listServiceHistory(
               to: step.referredToCounter,
               at: step.referredAt,
               note: step.referralNote,
+              /** ADR-070: the target was no longer open, so another open
+               * counter for the same service took the referral. The
+               * referral itself is kept as made; the step's counter says
+               * where the person was actually served. */
+              rerouted: Boolean(step.counter && step.counter.id !== step.referredToCounter?.id),
             }
           : null,
       })),

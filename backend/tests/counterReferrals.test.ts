@@ -9,6 +9,7 @@ import {
   callAndStart,
   complete,
   executiveCounter,
+  executiveOf,
   join,
   routeCounter,
   serveNext,
@@ -86,14 +87,103 @@ describe('referral priority', () => {
     expect(res.body.error.code).toBe('REFERRED_TO_ANOTHER_COUNTER');
     expect((await serveNext(pay2.operator.accessToken, ws.queueId)).status).toBe(404);
   });
+});
 
-  it('if the target counter is turned off, the person rejoins the normal line instead of being stranded', async () => {
-    const { ws, reg, pay, pay1, pay2 } = await setup();
-    const x = await join(ws.queueId, [reg, pay]);
-    await callAndStart(ws.admin.accessToken, ws.queueId);
-    await complete(ws.admin.accessToken, x.id, { referToCounterId: pay1.counterId }).expect(200);
-    await as(ws.admin.accessToken).patch(`/api/counters/${pay1.counterId}/status`, { status: 'OFFLINE' }).expect(200);
-    expect((await serveNext(pay2.operator.accessToken, ws.queueId)).body.data.id).toBe(x.id);
+/**
+ * ADR-070 (refined): a referral whose target is no longer open (OFF, paused,
+ * without an operator, or removed) keeps its priority and is rerouted to
+ * another open counter of the same queue that handles the step; with none,
+ * it waits safely. It never interrupts anyone and never leaves its queue.
+ */
+describe('referral fallback when the target becomes unavailable', () => {
+  /** X is referred to Pay 1 for Payment; `early` joined before X for Payment. */
+  async function referredToPay1() {
+    const ctx = await setup();
+    const early = await join(ctx.ws.queueId, [ctx.pay]);
+    const x = await join(ctx.ws.queueId, [ctx.reg, ctx.pay]);
+    await callAndStart(ctx.ws.admin.accessToken, ctx.ws.queueId);
+    await complete(ctx.ws.admin.accessToken, x.id, { referToCounterId: ctx.pay1.counterId }).expect(200);
+    return { ...ctx, early, x, A: as(ctx.ws.admin.accessToken) };
+  }
+
+  it('target turned OFF: another open Payment counter takes the referral first, ahead of earlier joiners', async () => {
+    const ctx = await referredToPay1();
+    await ctx.A.patch(`/api/counters/${ctx.pay1.counterId}/status`, { status: 'OFFLINE' }).expect(200);
+    expect((await serveNext(ctx.pay2.operator.accessToken, ctx.ws.queueId)).body.data.id).toBe(ctx.x.id);
+    // The referral record is kept as made; history shows where it was served.
+    await as(ctx.pay2.operator.accessToken).post(`/api/tokens/${ctx.x.id}/start`, {}).expect(200);
+    await complete(ctx.pay2.operator.accessToken, ctx.x.id).expect(200);
+    const step = await prisma.tokenServiceStep.findFirstOrThrow({ where: { tokenId: ctx.x.id, stepNumber: 2 } });
+    expect(step).toMatchObject({ referredToCounterId: ctx.pay1.counterId, counterId: ctx.pay2.counterId });
+    const history = await ctx.A.get('/api/service-history');
+    const row = history.body.data.find((r: { tokenId: string }) => r.tokenId === ctx.x.id);
+    expect(row.journey[1].referral).toMatchObject({ to: { name: 'Pay 1' }, rerouted: true });
+    expect(row.journey[1].counter).toMatchObject({ name: 'Pay 2' });
+  });
+
+  it('target PAUSED: rerouted to another open counter, still with priority', async () => {
+    const ctx = await referredToPay1();
+    await ctx.A.patch(`/api/counters/${ctx.pay1.counterId}/status`, { status: 'ON_BREAK' }).expect(200);
+    expect((await serveNext(ctx.pay2.operator.accessToken, ctx.ws.queueId)).body.data.id).toBe(ctx.x.id);
+  });
+
+  it('target removed: the referral keeps its priority at another open counter', async () => {
+    const ctx = await referredToPay1();
+    await ctx.A.patch(`/api/counters/${ctx.pay1.counterId}/status`, { status: 'OFFLINE' }).expect(200);
+    await ctx.A.delete(`/api/counters/${ctx.pay1.counterId}`).expect(204);
+    const step = await prisma.tokenServiceStep.findFirstOrThrow({ where: { tokenId: ctx.x.id, stepNumber: 2 } });
+    expect(step.referredToCounterId).toBeNull();
+    expect(step.referredAt).not.toBeNull();
+    expect((await serveNext(ctx.pay2.operator.accessToken, ctx.ws.queueId)).body.data.id).toBe(ctx.x.id);
+  });
+
+  it('no open counter handles the step: the referral waits safely, then is served first when one opens', async () => {
+    const ctx = await referredToPay1();
+    await ctx.A.patch(`/api/counters/${ctx.pay1.counterId}/status`, { status: 'OFFLINE' }).expect(200);
+    await ctx.A.patch(`/api/counters/${ctx.pay2.counterId}/status`, { status: 'OFFLINE' }).expect(200);
+    // The Registration desk cannot take a Payment step.
+    expect((await serveNext(ctx.ws.admin.accessToken, ctx.ws.queueId)).status).toBe(404);
+    const waiting = await prisma.token.findUniqueOrThrow({ where: { id: ctx.x.id } });
+    expect(waiting.status).toBe('WAITING');
+    const live = await ctx.A.get(`/api/dashboard/tokens?queueId=${ctx.ws.queueId}`);
+    const row = live.body.data.find((r: { id: string }) => r.id === ctx.x.id);
+    expect(row.actionEligibility).toEqual({ eligible: false, reason: 'NO_AVAILABLE_COUNTER' });
+
+    // Pay 2 reopens with an operator: the referral comes before `early`.
+    const operator = await executiveOf(ctx.ws);
+    await ctx.A.patch(`/api/counters/${ctx.pay2.counterId}/status`, {
+      status: 'ACTIVE',
+      operatorStaffId: operator.staffId,
+    }).expect(200);
+    expect((await serveNext(operator.accessToken, ctx.ws.queueId)).body.data.id).toBe(ctx.x.id);
+    void ctx.early;
+  });
+
+  it('never interrupts the visit in progress at the counter it is rerouted to', async () => {
+    const ctx = await referredToPay1();
+    // Pay 2 is serving `early`.
+    expect(await callAndStart(ctx.pay2.operator.accessToken, ctx.ws.queueId)).toBe(ctx.early.id);
+    await ctx.A.patch(`/api/counters/${ctx.pay1.counterId}/status`, { status: 'OFFLINE' }).expect(200);
+    expect((await prisma.token.findUniqueOrThrow({ where: { id: ctx.early.id } })).status).toBe('IN_PROGRESS');
+    expect((await serveNext(ctx.pay2.operator.accessToken, ctx.ws.queueId)).status).toBe(409);
+    await complete(ctx.pay2.operator.accessToken, ctx.early.id).expect(200);
+    expect((await serveNext(ctx.pay2.operator.accessToken, ctx.ws.queueId)).body.data.id).toBe(ctx.x.id);
+  });
+
+  it('is never routed to another queue or another Admin’s workspace', async () => {
+    const ctx = await referredToPay1();
+    const other = await adminWorkspace(ctx.ws.head);
+    await ctx.A.patch(`/api/counters/${ctx.pay1.counterId}/status`, { status: 'OFFLINE' }).expect(200);
+    await ctx.A.patch(`/api/counters/${ctx.pay2.counterId}/status`, { status: 'OFFLINE' }).expect(200);
+    // The other Admin's open counter cannot reach this queue's people at all.
+    const res = await serveNext(other.admin.accessToken, ctx.ws.queueId);
+    expect(res.status).toBe(404);
+    expect((await prisma.token.findUniqueOrThrow({ where: { id: ctx.x.id } })).status).toBe('WAITING');
+  });
+
+  it('while its target is open, no other counter may take it', async () => {
+    const ctx = await referredToPay1();
+    expect((await serveNext(ctx.pay2.operator.accessToken, ctx.ws.queueId)).body.data.id).toBe(ctx.early.id);
   });
 });
 

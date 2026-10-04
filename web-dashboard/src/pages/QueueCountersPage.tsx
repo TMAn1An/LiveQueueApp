@@ -192,7 +192,8 @@ function CounterRow({
   const nameError = latinNameError(name);
   const isMine = Boolean(staff && counter.staffId === staff.id);
   const isOff = counter.status === 'OFFLINE';
-  // An off counter is opened together with the person who will run it.
+  // ADR-069: an off counter gets its operator first — which makes it Paused,
+  // never Active. Opening it is a separate, explicit action.
   const [openingWith, setOpeningWith] = useState<AssignableStaff | null>(null);
   const routed = (counter.serviceIds ?? []).length > 0;
   const serviceNames = (counter.serviceIds ?? [])
@@ -274,15 +275,19 @@ function CounterRow({
                 <Button
                   disabled={!openingWith || openingWith.currentCounter !== null}
                   loading={setStatus.isPending}
-                  onClick={() => openingWith && changeStatus('ACTIVE', openingWith.id)}
+                  onClick={() => openingWith && changeStatus('ON_BREAK', openingWith.id)}
                 >
-                  Open
+                  Assign
                 </Button>
                 {openingWith?.currentCounter && (
                   <Button variant="secondary" onClick={() => setConfirmingMove(openingWith)}>
                     Move here
                   </Button>
                 )}
+                <p className="w-full text-xs text-muted">
+                  Off → operator assigned → <strong>Paused</strong>. The counter does not open by
+                  itself: choose Resume when the operator is ready to serve.
+                </p>
               </>
             ) : (
               <>
@@ -391,7 +396,7 @@ function CounterRow({
         {confirmingMove && (
           <ConfirmDialog
             title={`Move ${confirmingMove.name} to ${counter.name}?`}
-            message={`${confirmingMove.name} will leave ${confirmingMove.currentCounter!.name}, which turns off, and stand at ${counter.name} instead. A person can only be at one counter.`}
+            message={`${confirmingMove.name} will leave ${confirmingMove.currentCounter!.name}, which turns off, and stand at ${counter.name} instead. A person can only be at one counter.${isOff ? ` ${counter.name} becomes Paused — it does not open until you choose Resume.` : ''}`}
             confirmLabel="Move"
             tone="primary"
             confirming={assignCounter.isPending}

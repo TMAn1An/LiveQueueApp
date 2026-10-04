@@ -131,18 +131,41 @@ describe('QueueCountersPage — counter lifecycle (ADR-069)', () => {
     );
   });
 
-  it('opens an off counter only together with an operator', async () => {
+  it('assigning an operator to an OFF counter makes it PAUSED — never ACTIVE — and says so', async () => {
     const user = userEvent.setup();
     setCounters([counter({ status: 'OFFLINE', staffId: null, operator: null })]);
     renderPage();
-    const open = screen.getByRole('button', { name: 'Open' });
-    expect(open).toBeDisabled();
+    expect(screen.getByText(/Off → operator assigned →/)).toHaveTextContent('Paused');
+    expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+    const assign = screen.getByRole('button', { name: 'Assign' });
+    expect(assign).toBeDisabled();
     await user.selectOptions(screen.getByLabelText('Operator for Counter 1'), 'kofi');
-    await user.click(open);
+    await user.click(assign);
     expect(statusMutate).toHaveBeenCalledWith(
-      { counterId: 'c1', status: 'ACTIVE', operatorStaffId: 'kofi' },
+      { counterId: 'c1', status: 'ON_BREAK', operatorStaffId: 'kofi' },
       expect.anything(),
     );
+    expect(statusMutate).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'ACTIVE' }), expect.anything());
+  });
+
+  it('a paused counter opens only through the explicit Resume action', async () => {
+    const user = userEvent.setup();
+    setCounters([counter({ status: 'ON_BREAK' })]);
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(statusMutate).toHaveBeenCalledWith(
+      { counterId: 'c1', status: 'ACTIVE', operatorStaffId: undefined },
+      expect.anything(),
+    );
+  });
+
+  it('moving someone onto an OFF counter warns that it becomes Paused', async () => {
+    const user = userEvent.setup();
+    setCounters([counter({ status: 'OFFLINE', staffId: null, operator: null })]);
+    renderPage();
+    await user.selectOptions(screen.getByLabelText('Operator for Counter 1'), 'bilal');
+    await user.click(screen.getByRole('button', { name: 'Move here' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Counter 1 becomes Paused');
   });
 
   it('never offers to empty an open counter — only to replace its operator', () => {
