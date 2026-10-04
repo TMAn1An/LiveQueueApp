@@ -1,0 +1,37 @@
+name: Production E2E QA (scratch branch)
+
+# Scratch branch only; never merged. Creates ONE disposable organization
+# through the public API, exercises ADR-069/070 end to end, then deletes it
+# through "Delete organization". The QA mailbox comes from a secret.
+on:
+  push:
+    branches: [claude/compassionate-franklin-q5m1be]
+    paths: ['.github/prod-e2e/**', '.github/workflows/prod-e2e.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prod-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    defaults:
+      run:
+        working-directory: .github/prod-e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: npm install --no-audit --no-fund
+      - name: End-to-end QA
+        env:
+          API: https://livequeueapp.onrender.com
+          WEB: https://livequeue-dashboard.pages.dev
+          QA_EMAIL: ${{ secrets.QA_EMAIL }}
+        run: |
+          if [ -z "$QA_EMAIL" ]; then echo "::error title=e2e::QA_EMAIL secret missing"; exit 1; fi
+          node e2e.mjs
