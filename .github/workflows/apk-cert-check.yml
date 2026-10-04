@@ -1,0 +1,35 @@
+name: APK certificate check (scratch branch)
+
+# Scratch branch only; never merged. Reads an already-built APK artifact and
+# reports its signing certificate and badging. Builds and publishes nothing.
+on:
+  push:
+    branches: [claude/compassionate-franklin-q5m1be]
+    paths: ['.github/workflows/apk-cert-check.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LiveQueue-v1.0.5-apk
+          run-id: 37192748897
+          github-token: ${{ github.token }}
+          path: apk
+      - name: Certificate and badging
+        run: |
+          set -euo pipefail
+          apk=$(ls apk/*.apk)
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          cert=$("$bt/apksigner" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+          dn=$("$bt/apksigner" verify --print-certs "$apk" | sed -n 's/.*certificate DN: //p' | head -1)
+          badge=$("$bt/aapt2" dump badging "$apk" | sed -n 1p)
+          dbg=$("$bt/aapt2" dump badging "$apk" | grep -c application-debuggable || true)
+          api=$(unzip -p "$apk" lib/arm64-v8a/libapp.so | strings | grep -c 'https://livequeueapp.onrender.com' || true)
+          echo "::notice title=apk-cert::cert=$cert | dn=$dn | $badge | debuggable=$dbg | prodApiRefs=$api | sha256=$(sha256sum "$apk" | cut -d' ' -f1)"
