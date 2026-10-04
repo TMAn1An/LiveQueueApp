@@ -16,7 +16,7 @@ const pw = () => { const p = `Qa9${randomBytes(12).toString('hex')}x`; console.l
 
 const results = [];
 let failed = false;
-const rec = (ok, msg) => { results.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`); if (!ok) failed = true; console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`); };
+const rec = (ok, raw) => { const msg = String(raw).replace(/\s*\n\s*/g, ' / '); results.push(`${ok ? 'PASS' : 'FAIL'} ${msg}`); if (!ok) failed = true; console.log(`${ok ? 'PASS' : 'FAIL'} ${msg}`); };
 const info = (msg) => { results.push(`INFO ${msg}`); console.log(`INFO ${msg}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -382,11 +382,11 @@ async function ui({ head: hc, adminA, qA, publicCode }) {
   await page.getByText('Organization Head').first().waitFor({ timeout: 30000 });
   rec(await page.getByText('Organization Head').first().isVisible(), 'UI: Head sees "Organization Head" label');
   await page.goto(`${WEB}/staff`);
-  await page.getByText('QA Executive A1').waitFor({ timeout: 30000 });
+  await page.getByText('QA Executive A1').first().waitFor({ timeout: 30000 });
   const body = await page.locator('body').innerText();
   rec(body.includes('Executive') && body.includes('Organization Manager') && !/\b(OWNER|STAFF|MANAGER)\b/.test(body), 'UI: staff list shows role labels, no internal enum names');
   await page.goto(`${WEB}/queues`);
-  await page.getByRole('cell', { name: 'QA Admin A' }).waitFor({ timeout: 30000 });
+  await page.getByRole('cell', { name: 'QA Admin A' }).first().waitFor({ timeout: 30000 });
   rec(true, 'UI: Head queue list shows the Admin column');
   await desk.clearCookies(); await page.evaluate(() => localStorage.clear());
 

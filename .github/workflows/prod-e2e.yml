@@ -3,10 +3,9 @@ name: Production E2E QA (scratch branch)
 # Scratch branch only; never merged. Creates ONE disposable organization
 # through the public API, exercises ADR-069/070 end to end, then deletes it
 # through "Delete organization". The QA mailbox comes from a secret.
+# Manual dispatch only: it creates production data, so it never runs on push.
 on:
-  push:
-    branches: [claude/compassionate-franklin-q5m1be]
-    paths: ['.github/prod-e2e/**', '.github/workflows/prod-e2e.yml']
+  workflow_dispatch:
 
 permissions:
   contents: read
