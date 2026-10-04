@@ -21,5 +21,7 @@ jobs:
           PGURL: ${{ secrets.DATABASE_URL || secrets.PROD_DATABASE_URL || secrets.PRODUCTION_DATABASE_URL }}
           PGOPTIONS: -c default_transaction_read_only=on -c statement_timeout=30000
         run: |
-          if [ -z "$PGURL" ]; then echo "NO_DB_SECRET: no database secret is available to Actions"; exit 0; fi
-          psql "$PGURL" -X -A -t -F '=' -v ON_ERROR_STOP=1 -f .github/prod-db/audit.sql
+          if [ -z "$PGURL" ]; then echo "::notice title=prod-db-audit::NO_DB_SECRET"; exit 0; fi
+          out=$(psql "$PGURL" -X -A -t -F '=' -v ON_ERROR_STOP=1 -f .github/prod-db/audit.sql | grep -v '^$' | paste -sd ';' -)
+          # Logs are not readable from the reviewing environment; one annotation carries the counts.
+          echo "::notice title=prod-db-audit::$out"
