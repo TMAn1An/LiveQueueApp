@@ -1,0 +1,25 @@
+name: Production post-reset smoke (read-only, scratch branch)
+
+# Scratch branch only; never merged. No writes to production.
+on:
+  push:
+    branches: [claude/compassionate-franklin-q5m1be]
+    paths: ['.github/prod-smoke/postreset.mjs', '.github/workflows/prod-postreset-smoke.yml']
+
+permissions:
+  contents: read
+
+env:
+  API: https://livequeueapp.onrender.com
+  WEB: https://livequeue-dashboard.pages.dev
+  EXPECTED_VAPID_PUBLIC_KEY: BKHTEwquCGeSX70dPFo2YbCwKJtl1MSZz1U4usyL3uq3BsQttyj8AEn4gGUaSnHDCuJL1VKhBsuRA91EZbnLwnY
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - run: node .github/prod-smoke/postreset.mjs
