@@ -1,0 +1,25 @@
+name: Production DB audit (read-only counts, scratch branch)
+
+# Lives only on the scratch branch claude/compassionate-franklin-q5m1be;
+# never merged. Read-only session, counts only, no identifiers, no URL.
+on:
+  push:
+    branches: [claude/compassionate-franklin-q5m1be]
+    paths: ['.github/prod-db/**', '.github/workflows/prod-db-audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Counts (read-only)
+        env:
+          PGURL: ${{ secrets.DATABASE_URL || secrets.PROD_DATABASE_URL || secrets.PRODUCTION_DATABASE_URL }}
+          PGOPTIONS: -c default_transaction_read_only=on -c statement_timeout=30000
+        run: |
+          if [ -z "$PGURL" ]; then echo "NO_DB_SECRET: no database secret is available to Actions"; exit 0; fi
+          psql "$PGURL" -X -A -t -F '=' -v ON_ERROR_STOP=1 -f .github/prod-db/audit.sql
