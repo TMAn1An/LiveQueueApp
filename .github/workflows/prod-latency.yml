@@ -1,0 +1,47 @@
+name: Production latency probe (read-only, scratch branch)
+
+# Scratch branch only; never merged. GET/OPTIONS only — no writes.
+# Measures the register page's organization-name check: Render wake,
+# first database query on a fresh process, and warm timings.
+on:
+  workflow_dispatch:
+  push:
+    branches: [claude/compassionate-franklin-q5m1be]
+    paths: ['.github/workflows/prod-latency.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      API: https://livequeueapp.onrender.com
+      ORIGIN: https://livequeue-dashboard.pages.dev
+    steps:
+      - name: Probe
+        run: |
+          set -u
+          fmt='%{http_code} dns=%{time_namelookup} tcp=%{time_connect} tls=%{time_appconnect} ttfb=%{time_starttransfer} total=%{time_total}'
+          out=()
+          probe() { # label, method, path
+            local r
+            r=$(curl -s -o /dev/null -m 120 -X "$2" -H "Origin: $ORIGIN" \
+                  ${4:+-H "$4"} -w "$fmt" "$API$3" || echo "curl-failed")
+            out+=("$1 $r"); echo "$1 $r"
+          }
+          name="latencyprobe$RANDOM"
+          avail="/api/auth/organization-name-availability?name=$name"
+          # 1. First request after idle: does Render need waking?
+          probe "01 health (first request)" GET /health
+          # 2. First DB query on this process (Prisma connect + Neon wake if suspended)
+          probe "02 availability (first DB query)" GET "$avail"
+          # 3. Browser preflight, as the dashboard sends Content-Type: application/json
+          probe "03 preflight OPTIONS" OPTIONS "$avail" "Access-Control-Request-Method: GET"
+          for i in 1 2 3 4 5; do sleep 2; probe "0$((3+i)) availability warm #$i" GET "$avail"; done
+          for i in 1 2 3; do sleep 1; probe "1$((i-1)) health warm #$i" GET /health; done
+          probe "13 preflight OPTIONS warm" OPTIONS "$avail" "Access-Control-Request-Method: GET"
+          curl -s -D - -o /dev/null -H "Origin: $ORIGIN" -X OPTIONS -H "Access-Control-Request-Method: GET" -H "Access-Control-Request-Headers: content-type" "$API$avail" \
+            | grep -iE '^(access-control-max-age|access-control-allow-headers|x-render|rndr|server|cf-)' | tr -d '\r' | sed 's/^/14 preflight header: /' | while read -r l; do out+=("$l"); echo "$l"; done
+          printf '%s | ' "${out[@]}" | sed 's/^/::notice title=latency::/'
