@@ -1944,3 +1944,44 @@ Both migrations are additive: new tables, nullable/defaulted columns, backfills 
 - A malformed `CF-Connecting-IP` falls back to the peer bucket.
 - Default selection works, and with no header configured the peer address is used.
 - With the header disabled, the separate-bucket tests fail, which reproduces the production defect.
+
+## ADR-074: Realtime bursts refetch each dashboard view once, not once per waiting person (2026-10-08)
+
+**Context.** Every queue change (join, call, start, complete, skip, cancel, counter change, duration change) makes the server send `token.position_changed` once per waiting person (`broadcastQueueEtaUpdate`, ADR-026). That event is needed because every waiting person's ETA can move.
+
+On the dashboard, every `token.*` event invalidated `['dashboard']`, `['queues']` and `['queue', id]`. React Query cancels and restarts an in-flight fetch on each invalidation, and `apiFetch` cannot abort, so each restart was a real HTTP request. One "Serve next" therefore cost two full refetches per waiting person in every open staff tab. Each `/api/dashboard/tokens` refetch also recomputes the queue's ETAs on the server.
+
+Measured locally: one Serve next, one live-queue tab, a fresh seed each time.
+
+| Waiting | Live tab before | Live tab after | Overview tab before | Overview tab after |
+|---|---|---|---|---|
+| 50 | 103 req, 866 KB, 2.9 s | 3 req, 17.8 KB | 100 req, 87 KB | 2 req, 1.7 KB |
+| 200 | 403 req, 3,410 KB, 14.8 s | 3 req, 17.8 KB | 400 req, 349 KB | 2 req, 1.7 KB |
+| 500 | 1,003 req, 8,498 KB, 38.9 s | 5 req, 34.8 KB | 1,000 req, 872 KB | 4 req, 3.5 KB |
+
+Request counts include the `POST …/next` itself. Socket frames are unchanged: 0.34 KB per waiting person per staff tab.
+
+**Decision.**
+- `services/queryInvalidation.ts` adds one coalescing scheduler per QueryClient. A key requested during a burst is invalidated once, 100 ms after the burst goes quiet, and never later than 1 s after the first request. A key under an already-scheduled prefix is skipped.
+- The organization socket routes every event-driven invalidation through the scheduler.
+- The token mutations' `invalidateLiveData` uses it too, so the acting tab's own refresh and the broadcast it causes merge into one fetch.
+- `token.position_changed` patches the cached live-table row (`position`, `estimatedWaitMinutes`) immediately.
+- `token.position_changed` still schedules the same views as any token event. The server stays the source of truth: the screen is always replaced by a real fetch after the burst, and a duration change (which broadcasts only `position_changed`) still refreshes every tab.
+- Resync on (re)connect stays immediate.
+
+**Floating Counter Console (ADR-072).** Its branch invalidates `['counters', 'mine']` directly on every token and queue event, which would reintroduce the per-person refetch. When it merges, those calls go through the scheduler: `scheduleTokenViews` and the `queue.*` case schedule `['counters', 'mine']`. A trial merge resolved that way passed the dashboard suite. The one exact-key assertion was updated to include `["counters","mine"]`, and the result is still one fetch per burst.
+
+**Tradeoffs.**
+- Event-driven refreshes appear up to 100 ms later, or up to 1 s later during a continuous stream.
+- Very long bursts (500 waiting on a slow link) may flush twice instead of once.
+- The socket fan-out is still O(waiting) per staff tab: about 170 KB per queue change at 500 waiting. A batched per-queue positions event from the server is the next step if staff egress becomes the limit. It is not done here, so that the Android and portal clients, which rely on the per-token event, are untouched.
+
+**Tests.** `queryInvalidation.test.ts` covers the scheduler: dedupe, prefix coverage, max wait and cancel. `useOrganizationSocket.test.tsx` covers:
+- 500 events produce three invalidations;
+- the max-wait refresh;
+- nothing is lost between bursts;
+- the stats key is covered by its prefix;
+- the immediate row patch;
+- immediate resync.
+
+Browser QA covered two live tabs plus an overview tab through Serve next → Start → Complete (twice) → Serve next → Skip. After every step, both tabs matched a fresh load of the page.
