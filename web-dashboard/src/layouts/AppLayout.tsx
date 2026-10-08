@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useOrganizationSocket } from '../hooks/useOrganizationSocket';
+import { FloatingConsoleProvider } from '../floatingConsole/FloatingConsoleContext';
 import { EmailVerificationBanner } from '../components/EmailVerificationBanner';
 import { BrandLogo } from '../components/BrandLogo';
 import { Button } from '../components/Button';
@@ -194,6 +195,9 @@ export function AppLayout() {
   );
 
   return (
+    // ADR-072: the Floating Counter Console exists only inside the signed-in
+    // layout, so signing out closes it.
+    <FloatingConsoleProvider>
     <div className="flex min-h-screen bg-page">
       {/* Mobile Sidebar Backdrop */}
       {mobileMenuOpen && (
@@ -268,6 +272,7 @@ export function AppLayout() {
         <OnboardingTutorial />
       )}
     </div>
+    </FloatingConsoleProvider>
   );
 }
 

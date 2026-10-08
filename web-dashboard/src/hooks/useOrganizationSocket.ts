@@ -65,6 +65,8 @@ export function useOrganizationSocket(organizationId: string | null): void {
           void queryClient.invalidateQueries({ queryKey: ['queues'] });
           if (envelope.queueId) {
             void queryClient.invalidateQueries({ queryKey: ['queue', envelope.queueId] });
+            // ADR-072: deleting a queue releases its counters' operators.
+            void queryClient.invalidateQueries({ queryKey: ['counters', 'mine'] });
           }
           void queryClient.invalidateQueries({ queryKey: ['dashboard', 'stats'] });
           break;
@@ -87,6 +89,9 @@ export function useOrganizationSocket(organizationId: string | null): void {
           if (envelope.queueId) {
             void queryClient.invalidateQueries({ queryKey: ['queue', envelope.queueId] });
           }
+          // ADR-072: the person at the signed-in person's own counter
+          // (Floating Counter Console) may have just changed.
+          void queryClient.invalidateQueries({ queryKey: ['counters', 'mine'] });
           break;
       }
     }

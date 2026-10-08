@@ -116,6 +116,25 @@ export interface DeletedQueue {
   admin: QueueAdminSummary | null;
 }
 
+/**
+ * ADR-072: the person called to, or being served at, the signed-in person's
+ * own counter — read from the backend, never derived here. Deliberately
+ * minimal: it feeds the always-visible Floating Counter Console.
+ */
+export interface CounterCurrentToken {
+  id: string;
+  serialNumber: string;
+  status: 'CALLED' | 'IN_PROGRESS';
+  /** The current step's service on a journey; the whole selection otherwise. */
+  serviceName: string | null;
+  calledAt: string | null;
+  startedAt: string | null;
+  /** ADR-070: null for a token created before ordered journeys. */
+  step: { number: number; total: number } | null;
+  /** ADR-041: whether Start asks for the person's code (the API re-decides). */
+  requiresVerificationCode: boolean;
+}
+
 /** ADR-064: the counter an owner or admin has assigned the signed-in person to. */
 export interface MyCounter {
   id: string;
@@ -123,6 +142,8 @@ export interface MyCounter {
   status: CounterStatus;
   queueId: string;
   queueName: string;
+  /** ADR-072: optional so an older backend that omits it reads as "unknown". */
+  currentToken?: CounterCurrentToken | null;
 }
 
 export interface Counter {

@@ -9,6 +9,7 @@ import { InfoHelp } from './InfoHelp';
 import { PermissionGate } from './PermissionGate';
 import { StatusBadge } from './StatusBadge';
 import { actionErrorMessage } from '../utils/actionError';
+import { useFloatingConsole } from '../floatingConsole/useFloatingConsole';
 
 /**
  * ADR-064: the one way to take someone from the line.
@@ -26,6 +27,8 @@ export function ServeNextPanel({ queueId }: { queueId: string }) {
   const serveNext = useNextToken();
   const [error, setError] = useState<string | null>(null);
   const [lastServed, setLastServed] = useState<string | null>(null);
+  // ADR-072: absent outside the signed-in layout (and in isolated tests).
+  const floatingConsole = useFloatingConsole();
 
   if (isLoading) return null;
 
@@ -103,21 +106,37 @@ export function ServeNextPanel({ queueId }: { queueId: string }) {
               </p>
             )}
           </div>
-          <Button
-            size="lg"
-            disabled={!active}
-            loading={serveNext.isPending}
-            onClick={() => {
-              setError(null);
-              setLastServed(null);
-              serveNext.mutate(queueId, {
-                onSuccess: (res) => setLastServed(res.data.serialNumber),
-                onError: (err) => setError(actionErrorMessage(err)),
-              });
-            }}
-          >
-            {serveNext.isPending ? 'Calling…' : 'Serve next'}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {floatingConsole && (
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={floatingConsole.open}
+                title={
+                  floatingConsole.pipSupported
+                    ? 'A small window that stays on top of your other windows'
+                    : 'A small console docked on this page'
+                }
+              >
+                {floatingConsole.surface ? 'Show floating console' : 'Open floating console'}
+              </Button>
+            )}
+            <Button
+              size="lg"
+              disabled={!active}
+              loading={serveNext.isPending}
+              onClick={() => {
+                setError(null);
+                setLastServed(null);
+                serveNext.mutate(queueId, {
+                  onSuccess: (res) => setLastServed(res.data.serialNumber),
+                  onError: (err) => setError(actionErrorMessage(err)),
+                });
+              }}
+            >
+              {serveNext.isPending ? 'Calling…' : 'Serve next'}
+            </Button>
+          </div>
         </div>
         <ErrorBanner message={error} />
       </div>

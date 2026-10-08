@@ -10,15 +10,19 @@ export function useCounters(queueId: string | undefined) {
   });
 }
 
+/** The own-counter query, shared so a direct re-read (ADR-072) uses the
+ * same key and fetcher as the hook. */
+export const myCounterQuery = {
+  queryKey: ['counters', 'mine'] as const,
+  queryFn: async () => (await counterApi.getMyCounter()).data,
+};
+
 /**
  * ADR-064: the signed-in person's own counter — the one they claim people
  * at. Null when an owner or admin has not assigned them one.
  */
 export function useMyCounter() {
-  return useQuery({
-    queryKey: ['counters', 'mine'],
-    queryFn: async () => (await counterApi.getMyCounter()).data,
-  });
+  return useQuery(myCounterQuery);
 }
 
 function invalidateCounters(queryClient: ReturnType<typeof useQueryClient>, queueId: string) {

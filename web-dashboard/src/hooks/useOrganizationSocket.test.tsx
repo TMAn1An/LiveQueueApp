@@ -78,6 +78,9 @@ describe('useOrganizationSocket', () => {
     fakeSocket.trigger('token.called', { type: 'token.called', organizationId: 'org-1', data: {} });
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard'] });
+    // ADR-072: the Floating Counter Console reads the person at the
+    // signed-in person's own counter from here.
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['counters', 'mine'] });
   });
 
   it('invalidates the specific queue and queues list when a queue.* event arrives', () => {
@@ -92,6 +95,8 @@ describe('useOrganizationSocket', () => {
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['queues'] });
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['queue', 'q1'] });
+    // ADR-072: a deleted queue releases its counters' operators.
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['counters', 'mine'] });
   });
 
   it('invalidates counters for the affected queue when a counter.* event arrives', () => {
