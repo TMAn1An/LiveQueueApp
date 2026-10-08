@@ -3,13 +3,19 @@ import helmet from 'helmet';
 import cors from 'cors';
 import pinoHttp from 'pino-http';
 import { logger } from './config/logger';
-import { corsOrigins, env } from './config/env';
+import { clientIpHeader, corsOrigins, env } from './config/env';
 import routes from './routes';
 import { notFoundHandler } from './middleware/notFoundHandler';
 import { errorHandler } from './middleware/errorHandler';
+import { resolveClientIp } from './middleware/clientIp';
 
 export function createApp() {
   const app = express();
+
+  // ADR-073: `trust proxy` stays off on purpose. The real client address
+  // comes from one edge-set header instead (see middleware/clientIp.ts), and
+  // it is resolved first so every limiter and audit entry below sees it.
+  app.use(resolveClientIp(clientIpHeader));
 
   // Helmet's other defaults (CSP, X-Frame-Options, X-Content-Type-Options,
   // Referrer-Policy, COOP, etc.) are kept exactly as-is — this app only ever

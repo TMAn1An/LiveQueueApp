@@ -70,11 +70,11 @@ const fakeSocket = {
   removeAllListeners() {
     for (const key of Object.keys(socketHandlers)) delete socketHandlers[key];
   },
-  io: { on: () => undefined },
+  io: { on: () => undefined, off: () => undefined },
 };
 vi.mock('socket.io-client', () => ({ io: () => fakeSocket }));
-function fire(event: string) {
-  socketHandlers[event]?.forEach((cb) => cb({}));
+function fire(event: string, envelope: unknown = {}) {
+  socketHandlers[event]?.forEach((cb) => cb(envelope));
 }
 
 function renderAt(path: string) {
@@ -271,7 +271,7 @@ describe('queue → services → form → join', () => {
 });
 
 describe('live tracking', () => {
-  it('joins the token room, re-reads on every event and reconnect, and shows the counter when called', async () => {
+  it('joins the token room, applies events without re-reading, re-reads on reconnect, and shows the counter when called', async () => {
     let current: Record<string, unknown> = { ...TOKEN };
     handlers.push((url) => (url.pathname === '/api/tokens/tok-1' ? ok(current) : undefined));
     renderAt('/visit/token/tok-1');
@@ -281,10 +281,25 @@ describe('live tracking', () => {
     expect(fakeSocket.emitted).toContainEqual(['join:token', { tokenId: 'tok-1' }, expect.any(Function)]);
     expect(screen.getByTestId('live-indicator')).toHaveTextContent('Live');
 
+    // ADR-075: a position update is applied from the event itself — no read.
+    const readsBefore = () => calls.filter((c) => c.path === '/api/tokens/tok-1').length;
+    let reads = readsBefore();
+    await act(async () =>
+      fire('token.position_changed', {
+        tokenId: 'tok-1',
+        data: { position: 1, estimatedWaitMinutes: 4, estimatedReadyAt: null, etaUnavailableReason: null },
+      }),
+    );
+    expect(await screen.findByText('1')).toBeInTheDocument();
+    expect(readsBefore()).toBe(reads);
+
+    // A lifecycle event carries the full customer view: shown as is, no read.
     current = { ...TOKEN, status: 'CALLED', position: null, counter: { id: 'c1', name: 'Desk 3' } };
-    await act(async () => fire('token.called'));
+    reads = readsBefore();
+    await act(async () => fire('token.called', { tokenId: 'tok-1', data: current }));
     expect(await screen.findByText('It’s your turn')).toBeInTheDocument();
     expect(screen.getByText('Desk 3')).toBeInTheDocument();
+    expect(readsBefore()).toBe(reads);
 
     // A drop and reconnect re-reads the truth rather than trusting old state.
     await act(async () => fire('disconnect'));

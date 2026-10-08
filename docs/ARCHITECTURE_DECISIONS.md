@@ -1915,3 +1915,133 @@ The Head must choose an Admin workspace; an Admin invites into their own; a Mana
 
 ### Migration safety (Phase 27)
 Both migrations are additive: new tables, nullable/defaulted columns, backfills from existing rows (step name snapshots, a `BACKFILL` tenure for each current Head), partial unique indexes and triggers. Before deploy, check that no organization has two `OWNER` rows and that no live queue lacks an Admin other than legacy rows (the trigger guards transitions only, so existing legacy rows are not rejected). No column is dropped or renamed. Rollback is to leave the new objects in place; nothing reads them on the previous release.
+
+## ADR-073: The real client address comes from Cloudflare's CF-Connecting-IP, not from trust proxy (2026-10-08)
+
+**Context.** Production runs behind Cloudflare and Render's load balancer, and Express's `trust proxy` was never set. `req.ip` was therefore Render's internal proxy address. A read-only probe from two GitHub runners with different public addresses showed one `RateLimit-Remaining` counter falling across both. Every visitor in the world shared each rate-limit bucket, including login (20/15 min), join (10/min) and public reads (60/min), and every audit `ipAddress` was the proxy's.
+
+**Options rejected.**
+- `trust proxy: true` makes `req.ip` the left-most `X-Forwarded-For` entry. Render's proxy appends to the client's own header, so that entry is whatever the caller wants, and each request could pick a fresh bucket.
+- A hop count (`trust proxy: 2` or `3`) depends on how many proxies Render and Cloudflare happen to chain today. An unannounced change would silently either re-share every bucket or make the header spoofable again.
+
+**Decision.**
+- `trust proxy` stays off. A small middleware (`middleware/clientIp.ts`), mounted first, sets `req.ip` from a single header that the edge sets and overwrites: Cloudflare's `CF-Connecting-IP`.
+- It is chosen by `CLIENT_IP_HEADER` (`cf-connecting-ip` | `none`). When unset, it is `cf-connecting-ip` exactly when Render's own `RENDER=true` is present, and `none` everywhere else, so local development and the test suite keep the TCP peer address.
+- A missing, empty, multi-valued or non-IP value is ignored, and the request falls back to the peer address. A malformed header can only land in the shared proxy bucket, never in a fresh one.
+- `X-Forwarded-For`, `X-Real-IP` and `True-Client-IP` are never read.
+
+**Limits unchanged.** Every limiter keeps its window and maximum. The only change is that the key is now per client.
+
+**Tradeoffs.**
+- People behind one public address (campus NAT, carrier CGNAT) share a bucket. For example, 10 joins per minute is per address, not per person. That is a product question for later (for example, a device-keyed join limit) and is not addressed by loosening limits here.
+- The setting relies on Render's documented guarantee that all inbound traffic passes Cloudflare. Running on a host without Cloudflare in front requires `CLIENT_IP_HEADER=none`, or explicit configuration only when Cloudflare is the sole path. This is documented in DEPLOYMENT.md §4.
+- The limiter store is still in-memory, so the single-instance requirement is unchanged.
+
+**Tests.** `tests/clientIp.test.ts`:
+- Separate buckets for different clients: public reads, join, and login together with the invitation routes that share its limiter.
+- IPv6 clients are bucketed separately.
+- Rotating `X-Forwarded-For`, `X-Real-IP` or `True-Client-IP` cannot escape an exhausted bucket.
+- A malformed `CF-Connecting-IP` falls back to the peer bucket.
+- Default selection works, and with no header configured the peer address is used.
+- With the header disabled, the separate-bucket tests fail, which reproduces the production defect.
+
+## ADR-074: Realtime bursts refetch each dashboard view once, not once per waiting person (2026-10-08)
+
+**Context.** Every queue change (join, call, start, complete, skip, cancel, counter change, duration change) makes the server send `token.position_changed` once per waiting person (`broadcastQueueEtaUpdate`, ADR-026). That event is needed because every waiting person's ETA can move.
+
+On the dashboard, every `token.*` event invalidated `['dashboard']`, `['queues']` and `['queue', id]`. React Query cancels and restarts an in-flight fetch on each invalidation, and `apiFetch` cannot abort, so each restart was a real HTTP request. One "Serve next" therefore cost two full refetches per waiting person in every open staff tab. Each `/api/dashboard/tokens` refetch also recomputes the queue's ETAs on the server.
+
+Measured locally: one Serve next, one live-queue tab, a fresh seed each time.
+
+| Waiting | Live tab before | Live tab after | Overview tab before | Overview tab after |
+|---|---|---|---|---|
+| 50 | 103 req, 866 KB, 2.9 s | 3 req, 17.8 KB | 100 req, 87 KB | 2 req, 1.7 KB |
+| 200 | 403 req, 3,410 KB, 14.8 s | 3 req, 17.8 KB | 400 req, 349 KB | 2 req, 1.7 KB |
+| 500 | 1,003 req, 8,498 KB, 38.9 s | 5 req, 34.8 KB | 1,000 req, 872 KB | 4 req, 3.5 KB |
+
+Request counts include the `POST …/next` itself. Socket frames are unchanged: 0.34 KB per waiting person per staff tab.
+
+**Decision.**
+- `services/queryInvalidation.ts` adds one coalescing scheduler per QueryClient. A key requested during a burst is invalidated once, 100 ms after the burst goes quiet, and never later than 1 s after the first request. A key under an already-scheduled prefix is skipped.
+- The organization socket routes every event-driven invalidation through the scheduler.
+- The token mutations' `invalidateLiveData` uses it too, so the acting tab's own refresh and the broadcast it causes merge into one fetch.
+- `token.position_changed` patches the cached live-table row (`position`, `estimatedWaitMinutes`) immediately.
+- `token.position_changed` still schedules the same views as any token event. The server stays the source of truth: the screen is always replaced by a real fetch after the burst, and a duration change (which broadcasts only `position_changed`) still refreshes every tab.
+- Resync on (re)connect stays immediate.
+
+**Floating Counter Console (ADR-072).** Its branch invalidates `['counters', 'mine']` directly on every token and queue event, which would reintroduce the per-person refetch. When it merges, those calls go through the scheduler: `scheduleTokenViews` and the `queue.*` case schedule `['counters', 'mine']`. A trial merge resolved that way passed the dashboard suite. The one exact-key assertion was updated to include `["counters","mine"]`, and the result is still one fetch per burst. The exact steps and patch are in `docs/integration/floating-counter-console-merge.md`.
+
+**Tradeoffs.**
+- Event-driven refreshes appear up to 100 ms later, or up to 1 s later during a continuous stream.
+- Very long bursts (500 waiting on a slow link) may flush twice instead of once.
+- The socket fan-out is still O(waiting) per staff tab: about 170 KB per queue change at 500 waiting. A batched per-queue positions event from the server is the next step if staff egress becomes the limit. It is not done here, so that the Android and portal clients, which rely on the per-token event, are untouched.
+
+**Tests.** `queryInvalidation.test.ts` covers the scheduler: dedupe, prefix coverage, max wait and cancel. `useOrganizationSocket.test.tsx` covers:
+- 500 events produce three invalidations;
+- the max-wait refresh;
+- nothing is lost between bursts;
+- the stats key is covered by its prefix;
+- the immediate row patch;
+- immediate resync.
+
+Browser QA covered two live tabs plus an overview tab through Serve next → Start → Complete (twice) → Serve next → Skip. After every step, both tabs matched a fresh load of the page.
+
+## ADR-075: The iPhone/iPad portal applies live events instead of re-reading the token after each one (2026-10-08)
+
+**Context.** The portal's `useLiveToken` re-read `GET /api/tokens/:id` on every event in the visitor's token room. That read runs `computeComputedFields`, which simulates the whole queue's ETAs (`token.service.ts`, `computeQueueEtas`). Every queue change sends `token.position_changed` to every waiting person, so N portal visitors meant N whole-queue simulations per queue change.
+
+The Android app already applies the event payload without re-reading.
+
+Measured locally on one Serve next, with N visitors connected to their own tracking pages:
+
+| Waiting | Visitors | Token GETs | Token-GET bytes | ETA simulations | Server CPU | Socket.io to visitors |
+|---|---|---|---|---|---|---|
+| 50 | 1 / 10 / 50 | 1 / 10 / 50 → **0** | 1.1 / 4.2 / 26.5 KB → **0** | 2 / 11 / 50 → **1** | 88 / 256 / 1,095 ms → 50 / 52 / 138 ms | 0.3 / 3.3 / 17.6 KB (unchanged) |
+| 200 | 1 / 10 / 50 | 1 / 10 / 50 → **0** | 1.1 / 6.3 / 41.1 KB → **0** | 2 / 11 / 51 → **1** | 126 / 570 / 2,427 ms → 94 / 94 / 110 ms | 0.3 / 3.3 / 16.7 KB (unchanged) |
+| 500 | 1 / 10 / 50 | 1 / 10 / 50 → **0** | 1.1 / 10.6 / 52.8 KB → **0** | 2 / 11 / 51 → **1** | 316 / 1,158 / 4,849 ms → 164 / 155 / 156 ms | 0.3 / 3.3 / 16.7 KB (unchanged) |
+
+The remaining simulation is the server's own per-event broadcast. Server CPU is the backend process's user and system time over the event, including the Serve next itself.
+
+**Decision.**
+- **Lifecycle events** (`token.called`, `started`, `step_completed`, `completed`, `skipped`, `cancelled`) are applied as they arrive. Each carries the full customer view, built by `getTokenCustomerView`, the same `toCustomerView` as the REST read. A queue deletion's cancellation carries `queueRemoved`.
+- **`token.position_changed`** patches `position`, `estimatedWaitMinutes` and `etaUnavailableReason`. It patches only a token shown as `WAITING`.
+- **Re-reads still happen** in these cases, coalesced over 250 ms:
+  - a payload that fails the shape check (wrong token id, or missing status, serial number, services or position);
+  - a position update for a token not shown as waiting, because the screen and the server disagree;
+  - `token.created`, `queue.status_changed` and `queue.updated`. None of these is sent to a token room today; if one arrives, the portal re-reads rather than guesses.
+- **Applying an event supersedes any read in flight**, so an older answer never overwrites a newer event. A position patch that supersedes a read asks for one fresh read.
+- **Unchanged:** an immediate re-read on every (re)connect and on every return to the page (`visibilitychange`), and the first read on open.
+- **New safety read:** about every 10 minutes (±20% jitter per visitor) while the visit is live and the page visible, so no client state can outlive a silently lost event indefinitely.
+- **Cleanup:** on unmount the debounce and reconcile timers are cleared. The `reconnect_failed` handler is removed by name, because the Socket.io manager is shared per origin.
+
+**Correctness.** A real browser, with an iPhone Safari user agent, ran the full visitor flow against the local stack. After each step the live page matched a fresh load of the same visit, and no page or console errors were reported. Steps covered:
+- join → position changes (person ahead called, then completed) with **0 token reads**;
+- called → started;
+- step 1 completed and referred to another counter (journey step 2);
+- offline with a missed event, then reconnect;
+- browser refresh, and foreground (exactly one read);
+- completed;
+- visitor leaves;
+- queue deleted (the cancellation shows its reason);
+- unknown token ("Visit not found").
+
+**Tradeoffs.**
+- The screen trusts the event payload between reads. That payload comes from the same server function as the read, and every reconnect, foreground and safety read replaces it with a fresh read.
+- The safety read adds about 1 read per visitor per 10 minutes. ESTIMATE: 500 portal visitors ≈ 0.8 reads per second.
+- Socket traffic to visitors is unchanged: one event per visitor per queue change.
+
+**Tests.** `src/portal/useLiveToken.test.ts` (15 tests) covers:
+- position patch without a read;
+- full-view apply without a read, for every terminal state;
+- next journey step / referral;
+- queue-removal reason;
+- untrusted payload → one coalesced read;
+- position for a non-waiting screen → read;
+- superseded in-flight read;
+- other-token events ignored;
+- reconnect and foreground reads;
+- the reconcile read, which skips finished visits;
+- no timers, listeners or reads after unmount;
+- one listener per event.
+
+Run against the previous hook, 11 of the 15 fail. `pages.test.tsx` now drives the tracking page with real payloads.

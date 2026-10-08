@@ -1,0 +1,23 @@
+diff --git a/web-dashboard/src/hooks/useOrganizationSocket.ts b/web-dashboard/src/hooks/useOrganizationSocket.ts
+index 9a4c547..4dec921 100644
+--- a/web-dashboard/src/hooks/useOrganizationSocket.ts
++++ b/web-dashboard/src/hooks/useOrganizationSocket.ts
+@@ -76,6 +76,8 @@ export function useOrganizationSocket(organizationId: string | null): void {
+           scheduler.schedule(['queues']);
+           if (envelope.queueId) {
+             scheduler.schedule(['queue', envelope.queueId]);
++            // ADR-072: deleting a queue releases its counters' operators.
++            scheduler.schedule(['counters', 'mine']);
+           }
+           scheduler.schedule(['dashboard', 'stats']);
+           break;
+@@ -108,6 +110,9 @@ export function useOrganizationSocket(organizationId: string | null): void {
+       if (envelope.queueId) {
+         scheduler.schedule(['queue', envelope.queueId]);
+       }
++      // ADR-072: the person at the signed-in person's own counter
++      // (Floating Counter Console) may have just changed.
++      scheduler.schedule(['counters', 'mine']);
+     }
+ 
+     // The coalesced refetch above still replaces these rows with the

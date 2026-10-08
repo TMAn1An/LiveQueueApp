@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as tokenApi from '../api/token.api';
+import { invalidationSchedulerFor } from '../services/queryInvalidation';
 import type { SkipReasonCode } from '../types/terminalNotes';
 
 /**
@@ -8,13 +9,15 @@ import type { SkipReasonCode } from '../types/terminalNotes';
  * (CLAUDE.md section 5: sockets notify, but a fresh fetch is truth). Socket
  * events also invalidate the same keys, so a successful mutation's own
  * optimistic invalidation and the resulting broadcast are redundant-safe,
- * not conflicting.
+ * not conflicting — and, through the shared scheduler (ADR-074), they are
+ * merged into one refetch rather than two.
  */
 function invalidateLiveData(queryClient: ReturnType<typeof useQueryClient>) {
-  void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
+  const scheduler = invalidationSchedulerFor(queryClient);
+  scheduler.schedule(['dashboard']);
   // Waiting counts on the queue header and list.
-  void queryClient.invalidateQueries({ queryKey: ['queue'] });
-  void queryClient.invalidateQueries({ queryKey: ['queues'] });
+  scheduler.schedule(['queue']);
+  scheduler.schedule(['queues']);
 }
 
 export function useStartToken() {

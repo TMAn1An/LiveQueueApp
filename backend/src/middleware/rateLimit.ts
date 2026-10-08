@@ -1,5 +1,5 @@
 import rateLimit from 'express-rate-limit';
-import { env } from '../config/env';
+import { clientIpHeader, env } from '../config/env';
 
 /**
  * Disabled during the automated test suite by default: the integration
@@ -21,6 +21,10 @@ function createLimiter(windowMs: number, max: number) {
     standardHeaders: true,
     legacyHeaders: false,
     skip: shouldSkip,
+    // With an edge client-IP header (ADR-073) X-Forwarded-For is ignored on
+    // purpose, so the library's "you have X-Forwarded-For but no trust proxy"
+    // warning would be noise. Without one, keep the warning.
+    validate: { xForwardedForHeader: clientIpHeader === null },
     message: {
       success: false,
       error: { code: 'RATE_LIMITED', message: 'Too many requests. Please try again later.' },

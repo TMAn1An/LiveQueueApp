@@ -497,6 +497,7 @@ authentication-shaped: a low-volume domain whose name does not match the
 | `JWT_EXPIRES_IN` | `15m` | Access-token lifetime. |
 | `REFRESH_TOKEN_EXPIRES_IN` | `30d` | Refresh-session lifetime (ADR-013). |
 | `BCRYPT_SALT_ROUNDS` | `12` | Password hashing cost, bounded 10–15. |
+| `CLIENT_IP_HEADER` | `cf-connecting-ip` when `RENDER=true`, else `none` | Where `req.ip` comes from (ADR-073, §4). Wrong here means every client shares one rate-limit bucket (`none` behind a proxy) or a caller can pick their own address (`cf-connecting-ip` without Cloudflare in front). Only `cf-connecting-ip` and `none` are accepted. |
 | `RATE_LIMIT_PUBLIC_WINDOW_MS` / `RATE_LIMIT_PUBLIC_MAX` | `60000` / `60` | Public endpoints. |
 | `RATE_LIMIT_TOKEN_CREATE_WINDOW_MS` / `RATE_LIMIT_TOKEN_CREATE_MAX` | `60000` / `10` | `POST /api/tokens`'s stricter limiter. |
 | `RATE_LIMIT_SENSITIVE_WINDOW_MS` / `RATE_LIMIT_SENSITIVE_MAX` | `900000` / `30` | Sensitive authenticated mutations (incl. OTP-gated `/start`). |
@@ -568,12 +569,33 @@ server {
 }
 ```
 
-If the proxy is trusted to set `X-Forwarded-For` correctly, Express's
-`req.ip` (already used throughout — rate limiting, audit `ipAddress`
-snapshots) reflects the real client IP only if the proxy is configured to
-forward it; this repository does not currently set Express's `trust proxy`
-setting, so evaluate that against your actual proxy before relying on
-`req.ip` in production.
+### Real client address (ADR-073)
+
+Express's `trust proxy` is deliberately **off**. `req.ip` (rate limiting,
+audit `ipAddress`) comes from one edge-set header instead, chosen by
+`CLIENT_IP_HEADER`:
+
+- **Render:** nothing to set. Render exports `RENDER=true`, and with that the
+  default is `cf-connecting-ip`: every request to a Render web service passes
+  Cloudflare, which overwrites any client-supplied `CF-Connecting-IP`.
+  `X-Forwarded-For` is *not* used because Render's proxy appends to whatever
+  the client sent (`<client-chosen>, <client>, <edge>, <render>`), so trusting
+  it would let a caller choose their own rate-limit key.
+- **Anywhere else (local dev, tests, the nginx example above):** the default
+  is `none` — `req.ip` is the TCP peer, exactly as before. Only set
+  `CLIENT_IP_HEADER=cf-connecting-ip` when Cloudflare is genuinely the only
+  way to reach the process; otherwise a direct caller could send the header
+  themselves.
+- A missing or malformed header value falls back to the peer address (the
+  shared proxy bucket), never to a fresh bucket.
+
+Verify after deploy: two machines on different networks calling
+`GET /api/public/web-push/config` should each see their own
+`RateLimit-Remaining` counting down from the limit.
+
+People behind one public address (a campus or office NAT, a mobile carrier
+CGNAT) still share one bucket per limiter — the limits are per address, not
+per person.
 
 ---
 
@@ -907,9 +929,9 @@ is the only component that constrains instance count.
   this repository — whichever is used just needs to run `npm start` from
   `backend/` with the environment variables in §3 set, and send `SIGTERM`
   on stop/redeploy for the graceful-shutdown path (§5) to run.
-- Express's `trust proxy` setting is not configured in this codebase (§4) —
-  verify this against your actual reverse proxy before relying on `req.ip`
-  for anything security-sensitive in production.
+- Express's `trust proxy` stays off (§4, ADR-073). The real client address
+  comes from `CF-Connecting-IP` on Render and from the TCP peer elsewhere;
+  set `CLIENT_IP_HEADER` explicitly on any other host behind Cloudflare.
 - No backup tooling or schedule exists in this repository — §7/§9's "back
   up before migrating" is an operational rule this document states, not
   infrastructure this repository implements (that's Phase 7's separate,
