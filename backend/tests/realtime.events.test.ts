@@ -127,7 +127,14 @@ describe('All 12 specification events are emitted to the organization room', () 
     const queue = await createQueue(ctx.accessToken);
     const counter = await createCounter(ctx.accessToken, queue.id);
     const socket = await orgSocket(ctx.accessToken, ctx.organizationId);
-    const eventPromise = waitForEvent<Envelope>(socket, 'counter.updated');
+    // The setup's own operator assignment also emits counter.updated, and it
+    // can arrive after the socket joins — wait for the rename itself.
+    const eventPromise = waitForEvent<Envelope>(
+      socket,
+      'counter.updated',
+      5000,
+      (e) => e.data.name === 'Renamed Counter',
+    );
 
     await api()
       .put(`/api/counters/${counter.id}`)

@@ -69,15 +69,21 @@ export function waitForEvent<T = unknown>(
   socket: ClientSocket,
   event: string,
   timeoutMs = 5000,
+  /** Skip occurrences this rejects — e.g. a late event from test setup. */
+  matches: (payload: T) => boolean = () => true,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
+    const onEvent = (payload: T) => {
+      if (!matches(payload)) return;
+      clearTimeout(timer);
+      socket.off(event, onEvent);
+      resolve(payload);
+    };
     const timer = setTimeout(() => {
+      socket.off(event, onEvent);
       reject(new Error(`Timed out waiting for event "${event}"`));
     }, timeoutMs);
-    socket.once(event, (payload: T) => {
-      clearTimeout(timer);
-      resolve(payload);
-    });
+    socket.on(event, onEvent);
   });
 }
 
