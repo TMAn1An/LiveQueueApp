@@ -136,7 +136,8 @@ export async function complete(req: Request, res: Response) {
       referralNote: req.body.referralNote,
     },
   );
-  res.status(200).json({ success: true, data: token });
+  // ADR-071: the audit trail is written before the response, so whoever
+  // reads it next (the Admin's audit page, a report) already sees it.
   await auditService.recordAuditEventSafely({
     actor: auditService.actorFromAuth(req.auth!),
     action: 'token_completed',
@@ -166,6 +167,7 @@ export async function complete(req: Request, res: Response) {
       ipAddress: req.ip,
     });
   }
+  res.status(200).json({ success: true, data: token });
   if (advanced) {
     await realtime.emitTokenStepCompleted(token.id);
   } else {
