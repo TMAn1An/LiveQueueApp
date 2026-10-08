@@ -53,14 +53,16 @@ describe('AuditLog schema foundation', () => {
     expect(staffIdField?.kind).toBe('scalar');
   });
 
-  it('survives organization deletion (real database, real DELETE endpoint)', async () => {
+  // ADR-071 D8 (supersedes the Phase 7 rule): an organization's audit rows
+  // leave with it; only a minimal deletion receipt remains.
+  it('is removed with its organization, leaving a deletion receipt (real database, real DELETE endpoint)', async () => {
     const ctx = await registerOwner({ organizationName: 'Audit Survivor Org' });
 
     const record = await recordAuditEvent({
       actor: { staffId: ctx.staffId, organizationId: ctx.organizationId, staffEmail: ctx.email },
-      action: 'organization_deletion_requested',
-      entityType: 'organization',
-      entityId: ctx.organizationId,
+      action: 'staff_updated',
+      entityType: 'staff',
+      entityId: ctx.staffId,
     });
 
     const deleteRes = await api()
@@ -69,16 +71,26 @@ describe('AuditLog schema foundation', () => {
       .send({ confirmName: 'Audit Survivor Org' });
     expect(deleteRes.status).toBe(204);
 
-    // The organization (and, via cascade, its Staff/Session/Queue/Token rows)
-    // is genuinely gone — but the audit row, having no FK to either, remains.
-    const orgStillExists = await prisma.organization.findUnique({
-      where: { id: ctx.organizationId },
-    });
-    expect(orgStillExists).toBeNull();
+    expect(await prisma.organization.findUnique({ where: { id: ctx.organizationId } })).toBeNull();
+    expect(await prisma.auditLog.findUnique({ where: { id: record.id } })).toBeNull();
+    expect(
+      await prisma.organizationDeletionReceipt.count({ where: { organizationId: ctx.organizationId } }),
+    ).toBe(1);
+  });
 
-    const auditStillExists = await prisma.auditLog.findUnique({ where: { id: record.id } });
-    expect(auditStillExists).not.toBeNull();
-    expect(auditStillExists?.organizationId).toBe(ctx.organizationId);
+  it('cannot be edited or deleted while its organization exists (DB trigger)', async () => {
+    const ctx = await registerOwner();
+    const record = await recordAuditEvent({
+      actor: { staffId: ctx.staffId, organizationId: ctx.organizationId, staffEmail: ctx.email },
+      action: 'staff_updated',
+      entityType: 'staff',
+      entityId: ctx.staffId,
+    });
+    await expect(
+      prisma.auditLog.update({ where: { id: record.id }, data: { action: 'staff_removed' } }),
+    ).rejects.toThrow();
+    await expect(prisma.auditLog.delete({ where: { id: record.id } })).rejects.toThrow();
+    expect(await prisma.auditLog.findUnique({ where: { id: record.id } })).not.toBeNull();
   });
 
   it('can store safe, structured JSON metadata', async () => {

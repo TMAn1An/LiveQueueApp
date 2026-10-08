@@ -12,6 +12,7 @@ import {
   servingToken,
 } from './helpers/app';
 import { resetDb } from './helpers/db';
+import { recordAuditEvent } from '../src/services/audit.service';
 import { prisma } from '../src/config/prisma';
 import type { Prisma } from '@prisma/client';
 
@@ -339,6 +340,12 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
   // governance history with it; only a minimal receipt survives.
   it('organization deletion removes the audit trail and leaves only a minimal receipt', async () => {
     const ctx = await registerOwner({ organizationName: 'Deletion Wiring Org' });
+    await recordAuditEvent({
+      actor: { staffId: ctx.staffId, organizationId: ctx.organizationId, staffEmail: ctx.email },
+      action: 'staff_updated',
+      entityType: 'staff',
+      entityId: ctx.staffId,
+    });
     expect(await prisma.auditLog.count({ where: { organizationId: ctx.organizationId } })).toBeGreaterThan(0);
 
     const res = await api()
