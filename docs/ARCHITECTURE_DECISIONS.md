@@ -1915,3 +1915,32 @@ The Head must choose an Admin workspace; an Admin invites into their own; a Mana
 
 ### Migration safety (Phase 27)
 Both migrations are additive: new tables, nullable/defaulted columns, backfills from existing rows (step name snapshots, a `BACKFILL` tenure for each current Head), partial unique indexes and triggers. Before deploy, check that no organization has two `OWNER` rows and that no live queue lacks an Admin other than legacy rows (the trigger guards transitions only, so existing legacy rows are not rejected). No column is dropped or renamed. Rollback is to leave the new objects in place; nothing reads them on the previous release.
+
+## ADR-073: The real client address comes from Cloudflare's CF-Connecting-IP, not from trust proxy (2026-10-08)
+
+**Context.** Production runs behind Cloudflare and Render's load balancer, and Express's `trust proxy` was never set. `req.ip` was therefore Render's internal proxy address. A read-only probe from two GitHub runners with different public addresses showed one `RateLimit-Remaining` counter falling across both. Every visitor in the world shared each rate-limit bucket, including login (20/15 min), join (10/min) and public reads (60/min), and every audit `ipAddress` was the proxy's.
+
+**Options rejected.**
+- `trust proxy: true` makes `req.ip` the left-most `X-Forwarded-For` entry. Render's proxy appends to the client's own header, so that entry is whatever the caller wants, and each request could pick a fresh bucket.
+- A hop count (`trust proxy: 2` or `3`) depends on how many proxies Render and Cloudflare happen to chain today. An unannounced change would silently either re-share every bucket or make the header spoofable again.
+
+**Decision.**
+- `trust proxy` stays off. A small middleware (`middleware/clientIp.ts`), mounted first, sets `req.ip` from a single header that the edge sets and overwrites: Cloudflare's `CF-Connecting-IP`.
+- It is chosen by `CLIENT_IP_HEADER` (`cf-connecting-ip` | `none`). When unset, it is `cf-connecting-ip` exactly when Render's own `RENDER=true` is present, and `none` everywhere else, so local development and the test suite keep the TCP peer address.
+- A missing, empty, multi-valued or non-IP value is ignored, and the request falls back to the peer address. A malformed header can only land in the shared proxy bucket, never in a fresh one.
+- `X-Forwarded-For`, `X-Real-IP` and `True-Client-IP` are never read.
+
+**Limits unchanged.** Every limiter keeps its window and maximum. The only change is that the key is now per client.
+
+**Tradeoffs.**
+- People behind one public address (campus NAT, carrier CGNAT) share a bucket. For example, 10 joins per minute is per address, not per person. That is a product question for later (for example, a device-keyed join limit) and is not addressed by loosening limits here.
+- The setting relies on Render's documented guarantee that all inbound traffic passes Cloudflare. Running on a host without Cloudflare in front requires `CLIENT_IP_HEADER=none`, or explicit configuration only when Cloudflare is the sole path. This is documented in DEPLOYMENT.md §4.
+- The limiter store is still in-memory, so the single-instance requirement is unchanged.
+
+**Tests.** `tests/clientIp.test.ts`:
+- Separate buckets for different clients: public reads, join, and login together with the invitation routes that share its limiter.
+- IPv6 clients are bucketed separately.
+- Rotating `X-Forwarded-For`, `X-Real-IP` or `True-Client-IP` cannot escape an exhausted bucket.
+- A malformed `CF-Connecting-IP` falls back to the peer bucket.
+- Default selection works, and with no header configured the peer address is used.
+- With the header disabled, the separate-bucket tests fail, which reproduces the production defect.

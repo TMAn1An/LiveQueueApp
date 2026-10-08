@@ -64,6 +64,18 @@ export const envSchema = z.object({
   RATE_LIMIT_REPORT_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   RATE_LIMIT_REPORT_MAX: z.coerce.number().int().positive().default(10),
 
+  // ADR-073: where the real client address comes from. Express's `trust
+  // proxy` stays off — Render's proxy appends to whatever X-Forwarded-For the
+  // client sent, so trusting that header would let anyone choose their own
+  // rate-limit key. Instead one named header, set and overwritten by the
+  // edge in front of the service, becomes `req.ip` (middleware/clientIp.ts).
+  // 'cf-connecting-ip' is right on Render (every request passes Cloudflare,
+  // which replaces any client-supplied value); 'none' uses the TCP peer
+  // address. Unset means 'cf-connecting-ip' when Render's own RENDER=true is
+  // present and 'none' everywhere else, so local dev and tests are unchanged.
+  CLIENT_IP_HEADER: z.enum(['cf-connecting-ip', 'none']).optional(),
+  RENDER: z.string().optional(),
+
   // Test-harness-only escape hatch (not in .env.example — never meant for a
   // real environment): every limiter is skipped whenever NODE_ENV === 'test'
   // by default, same as the pre-existing authRateLimiter carve-out, since
@@ -232,6 +244,22 @@ function loadEnv() {
 }
 
 export const env = loadEnv();
+
+/**
+ * The header that carries the real client address, or null to use the socket
+ * peer (ADR-073). An explicit CLIENT_IP_HEADER wins; otherwise Render (which
+ * sets RENDER=true and always fronts the service with Cloudflare) gets
+ * CF-Connecting-IP and everything else keeps the peer address.
+ */
+export function pickClientIpHeader(
+  configured: 'cf-connecting-ip' | 'none' | undefined,
+  render: string | undefined,
+): 'cf-connecting-ip' | null {
+  const choice = configured ?? (render === 'true' ? 'cf-connecting-ip' : 'none');
+  return choice === 'none' ? null : choice;
+}
+
+export const clientIpHeader = pickClientIpHeader(env.CLIENT_IP_HEADER, env.RENDER);
 
 export const corsOrigins = env.CORS_ORIGINS.split(',')
   .map((origin) => origin.trim())
