@@ -23,7 +23,7 @@
 | PostgreSQL | Neon | Prisma `DATABASE_URL` (value never in repo); owner-confirmed |
 | Staff dashboard + iPhone/iPad visitor portal (static) | Cloudflare Pages | `web-dashboard/public/_redirects`, `_headers`; `CF_PAGES` handling in `vite.config.ts` |
 | Android push | Firebase Cloud Messaging (`firebase-admin`) | `docs/FIREBASE_SETUP.md`, `FIREBASE_CREDENTIALS` |
-| Browser / iOS push | Standards Web Push with VAPID (`web-push`) | ADR-068 |
+| iPhone/iPad push (Safari Home Screen PWA) | Standards Web Push with VAPID (`web-push`), scoped to the Safari portal | ADR-068 |
 | Transactional email | Resend (`resend`) | `docs/DEPLOYMENT.md` §3b |
 | Source, CI, Android releases | GitHub (public repository), GitHub Actions, GitHub Releases | `.github/workflows/*`, releases v1.0.3–v1.0.6 |
 | DNS for the sending domain `tdastudbook.au` | Hostinger DNS (public-DNS audit, `docs/DEPLOYMENT.md`) | Registrar and renewal price **not verified** |
@@ -64,7 +64,7 @@ Render Free (web) · Neon Free · Cloudflare Pages Free · FCM (no-cost product)
 - Project quota **600,000 messages/minute**; Android per device **240/minute, 5,000/hour**; collapsible messages burst 20, refill 1 per 3 minutes.
 
 ### Web Push / VAPID
-- No provider fee: delivery uses the browser vendors' push services (Apple, Google, Mozilla, Microsoft). VAPID is a key pair identifying the sender, not a paid quota. Practical limits are platform rules (iOS/iPadOS 16.4+, Home Screen install, user permission), not money.
+- Scope: the deployed product uses Web Push only for iPhone/iPad visitors who add the Safari portal to their Home Screen; delivery goes through Apple's push service. Android push is separate (FCM, above). No provider fee; VAPID is a key pair identifying the sender, not a paid quota. Practical limits are platform rules (iOS/iPadOS 16.4+, Home Screen install, user permission), not money.
 
 ### Resend — https://resend.com/pricing
 - Free: **3,000 emails/month, 100 emails/day**, 3 custom domains, 30-day retention.

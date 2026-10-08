@@ -76,7 +76,7 @@ Open (ACTIVE: operator required) · Paused (ON_BREAK: operator retained) · Off 
 |---|---|---|
 | Socket.io | Live position, ETA, called, completed | In-app / in-portal while open |
 | FCM (Android) | Called, reminders, lifecycle | `firebase-admin` → Google → device |
-| Web Push (iPhone/iPad portal, other browsers) | Same events | `web-push` with VAPID → Apple/Google/Mozilla push services |
+| Web Push (iPhone/iPad Safari, Home Screen PWA) | Same events | `web-push` with VAPID → Apple's push service → the visitor's Home Screen web app |
 | Email (Resend) | Verification, invitations, password reset, Head succession, optional visitor email codes | HTTPS API |
 
 A reminder scheduler (`node-cron`, every minute) sends "your turn is close" reminders. **Delivery is best-effort; no channel is guaranteed.**
@@ -102,7 +102,7 @@ Visitors (Android app, iPhone portal)      Staff (dashboard, Floating Console*)
  Render web service (1 instance) ◀── API ── Cloudflare Pages (dashboard + portal)
  Express + Socket.io + cron
         │ Prisma (TLS)            ├── FCM (Android push)
-        ▼                         ├── Web Push services (VAPID)
+        ▼                         ├── Web Push (iPhone/iPad Safari Home Screen PWA, VAPID)
  Neon PostgreSQL                  └── Resend (email)
 GitHub: source, Actions (tests, signed APK), Releases (APK)      *feature branch
 ```

@@ -223,7 +223,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
 // 5. Architecture
 {
   const s = content('System architecture', 'Architecture',
-    'Walk left to right. Three clients. One backend process on Render runs the REST API, the Socket.io server and two schedulers. PostgreSQL on Neon is the single source of truth via Prisma. Static dashboard and portal are served by Cloudflare Pages — note that API traffic goes straight to Render, not through Cloudflare. Notifications fan out to FCM, the browser push services and Resend for email. The console is a fourth surface in review.');
+    'Walk left to right. Three clients. One backend process on Render runs the REST API, the Socket.io server and two schedulers. PostgreSQL on Neon is the single source of truth via Prisma. Static dashboard and portal are served by Cloudflare Pages — note that API traffic goes straight to Render, not through Cloudflare. Notifications fan out to FCM for the Android app, Web Push for iPhone/iPad visitors who added the Safari portal to their Home Screen, and Resend for email. The console is a fourth surface in review.');
   label(s, 0.4, 1.05, 2.1, 0.62, 'Android app', 'Flutter · visitors');
   label(s, 0.4, 1.8, 2.1, 0.62, 'iPhone/iPad portal', 'Safari PWA · visitors');
   label(s, 0.4, 2.55, 2.1, 0.62, 'Staff dashboard', 'React + Vite');
@@ -241,7 +241,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
   arrow(s, 2.5, 4.51, 3.0, 4.51, { dash: 'dash', color: HEX.slateLt });
   T(s, 'assets', { x: 2.55, y: 4.55, w: 0.6, h: 0.2, fontSize: 8, color: HEX.mute });
   label(s, 7.25, 1.3, 2.3, 0.62, 'Firebase Cloud Messaging', 'Android push');
-  label(s, 7.25, 2.1, 2.3, 0.62, 'Web Push services', 'VAPID · Apple/Google/Mozilla');
+  label(s, 7.25, 2.05, 2.3, 0.72, 'Web Push', 'iPhone/iPad Safari (Home Screen PWA)\nVAPID-based notifications', { ss: 9.5 });
   label(s, 7.25, 2.9, 2.3, 0.62, 'Resend', 'Transactional email');
   label(s, 7.25, 3.9, 2.3, 0.85, 'GitHub', 'Source · Actions CI · signed APK releases', { fill: HEX.white });
   [1.61, 2.41, 3.21].forEach((y) => arrow(s, 6.45, y, 7.25, y, { color: HEX.teal }));
@@ -415,7 +415,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
   label(s, 0.5, 2.0, 1.9, 1.1, 'Queue event', 'called · close to turn · completed', { fill: HEX.navy, line: HEX.navy, dark: true });
   label(s, 2.9, 2.05, 1.7, 1.0, 'Backend', 'events + reminder scheduler (every minute)', { fill: HEX.ice, line: HEX.blue });
   arrow(s, 2.4, 2.55, 2.9, 2.55, { w: 1.5 });
-  const ch = [['Socket.io', 'Open app / portal / dashboard', 'live, instant'], ['FCM', 'Android app', 'free · Google'], ['Web Push (VAPID)', 'iPhone / browser', 'free · vendor push services'], ['Resend email', 'Accounts, invitations, succession', 'free: 100/day']];
+  const ch = [['Socket.io', 'Open app / portal / dashboard', 'live, instant'], ['FCM', 'Android app', 'free · Google'], ['Web Push (VAPID)', 'iPhone/iPad Safari PWA', 'free · Apple push service'], ['Resend email', 'Accounts, invitations, succession', 'free: 100/day']];
   ch.forEach(([a, b, c], i) => {
     const y = 1.05 + i * 0.98;
     label(s, 5.25, y, 2.1, 0.8, a, b, { fill: HEX.card });
@@ -569,7 +569,7 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
     ['Neon (PostgreSQL)', 'Free', '100 CU-h/month (≈400 h at 0.25 CU) · 1 GB storage · 5 GB egress · sleeps after 5 min'],
     ['Cloudflare Pages', 'Free', '500 builds/month · no published static bandwidth cap'],
     ['Firebase Cloud Messaging', 'No-cost', '600k messages/min per project'],
-    ['Web Push (VAPID)', 'No fee', 'Vendor push services; device rules apply'],
+    ['Web Push (VAPID)', 'No fee', 'iPhone/iPad Safari Home Screen PWA via Apple\'s push service; iOS/iPadOS 16.4+ and user permission'],
     ['Resend', 'Free', '100 emails/day · 3,000/month'],
     ['GitHub', 'Free (public repo)', 'Standard Actions runners free for public repos'],
   ], { x: 0.5, y: 1.05, w: 9.0, colW: [2.1, 1.5, 5.4], fs: 11.5 });
