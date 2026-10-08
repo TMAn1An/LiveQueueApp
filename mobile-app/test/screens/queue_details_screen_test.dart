@@ -119,7 +119,7 @@ void main() {
       expect(find.text('Document Check'), findsOneWidget);
       expect(find.text('Bring ID'), findsOneWidget);
       expect(find.text('7 min'), findsOneWidget);
-      expect(find.text('Several services can be chosen in one visit.'), findsOneWidget);
+      expect(find.text('One or several services can be chosen in one visit.'), findsOneWidget);
     });
 
     testWidgets('it is not a step in a join: nothing to continue to', (tester) async {
@@ -153,7 +153,9 @@ void main() {
 
       expect(find.text("Today's hours: 09:00–12:00, 14:00–17:00"), findsOneWidget);
       expect(find.text('Each person may use this queue once.'), findsOneWidget);
-      expect(find.text('One service per visit.'), findsOneWidget);
+      // ADR-071 D1: a stale false is ignored.
+      expect(find.text('One or several services can be chosen in one visit.'), findsOneWidget);
+      expect(find.text('One service per visit.'), findsNothing);
     });
 
     testWidgets('a paused queue is shown as paused', (tester) async {

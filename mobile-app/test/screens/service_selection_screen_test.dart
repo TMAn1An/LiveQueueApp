@@ -215,17 +215,17 @@ void main() {
       expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Next')).onPressed, isNotNull);
     });
 
-    testWidgets('a one-service-per-visit queue swaps the choice instead of adding to it', (tester) async {
+    testWidgets('a stale allowMultipleServices=false is ignored: several services can be chosen', (tester) async {
       final provider = await _buildLoadedProvider({'allowMultipleServices': false});
       await pump(tester, provider);
 
-      await tester.tap(find.widgetWithText(RadioListTile<String>, 'General Inquiry'));
+      expect(find.byType(RadioListTile<String>), findsNothing);
+      await tester.tap(find.widgetWithText(ActionChip, 'General Inquiry'));
       await tester.pump();
-      await tester.tap(find.widgetWithText(RadioListTile<String>, 'Document Check'));
+      await tester.tap(find.widgetWithText(ActionChip, 'Document Check'));
       await tester.pump();
 
-      expect(provider.selectedServiceIds, {'service-2'});
-      expect(find.text('Estimated service time: 7 minutes'), findsOneWidget);
+      expect(provider.selectedServiceIds, {'service-1', 'service-2'});
     });
 
     testWidgets('a queue with no services says so and offers no way on', (tester) async {

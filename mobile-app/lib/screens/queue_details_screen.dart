@@ -97,9 +97,7 @@ class _Details extends StatelessWidget {
               trailing: Text('${service.durationMinutes} min'),
             ),
           Text(
-            config.allowMultipleServices
-                ? 'Several services can be chosen in one visit.'
-                : 'One service per visit.',
+            'One or several services can be chosen in one visit.',
             style: theme.textTheme.bodySmall,
           ),
         ],

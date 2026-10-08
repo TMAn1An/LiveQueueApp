@@ -42,7 +42,6 @@ class _QueueServices extends StatelessWidget {
   Widget build(BuildContext context) {
     final services = config.services;
     final selectedIds = provider.selectedServiceIds;
-    final allowMultiple = config.allowMultipleServices;
 
     // A queue that will refuse the join is said to be closed here, before
     // anyone picks a service or fills in a form — and offers neither. The
@@ -65,45 +64,15 @@ class _QueueServices extends StatelessWidget {
             padding: EdgeInsets.symmetric(vertical: 24),
             child: Center(child: Text('No services are currently available.')),
           ),
-        // ADR-070: a multi-service visit is an ordered journey.
-        if (canJoin && allowMultiple && services.isNotEmpty) JourneyBuilder(services: services),
-        if (canJoin && !allowMultiple)
-          for (final service in services)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Card(
-                margin: EdgeInsets.zero,
-                child: RadioListTile<String>(
-                  value: service.id,
-                  title: Text(service.serviceName),
-                  subtitle: service.description != null ? Text(service.description!) : null,
-                  secondary: Text('${service.durationMinutes} min'),
-                ),
-              ),
-            ),
+        // ADR-070/071: every visit is an ordered journey of one or more
+        // services; a stored allowMultipleServices=false is ignored.
+        if (canJoin && services.isNotEmpty) JourneyBuilder(services: services),
       ],
     );
 
     return Column(
       children: [
-        Expanded(
-          // V2 Checkpoint 6: single-select queues wrap the same list in a
-          // RadioGroup — selecting one service replaces the whole selection
-          // (toggleService already implements that swap for this queue's
-          // mode); multi-select queues render unwrapped, unchanged checkbox
-          // behavior.
-          child: allowMultiple
-              ? list
-              : RadioGroup<String>(
-                  groupValue: selectedIds.isEmpty ? null : selectedIds.first,
-                  onChanged: (value) {
-                    if (value != null) {
-                      context.read<QueueJoinProvider>().toggleService(value);
-                    }
-                  },
-                  child: list,
-                ),
-        ),
+        Expanded(child: list),
         if (canJoin && services.isNotEmpty)
           SafeArea(
             top: false,
@@ -119,7 +88,7 @@ class _QueueServices extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   FilledButton(
-                    onPressed: selectedIds.isEmpty || (allowMultiple && !provider.isJourneyValid)
+                    onPressed: selectedIds.isEmpty || !provider.isJourneyValid
                         ? null
                         : () {
                             Navigator.of(context).push(

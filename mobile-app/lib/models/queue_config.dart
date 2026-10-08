@@ -40,10 +40,9 @@ class QueueConfig {
   final String? clientTerminology;
   final List<ServiceOption> services;
   final List<DynamicFormField> formFields;
-  /// V2 Checkpoint 6: when false, the join flow must present a single-select
-  /// (radio-style) service picker instead of the default checkbox
-  /// multi-select. The backend remains authoritative regardless of what the
-  /// UI shows — this only drives which widget renders.
+  /// Retired by ADR-071 D1: every queue accepts one service or many and the
+  /// backend always reports true. Parsed (default true) only so older
+  /// payloads keep decoding; nothing in the join flow reads it.
   final bool allowMultipleServices;
 
   /// ADR-034 — what this queue needs to recognise the customer, if it limits

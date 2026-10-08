@@ -224,20 +224,14 @@ class QueueJoinProvider extends ChangeNotifier {
   /// queue-level, not service-level, but a changed selection means the
   /// customer hasn't seen/confirmed the form for it yet.
   ///
-  /// V2 Checkpoint 6: when the loaded queue disallows multiple services,
-  /// selecting one replaces the whole set instead of adding to it (radio
-  /// behavior) — the backend independently re-validates and is the actual
-  /// enforcement point regardless of this client-side shortcut.
+  /// ADR-071 D1: every queue accepts one service or many, so a tick always
+  /// adds and an untick always removes — a stored `allowMultipleServices`
+  /// value is ignored.
   void toggleService(String serviceId) {
-    final allowMultiple = queueConfig?.allowMultipleServices ?? true;
-    if (allowMultiple) {
-      // Untick removes every step of that service; tick adds it at the end.
-      journeySteps = journeySteps.contains(serviceId)
-          ? journeySteps.where((id) => id != serviceId).toList()
-          : [...journeySteps, serviceId];
-    } else {
-      journeySteps = journeySteps.contains(serviceId) ? [] : [serviceId];
-    }
+    // Untick removes every step of that service; tick adds it at the end.
+    journeySteps = journeySteps.contains(serviceId)
+        ? journeySteps.where((id) => id != serviceId).toList()
+        : [...journeySteps, serviceId];
     _journeyChanged();
   }
 
@@ -270,11 +264,11 @@ class QueueJoinProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// ADR-070: a multi-service queue's join starts from its suggested order,
+  /// ADR-070: a join starts from the queue's suggested order,
   /// keeping only services that are on offer now.
   void _prefillRecommendedJourney() {
     final config = queueConfig;
-    if (config == null || !config.allowMultipleServices || journeySteps.isNotEmpty) return;
+    if (config == null || journeySteps.isNotEmpty) return;
     final offered = {for (final s in config.services) s.id};
     final steps = <String>[];
     for (final id in config.recommendedJourney) {
