@@ -25,8 +25,31 @@ export function formatPercent(value: number): string {
   return `${value}%`;
 }
 
-/** "staff_created" -> "Staff Created" — audit action codes are snake_case on the wire. */
+/** ADR-071: actions whose generated label would read wrong — "Staff" is not
+ * a word people see (Associates), and governance events deserve plain names. */
+const ACTION_LABELS: Record<string, string> = {
+  staff_created: 'Associate Invited',
+  staff_updated: 'Associate Updated',
+  staff_removed: 'Associate Removed',
+  staff_sessions_revoked: 'Sessions Ended',
+  invitation_accepted: 'Invitation Accepted',
+  admin_workspace_transferred: 'Admin Workspace Handed Over',
+  head_succession_started: 'Leadership Handover Started',
+  head_succession_verified: 'Leadership Handover Confirmed',
+  head_succession_cancelled: 'Leadership Handover Cancelled',
+  head_succession_declined: 'Leadership Handover Declined',
+  head_succession_expired: 'Leadership Handover Expired',
+  head_succession_completed: 'Leadership Handover Completed',
+  head_tenure_ended: 'Organization Head Tenure Ended',
+  head_tenure_started: 'Organization Head Tenure Started',
+  queue_deleted_or_archived: 'Queue Deleted',
+};
+
+/** "queue_created" -> "Queue Created" — audit action codes are snake_case on
+ * the wire; a few read better with an explicit label (ACTION_LABELS). */
 export function formatActionLabel(action: string): string {
+  const explicit = ACTION_LABELS[action];
+  if (explicit) return explicit;
   return action
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

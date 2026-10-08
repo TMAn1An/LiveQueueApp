@@ -16,7 +16,7 @@ export function listStaff(page = 1, pageSize = 20, search?: string, adminId?: st
 }
 
 /** ADR-069: the Organization Head places an Executive in an Admin's
- * workspace (null: organization-level). */
+ * workspace. ADR-071 D13: always a workspace — never organization-level. */
 export function setExecutiveWorkspace(staffId: string, adminId: string | null) {
   return apiFetch<Staff>(`/api/staff/${staffId}/workspace`, { method: 'PATCH', body: { adminId } });
 }
@@ -27,8 +27,8 @@ export interface CreateStaffInput {
   name: string;
   email: string;
   role: Exclude<StaffRole, 'OWNER'>;
-  /** ADR-069: the Head may place a new Executive in an Admin's workspace;
-   * an Admin's invitees always join their own. */
+  /** ADR-071 D13: required when the Head invites an Executive; an Admin's
+   * invitees always join their own workspace. */
   workspaceAdminId?: string;
 }
 
@@ -52,6 +52,8 @@ export interface UpdateStaffInput {
   password?: string;
   role?: Exclude<StaffRole, 'OWNER'>;
   status?: StaffStatus;
+  /** ADR-071: the destination Admin workspace when making someone an Executive. */
+  workspaceAdminId?: string;
 }
 
 export function updateStaff(staffId: string, input: UpdateStaffInput) {
@@ -93,4 +95,45 @@ export function cancelRemovalRequest(requestId: string) {
   return apiFetch<MembershipRemovalRequest>(`/api/staff/removal-requests/${requestId}/cancel`, {
     method: 'POST',
   });
+}
+
+// ADR-071: Admin workspace handover.
+
+export interface RoleChangeImpact {
+  staff: { id: string; name: string; role: StaffRole };
+  liveQueue: { id: string; name: string } | null;
+  executiveCount: number;
+  holdsCounter: boolean;
+  activeService: boolean;
+  requiresReplacement: boolean;
+  eligibleReplacements: { id: string; name: string; email: string; role: StaffRole; workspaceAdminId: string | null }[];
+}
+
+export function getRoleChangeImpact(staffId: string) {
+  return apiFetch<RoleChangeImpact>(`/api/staff/${staffId}/role-change-impact`);
+}
+
+export type TransferOutcome = 'MANAGER' | 'EXECUTIVE' | 'REMOVE';
+
+export interface WorkspaceTransferInput {
+  replacementStaffId: string;
+  outcome: TransferOutcome;
+  reason: string;
+  note?: string;
+}
+
+export interface WorkspaceTransfer {
+  id: string;
+  queue: { id: string; name: string } | null;
+  oldAdmin: { id: string; name: string; outcome: 'MANAGER' | 'EXECUTIVE' | 'REMOVED' };
+  newAdmin: { id: string; name: string; previousRole: StaffRole };
+  transferredByName: string;
+  reason: string;
+  note: string | null;
+  executivesMoved: number;
+  createdAt: string;
+}
+
+export function transferWorkspace(adminId: string, input: WorkspaceTransferInput) {
+  return apiFetch<WorkspaceTransfer>(`/api/staff/${adminId}/workspace-transfer`, { method: 'POST', body: input });
 }

@@ -97,7 +97,7 @@ export function AppLayout() {
             {(hasPermission('manage_staff') || hasPermission('view_staff')) && (
               <NavItem
                 to="/staff"
-                label="Staff"
+                label="Associates"
                 icon={StaffIcon}
                 onNavigate={closeMobileMenu}
               />

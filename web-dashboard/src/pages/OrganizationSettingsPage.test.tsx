@@ -11,6 +11,8 @@ import {
   useUpdateOrganization,
 } from '../hooks/useOrganization';
 
+// ADR-071: the leadership card has its own tests.
+vi.mock('../components/OrganizationLeadership', () => ({ OrganizationLeadership: () => null }));
 vi.mock('../context/AuthContext', () => ({
   useAuth: vi.fn(),
 }));

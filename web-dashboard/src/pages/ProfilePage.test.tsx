@@ -9,6 +9,8 @@ import {
 } from '../hooks/useStaff';
 
 const auth = vi.hoisted(() => ({ role: 'STAFF' as string }));
+// ADR-071: the leadership card has its own tests.
+vi.mock('../components/OrganizationLeadership', () => ({ OrganizationLeadership: () => null }));
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({
     staff: { id: 's1', name: 'Sami', email: 's@example.com', role: auth.role, status: 'ACTIVE', lastLoginAt: null },

@@ -10,6 +10,7 @@ import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
 import { VerifyEmailPage } from './pages/VerifyEmailPage';
 import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
+import { AcceptLeadershipPage } from './pages/AcceptLeadershipPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { DashboardPage } from './pages/DashboardPage';
@@ -50,6 +51,9 @@ function App() {
                 above it — see AuthLayout. */}
             <Route element={<AuthLayout brand="inside" />}>
               <Route path="/accept-invitation" element={<AcceptInvitationPage />} />
+              {/* ADR-071: a successor accepts the Organization Head role. Public —
+                  the emailed link is the credential. */}
+              <Route path="/accept-leadership" element={<AcceptLeadershipPage />} />
             </Route>
 
             <Route element={<ProtectedRoute />}>

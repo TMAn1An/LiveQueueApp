@@ -14,6 +14,8 @@ import {
   useStaffList,
   useUpdateStaff,
   useAdmins,
+  useRoleChangeImpact,
+  useTransferWorkspace,
   useSetExecutiveWorkspace,
 } from '../hooks/useStaff';
 import type { MembershipRemovalRequest, Staff, StaffRole } from '../types/auth';
@@ -109,7 +111,7 @@ beforeEach(() => {
 describe('StaffPage — invitations', () => {
   it('invites without asking an administrator for a password', async () => {
     render(<MemoryRouter><StaffPage /></MemoryRouter>);
-    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^invite associate$/i }));
 
     // The password field is gone entirely; the colleague sets their own.
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
@@ -118,7 +120,7 @@ describe('StaffPage — invitations', () => {
 
   it('reports that the invitation was sent', async () => {
     render(<MemoryRouter><StaffPage /></MemoryRouter>);
-    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^invite associate$/i }));
     await userEvent.type(screen.getByLabelText('Name'), 'Rafi Ahmed');
     await userEvent.type(screen.getByLabelText('Email'), 'rafi@example.com');
     await userEvent.click(screen.getByRole('button', { name: /send invitation/i }));
@@ -134,7 +136,7 @@ describe('StaffPage — invitations', () => {
   it('says the account exists when the email could not be delivered', async () => {
     createMutateAsync.mockResolvedValue({ data: { id: 's2', invitationEmailSent: false } });
     render(<MemoryRouter><StaffPage /></MemoryRouter>);
-    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^invite associate$/i }));
     await userEvent.type(screen.getByLabelText('Name'), 'Rafi Ahmed');
     await userEvent.type(screen.getByLabelText('Email'), 'rafi@example.com');
     await userEvent.click(screen.getByRole('button', { name: /send invitation/i }));
@@ -300,7 +302,7 @@ describe('StaffPage — ADR-057 role-aware membership actions', () => {
 describe('StaffPage — ADR-056 Latin-only names', () => {
   it('flags a non-Latin name as it is typed and blocks sending', async () => {
     render(<MemoryRouter><StaffPage /></MemoryRouter>);
-    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^invite associate$/i }));
     await userEvent.type(screen.getByLabelText('Name'), 'রহিম');
     await userEvent.type(screen.getByLabelText('Email'), 'r@example.com');
     expect(screen.getByRole('alert')).toHaveTextContent(/English letters/i);
@@ -365,9 +367,30 @@ describe('StaffPage — who may invite whom (ADR-069)', () => {
     setActor('owner1', 'OWNER');
     mockList([]);
     render(<MemoryRouter><StaffPage /></MemoryRouter>);
-    await userEvent.click(screen.getByRole('button', { name: /^invite member$/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^invite associate$/i }));
     const options = within(screen.getByLabelText('Role')).getAllByRole('option').map((o) => o.textContent);
     expect(options).toEqual(['Admin', 'Executive', 'Organization Manager']);
+  });
+
+  it('the Head must choose an Admin workspace for a new Executive — there is no organization-level option (ADR-071)', async () => {
+    setActor('owner1', 'OWNER');
+    mockList([]);
+    vi.mocked(useAdmins).mockReturnValue({
+      admins: [member('a1', 'ADMIN', 'Ada Admin')],
+    } as unknown as ReturnType<typeof useAdmins>);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.click(screen.getByRole('button', { name: /^invite associate$/i }));
+    await userEvent.selectOptions(screen.getByLabelText('Role'), 'STAFF');
+    await userEvent.type(screen.getByLabelText('Name'), 'New Exec');
+    await userEvent.type(screen.getByLabelText('Email'), 'exec@example.com');
+    const workspace = screen.getByLabelText('Admin workspace');
+    expect(within(workspace).queryByText(/Organization-level/)).not.toBeInTheDocument();
+    const send = screen.getByRole('button', { name: /send invitation/i });
+    expect(send).toBeDisabled();
+    await userEvent.selectOptions(workspace, 'a1');
+    expect(send).toBeEnabled();
+    await userEvent.click(send);
+    expect(createMutateAsync).toHaveBeenCalledWith(expect.objectContaining({ role: 'STAFF', workspaceAdminId: 'a1' }));
   });
 
   it('an Admin may only invite Executives', async () => {
@@ -395,5 +418,134 @@ describe('StaffPage — who may invite whom (ADR-069)', () => {
     mockList([member('s1', 'STAFF', 'Sami Exec')]);
     render(<MemoryRouter><StaffPage /></MemoryRouter>);
     expect(screen.getByLabelText("Change Sami Exec's role")).toBeInTheDocument();
+  });
+});
+
+// ADR-071: an Admin who still runs a queue, or has Executives, leaves the
+// role only through a guided workspace handover.
+describe('StaffPage — Admin replacement (ADR-071)', () => {
+  const transferMutateAsync = vi.fn();
+  const updateMutate = vi.fn();
+
+  function impact(overrides: Record<string, unknown> = {}) {
+    return {
+      staff: { id: 'a1', name: 'Ada Admin', role: 'ADMIN' },
+      liveQueue: { id: 'q1', name: 'Pharmacy' },
+      executiveCount: 2,
+      holdsCounter: true,
+      activeService: false,
+      requiresReplacement: true,
+      eligibleReplacements: [
+        { id: 'm1', name: 'Mira Manager', email: 'm1@example.com', role: 'MANAGER', workspaceAdminId: null },
+        { id: 'a2', name: 'Abe Admin', email: 'a2@example.com', role: 'ADMIN', workspaceAdminId: null },
+      ],
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    setActor('owner1', 'OWNER');
+    mockList([member('a1', 'ADMIN', 'Ada Admin'), member('m2', 'MANAGER', 'Max Manager')]);
+    vi.mocked(useAdmins).mockReturnValue({
+      admins: [member('a1', 'ADMIN', 'Ada Admin'), member('a2', 'ADMIN', 'Abe Admin')],
+    } as unknown as ReturnType<typeof useAdmins>);
+    transferMutateAsync.mockResolvedValue({ data: {} });
+    vi.mocked(useTransferWorkspace).mockReturnValue({
+      mutateAsync: transferMutateAsync,
+      isPending: false,
+    } as unknown as ReturnType<typeof useTransferWorkspace>);
+    vi.mocked(useUpdateStaff).mockReturnValue({
+      mutate: updateMutate,
+      isPending: false,
+    } as unknown as ReturnType<typeof useUpdateStaff>);
+    vi.mocked(useRoleChangeImpact).mockReturnValue({
+      data: impact(),
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRoleChangeImpact>);
+  });
+
+  it('changing the role of an Admin who runs a queue opens the guided replacement, not a failure', async () => {
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.selectOptions(screen.getByLabelText("Change Ada Admin's role"), 'MANAGER');
+
+    const dialog = await screen.findByRole('dialog', { name: 'Replace Ada Admin as Admin' });
+    expect(
+      within(dialog).getByText('Ada Admin currently manages Pharmacy. Choose a replacement Admin before changing this role.'),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('radio', { name: /becomes an Organization Manager/ })).toBeChecked();
+    expect(within(dialog).getByRole('button', { name: 'Invite replacement Admin' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: 'Delete the queue instead' })).toHaveAttribute('href', '/queues/q1');
+
+    const confirm = within(dialog).getByRole('button', { name: 'Hand over workspace' });
+    expect(confirm).toBeDisabled();
+    await userEvent.selectOptions(within(dialog).getByLabelText('Replacement Admin'), 'm1');
+    await userEvent.type(within(dialog).getByLabelText('Reason'), 'Moving to head office');
+
+    // The summary says exactly what moves and what does not.
+    expect(within(dialog).getByText('Pharmacy moves to Mira Manager.')).toBeInTheDocument();
+    expect(within(dialog).getByText(/2 Executives move to Mira Manager/)).toBeInTheDocument();
+    expect(within(dialog).getByText('Mira Manager becomes an Admin.')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('The queue, its counters, services, tokens and history stay exactly as they are.'),
+    ).toBeInTheDocument();
+
+    await userEvent.click(confirm);
+    expect(transferMutateAsync).toHaveBeenCalledWith({
+      adminId: 'a1',
+      input: { replacementStaffId: 'm1', outcome: 'MANAGER', reason: 'Moving to head office' },
+    });
+    expect(updateMutate).not.toHaveBeenCalled();
+  });
+
+  it('removing such an Admin opens the same flow with "leaves the organization" chosen', async () => {
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    const row = screen.getByText('Ada Admin').closest('tr')!;
+    await userEvent.click(within(row).getByRole('button', { name: 'Remove' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Replace Ada Admin as Admin' });
+    expect(within(dialog).getByRole('radio', { name: /leaves the organization/ })).toBeChecked();
+  });
+
+  it('an Admin with no queue and no Executives changes role with a plain confirmation', async () => {
+    vi.mocked(useRoleChangeImpact).mockReturnValue({
+      data: impact({ liveQueue: null, executiveCount: 0, requiresReplacement: false, eligibleReplacements: [] }),
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRoleChangeImpact>);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.selectOptions(screen.getByLabelText("Change Ada Admin's role"), 'MANAGER');
+    const dialog = await screen.findByRole('dialog', { name: 'Make Ada Admin Organization Manager?' });
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Change role' }));
+    expect(updateMutate).toHaveBeenCalledWith(
+      { staffId: 'a1', input: { role: 'MANAGER' } },
+      expect.anything(),
+    );
+  });
+
+  it('making someone an Executive asks which Admin’s workspace they join', async () => {
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.selectOptions(screen.getByLabelText("Change Max Manager's role"), 'STAFF');
+    const dialog = await screen.findByRole('dialog', { name: 'Make Max Manager Executive?' });
+    const change = within(dialog).getByRole('button', { name: 'Change role' });
+    expect(change).toBeDisabled();
+    await userEvent.selectOptions(within(dialog).getByLabelText('Admin workspace'), 'a2');
+    await userEvent.click(change);
+    expect(updateMutate).toHaveBeenCalledWith(
+      { staffId: 'm2', input: { role: 'STAFF', workspaceAdminId: 'a2' } },
+      expect.anything(),
+    );
+  });
+
+  it('when nobody can take over yet, says so and offers to invite an Admin', async () => {
+    vi.mocked(useRoleChangeImpact).mockReturnValue({
+      data: impact({ eligibleReplacements: [] }),
+      isLoading: false,
+      isError: false,
+    } as unknown as ReturnType<typeof useRoleChangeImpact>);
+    render(<MemoryRouter><StaffPage /></MemoryRouter>);
+    await userEvent.selectOptions(screen.getByLabelText("Change Ada Admin's role"), 'MANAGER');
+    const dialog = await screen.findByRole('dialog', { name: 'Replace Ada Admin as Admin' });
+    expect(within(dialog).getByText(/Nobody can take over yet/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Hand over workspace' })).toBeDisabled();
   });
 });

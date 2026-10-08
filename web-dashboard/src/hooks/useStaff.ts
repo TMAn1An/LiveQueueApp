@@ -110,3 +110,27 @@ export function useReviewRemovalRequest() {
 export function useCancelRemovalRequest() {
   return useRemovalRequestMutation((requestId: string) => staffApi.cancelRemovalRequest(requestId));
 }
+
+/** ADR-071: what changing this person's role would affect (Head only). */
+export function useRoleChangeImpact(staffId: string | null) {
+  return useQuery({
+    queryKey: ['role-change-impact', staffId],
+    queryFn: async () => (await staffApi.getRoleChangeImpact(staffId!)).data,
+    enabled: Boolean(staffId),
+    staleTime: 0,
+  });
+}
+
+/** ADR-071: hand an Admin's workspace to a replacement Admin. */
+export function useTransferWorkspace() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ adminId, input }: { adminId: string; input: staffApi.WorkspaceTransferInput }) =>
+      staffApi.transferWorkspace(adminId, input),
+    onSuccess: () => {
+      for (const key of ['staff', 'queues', 'queue', 'counters', 'assignableStaff', 'role-change-impact']) {
+        void queryClient.invalidateQueries({ queryKey: [key] });
+      }
+    },
+  });
+}

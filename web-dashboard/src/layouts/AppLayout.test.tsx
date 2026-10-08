@@ -69,7 +69,7 @@ describe('AppLayout navigation', () => {
     mockSession();
     renderLayout();
 
-    for (const label of ['Dashboard', 'Queues', 'Staff', 'Reports', 'Organization Settings']) {
+    for (const label of ['Dashboard', 'Queues', 'Associates', 'Reports', 'Organization Settings']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument();
     }
   });

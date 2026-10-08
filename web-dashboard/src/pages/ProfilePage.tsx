@@ -12,6 +12,7 @@ import { formatDateTime } from '../utils/format';
 import { MyRequests, RemovalRequestDialog } from '../components/MembershipRequests';
 import { useRemovalRequests } from '../hooks/useStaff';
 import { roleLabel } from '../types/auth';
+import { OrganizationLeadership } from '../components/OrganizationLeadership';
 
 export function ProfilePage() {
   const { staff, organization, permissions, logout } = useAuth();
@@ -24,7 +25,7 @@ export function ProfilePage() {
     <div className="max-w-2xl space-y-6">
       <PageHeader
         title="Profile"
-        description="View your staff permissions and update your security credentials."
+        description="View your role and permissions, and update your security credentials."
       />
 
       <Card>
@@ -74,6 +75,10 @@ export function ProfilePage() {
           </div>
         </dl>
       </Card>
+
+      {/* ADR-071: everyone can see who leads the organization; Managers also
+          see the history (the Head sees it in Organization Settings). */}
+      {staff.role !== 'OWNER' && <OrganizationLeadership isHead={false} />}
 
       <ChangePasswordCard />
 

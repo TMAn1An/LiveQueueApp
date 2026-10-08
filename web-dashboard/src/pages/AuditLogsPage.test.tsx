@@ -60,7 +60,7 @@ describe('AuditLogsPage', () => {
 
     render(<AuditLogsPage />);
 
-    expect(screen.getByText('Staff Created')).toBeInTheDocument();
+    expect(screen.getByText('Associate Invited')).toBeInTheDocument();
     expect(screen.getByText('owner@example.com')).toBeInTheDocument();
   });
 

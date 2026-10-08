@@ -14,6 +14,7 @@ import { Spinner } from '../components/Spinner';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PageHeader } from '../components/PageHeader';
 import { OrganizationQrCard } from '../components/OrganizationQrCard';
+import { OrganizationLeadership } from '../components/OrganizationLeadership';
 import { OrganizationNameStatus } from '../components/OrganizationNameStatus';
 import { FieldError } from '../components/FieldError';
 import { latinNameError } from '../utils/latinText';
@@ -175,7 +176,7 @@ export function OrganizationSettingsPage() {
         )}
 
         {!isOwner && (
-          <p className="mt-3 text-xs text-faint">Only the organization owner can edit these settings.</p>
+          <p className="mt-3 text-xs text-faint">Only the Organization Head can edit these settings.</p>
         )}
       </Card>
 
@@ -183,6 +184,9 @@ export function OrganizationSettingsPage() {
       {organization.publicCode && (
         <OrganizationQrCard organizationName={organization.name} publicCode={organization.publicCode} />
       )}
+
+      {/* ADR-071: who leads the organization; the Head hands over here. */}
+      <OrganizationLeadership isHead={isOwner} />
 
       {/* Owner Guided Tour / Setup Guide */}
       {isOwner && (
@@ -214,8 +218,9 @@ export function OrganizationSettingsPage() {
           <div className="mb-3 border-b border-rose-200 dark:border-rose-900/60 pb-3">
             <h2 className="text-base font-bold text-rose-700 dark:text-rose-400">Delete Organization</h2>
             <p className="text-xs text-muted">
-              This permanently deletes the organization and all of its staff, queues, services,
-              counters, and token history. This action cannot be undone.
+              This permanently deletes the organization and all of its associates, queues, services,
+              counters, token history, audit log and leadership history. Only a minimal record that the
+              organization was deleted is kept. This action cannot be undone.
             </p>
           </div>
 

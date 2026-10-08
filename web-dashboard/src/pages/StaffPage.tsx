@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { AdminReplacementDialog } from '../components/AdminReplacementDialog';
+import type { TransferOutcome } from '../api/staff.api';
 import {
   useAdmins,
   useSetExecutiveWorkspace,
@@ -7,6 +9,7 @@ import {
   useDeleteStaff,
   useRemovalRequests,
   useResendInvitation,
+  useRoleChangeImpact,
   useStaffList,
   useUpdateStaff,
 } from '../hooks/useStaff';
@@ -62,8 +65,10 @@ function CreateStaffModal({
   const [role, setRole] = useState<InvitableRole>(
     initialRole && roles.includes(initialRole) ? initialRole : (roles[0] ?? 'STAFF'),
   );
-  // The Head may place a new Executive straight into an Admin's workspace.
+  // ADR-071 D13: every new Executive belongs to an Admin's workspace — the
+  // Head chooses which (an Admin's own invitations go into their own).
   const [workspaceAdminId, setWorkspaceAdminId] = useState('');
+  const needsWorkspace = isHead && role === 'STAFF';
   const [error, setError] = useState<string | null>(null);
   const nameError = latinNameError(name);
 
@@ -74,17 +79,17 @@ function CreateStaffModal({
         name: name.trim(),
         email,
         role,
-        ...(isHead && role === 'STAFF' && workspaceAdminId ? { workspaceAdminId } : {}),
+        ...(needsWorkspace ? { workspaceAdminId } : {}),
       });
       onInvited({ name, emailSent: created.data.invitationEmailSent });
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Failed to create staff member.');
+      setError(err instanceof ApiError ? err.message : 'Could not send the invitation. Please try again.');
     }
   }
 
   return (
-    <Modal title={roles.length === 1 ? `Invite ${roleLabel(roles[0])}` : 'Invite Member'} onClose={onClose}>
+    <Modal title={roles.length === 1 ? `Invite ${roleLabel(roles[0])}` : 'Invite associate'} onClose={onClose}>
       <ErrorBanner message={error} />
       <div className="space-y-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -125,10 +130,10 @@ function CreateStaffModal({
           </div>
         </div>
 
-        {isHead && role === 'STAFF' && (
+        {needsWorkspace && (
           <div>
             <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor="staff-workspace">
-              Workspace
+              Admin workspace
             </label>
             <select
               id="staff-workspace"
@@ -136,13 +141,16 @@ function CreateStaffModal({
               onChange={(e) => setWorkspaceAdminId(e.target.value)}
               className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
             >
-              <option value="">Organization-level (no Admin yet)</option>
+              <option value="">Choose an Admin…</option>
               {admins.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name}&apos;s workspace
                 </option>
               ))}
             </select>
+            {admins.length === 0 && (
+              <p className="mt-1 text-xs text-muted">Invite an Admin first — every Executive works in an Admin&apos;s workspace.</p>
+            )}
           </div>
         )}
 
@@ -170,7 +178,7 @@ function CreateStaffModal({
           </Button>
           <Button
             loading={createStaff.isPending}
-            disabled={!name.trim() || !email || Boolean(nameError)}
+            disabled={!name.trim() || !email || Boolean(nameError) || (needsWorkspace && !workspaceAdminId)}
             onClick={() => void handleSubmit()}
           >
             {createStaff.isPending ? 'Sending invitation…' : 'Send invitation'}
@@ -229,6 +237,125 @@ function rowActions(actor: Staff | null, target: Staff) {
   };
 }
 
+/**
+ * ADR-071: changing someone's role. For an Admin, the impact is checked first
+ * — one who still runs a queue or has Executives is handed to the guided
+ * replacement flow. Making someone an Executive asks which Admin's workspace
+ * they join.
+ */
+function RoleChangeFlow({
+  staff,
+  role,
+  adminNames,
+  onClose,
+  onNeedsReplacement,
+  onError,
+}: {
+  staff: Staff;
+  role: InvitableRole;
+  adminNames: Map<string, string>;
+  onClose: () => void;
+  onNeedsReplacement: (intended: TransferOutcome) => void;
+  onError: (err: unknown) => void;
+}) {
+  const updateStaff = useUpdateStaff();
+  const impact = useRoleChangeImpact(staff.role === 'ADMIN' ? staff.id : null);
+  const [workspaceAdminId, setWorkspaceAdminId] = useState('');
+  const intended: TransferOutcome = role === 'MANAGER' ? 'MANAGER' : 'EXECUTIVE';
+  const requiresReplacement = staff.role === 'ADMIN' && impact.data?.requiresReplacement === true;
+
+  useEffect(() => {
+    if (requiresReplacement && role !== 'ADMIN') onNeedsReplacement(intended);
+  }, [requiresReplacement, role, intended, onNeedsReplacement]);
+
+  if (staff.role === 'ADMIN' && impact.isLoading) {
+    return (
+      <Modal title={`Change ${staff.name}'s role`} onClose={onClose}>
+        <Spinner label="Checking what this affects…" />
+      </Modal>
+    );
+  }
+  if (requiresReplacement) return null;
+
+  const destinations = [...adminNames].filter(([id]) => id !== staff.id);
+  const needsWorkspace = role === 'STAFF';
+  function apply() {
+    updateStaff.mutate(
+      { staffId: staff.id, input: { role, ...(needsWorkspace ? { workspaceAdminId } : {}) } },
+      { onSuccess: onClose, onError },
+    );
+  }
+
+  return (
+    <Modal title={`Make ${staff.name} ${roleLabel(role)}?`} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-fg-soft">
+          {staff.name}&apos;s permissions change to those of {roleLabel(role)}. They are signed out of live
+          updates and continue with their new access. If they can no longer operate their counter, it is turned
+          off — this is refused while they are serving someone.
+        </p>
+        {needsWorkspace && (
+          <div>
+            <label className="mb-1 block text-xs font-medium text-fg-soft" htmlFor={`role-workspace-${staff.id}`}>
+              Admin workspace
+            </label>
+            <select
+              id={`role-workspace-${staff.id}`}
+              value={workspaceAdminId}
+              onChange={(e) => setWorkspaceAdminId(e.target.value)}
+              className="h-9 w-full rounded-md border border-border-strong bg-surface px-3 text-sm text-fg focus:border-brand-500"
+            >
+              <option value="">Choose an Admin…</option>
+              {destinations.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name}&apos;s workspace
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+        <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            loading={updateStaff.isPending}
+            disabled={updateStaff.isPending || (needsWorkspace && !workspaceAdminId)}
+            onClick={apply}
+          >
+            {updateStaff.isPending ? 'Changing…' : 'Change role'}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** ADR-071: before removing an Admin, check whether a replacement is needed. */
+function RemovalCheck({
+  staffId,
+  onClear,
+  onNeedsReplacement,
+  onClose,
+}: {
+  staffId: string;
+  onClear: () => void;
+  onNeedsReplacement: () => void;
+  onClose: () => void;
+}) {
+  const impact = useRoleChangeImpact(staffId);
+  useEffect(() => {
+    if (!impact.data) return;
+    if (impact.data.requiresReplacement) onNeedsReplacement();
+    else onClear();
+  }, [impact.data, onClear, onNeedsReplacement]);
+  return (
+    <Modal title="Checking…" onClose={onClose}>
+      {impact.isError ? <ErrorBanner message={actionErrorMessage(impact.error)} /> : <Spinner label="Checking what this affects…" />}
+    </Modal>
+  );
+}
+
 function StaffRow({
   staff,
   pendingAbout,
@@ -241,6 +368,10 @@ function StaffRow({
   const { staff: actor } = useAuth();
   const setWorkspace = useSetExecutiveWorkspace();
   const [confirmingRole, setConfirmingRole] = useState<InvitableRole | null>(null);
+  // ADR-071: an Admin who still runs a queue (or has Executives) leaves the
+  // role only by handing the workspace to a replacement.
+  const [replacing, setReplacing] = useState<TransferOutcome | null>(null);
+  const [checkingRemoval, setCheckingRemoval] = useState(false);
   const updateStaff = useUpdateStaff();
   const deleteStaff = useDeleteStaff();
   const resendInvitation = useResendInvitation();
@@ -250,6 +381,16 @@ function StaffRow({
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowNote, setRowNote] = useState<string | null>(null);
   const actions = rowActions(actor, staff);
+
+  /** A refusal that means "hand the workspace over first" opens the guided
+   * replacement flow instead of only showing the error. */
+  function handleGovernanceError(err: unknown, intended: TransferOutcome) {
+    if (err instanceof ApiError && (err.code === 'ADMIN_OWNS_LIVE_QUEUE' || err.code === 'ADMIN_HAS_EXECUTIVES')) {
+      setReplacing(intended);
+      return;
+    }
+    setRowError(actionErrorMessage(err));
+  }
 
   function setStatus(status: 'ACTIVE' | 'SUSPENDED') {
     setRowError(null);
@@ -335,14 +476,21 @@ function StaffRow({
                 disabled={setWorkspace.isPending}
                 onChange={(e) => {
                   setRowError(null);
+                  if (!e.target.value) return;
                   setWorkspace.mutate(
-                    { staffId: staff.id, adminId: e.target.value || null },
+                    { staffId: staff.id, adminId: e.target.value },
                     { onError: (err) => setRowError(actionErrorMessage(err)) },
                   );
                 }}
                 className="rounded-md border border-border-strong bg-surface px-2 py-1 text-xs text-fg focus:border-brand-500"
               >
-                <option value="">Organization-level</option>
+                {/* ADR-071 D13: every Executive belongs to an Admin; an older
+                    organization-level Executive is shown as unplaced until moved. */}
+                {!staff.workspaceAdminId && (
+                  <option value="" disabled>
+                    Choose an Admin…
+                  </option>
+                )}
                 {[...adminNames].map(([id, name]) => (
                   <option key={id} value={id}>
                     {name}
@@ -416,7 +564,10 @@ function StaffRow({
             </Button>
           )}
           {actions.canRemove && (
-            <Button variant="danger" onClick={() => setConfirmingDelete(true)}>
+            <Button
+              variant="danger"
+              onClick={() => (staff.role === 'ADMIN' && actor?.role === 'OWNER' ? setCheckingRemoval(true) : setConfirmingDelete(true))}
+            >
               Remove
             </Button>
           )}
@@ -431,31 +582,42 @@ function StaffRow({
           />
         )}
         {confirmingRole && (
-          <ConfirmDialog
-            title={`Make ${staff.name} ${roleLabel(confirmingRole)}?`}
-            message={
-              staff.role === 'ADMIN'
-                ? `${staff.name} stops being an Admin. Their queue and Executives return to you (Head-managed) until you assign them to another Admin.`
-                : `${staff.name}'s permissions change to those of ${roleLabel(confirmingRole)}. If they can no longer operate their counter, it is turned off.`
-            }
-            confirmLabel="Change role"
-            confirmingLabel="Changing…"
-            tone="primary"
-            confirming={updateStaff.isPending}
-            onConfirm={() => {
-              setRowError(null);
-              updateStaff.mutate(
-                { staffId: staff.id, input: { role: confirmingRole } },
-                {
-                  onSuccess: () => setConfirmingRole(null),
-                  onError: (err) => {
-                    setConfirmingRole(null);
-                    setRowError(actionErrorMessage(err));
-                  },
-                },
-              );
+          <RoleChangeFlow
+            staff={staff}
+            role={confirmingRole}
+            adminNames={adminNames}
+            onClose={() => setConfirmingRole(null)}
+            onNeedsReplacement={(intended) => {
+              setConfirmingRole(null);
+              setReplacing(intended);
             }}
-            onCancel={() => setConfirmingRole(null)}
+            onError={(err) => {
+              setConfirmingRole(null);
+              handleGovernanceError(err, confirmingRole === 'MANAGER' ? 'MANAGER' : 'EXECUTIVE');
+            }}
+          />
+        )}
+        {checkingRemoval && (
+          <RemovalCheck
+            staffId={staff.id}
+            onClear={() => {
+              setCheckingRemoval(false);
+              setConfirmingDelete(true);
+            }}
+            onNeedsReplacement={() => {
+              setCheckingRemoval(false);
+              setReplacing('REMOVE');
+            }}
+            onClose={() => setCheckingRemoval(false)}
+          />
+        )}
+        {replacing && (
+          <AdminReplacementDialog
+            key={replacing}
+            admin={{ id: staff.id, name: staff.name }}
+            intended={replacing}
+            onClose={() => setReplacing(null)}
+            onDone={(message) => setRowNote(message)}
           />
         )}
         {confirmingSuspend && (
@@ -481,7 +643,7 @@ function StaffRow({
                 onSuccess: () => setConfirmingDelete(false),
                 onError: (err) => {
                   setConfirmingDelete(false);
-                  setRowError(actionErrorMessage(err));
+                  handleGovernanceError(err, 'REMOVE');
                 },
               })
             }
@@ -523,7 +685,7 @@ export function StaffPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Staff"
+        title="Associates"
         description="Invite colleagues, assign operational roles, and manage access to LiveQueue."
         actions={
           <PermissionGate permission="manage_staff">
@@ -532,7 +694,7 @@ export function StaffPage() {
                 <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
                   <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
                 </svg>
-                {roles.length === 1 ? `Invite ${roleLabel(roles[0])}` : 'Invite Member'}
+                {roles.length === 1 ? `Invite ${roleLabel(roles[0])}` : 'Invite associate'}
               </Button>
             )}
           </PermissionGate>
@@ -560,7 +722,7 @@ export function StaffPage() {
         <SearchInput
           value={search}
           onChange={handleSearchChange}
-          label="Search staff"
+          label="Search associates"
           placeholder="Search by name, email, or role…"
         />
         </div>
@@ -584,10 +746,10 @@ export function StaffPage() {
 
       <Card>
         {isLoading ? (
-          <Spinner label="Loading staff…" />
+          <Spinner label="Loading associates…" />
         ) : !result?.data.length ? (
           <EmptyState
-            message={debouncedSearch ? 'No staff match your search.' : 'No staff found.'}
+            message={debouncedSearch ? 'No associates match your search.' : 'No associates yet.'}
           />
         ) : (
           <div className="overflow-x-auto">

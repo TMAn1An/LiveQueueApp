@@ -36,7 +36,7 @@ export function AuditLogsPage() {
             value={search}
             onChange={handleSearchChange}
             label="Search audit logs"
-            placeholder="Search by staff, action, or entity…"
+            placeholder="Search by person, action, or entity…"
           />
         </div>
         {/* ADR-069: the Head and Managers may narrow to one Admin's workspace. */}
@@ -71,7 +71,7 @@ export function AuditLogsPage() {
               <thead>
                 <tr className="border-b border-border text-left text-xs uppercase font-semibold text-faint">
                   <th className="py-3 pr-4">Time</th>
-                  <th className="py-3 pr-4">Staff</th>
+                  <th className="py-3 pr-4">Performed by</th>
                   <th className="py-3 pr-4">Action</th>
                   <th className="py-3 pr-4">Entity</th>
                   <th className="py-3 pr-4">Details</th>

@@ -38,17 +38,17 @@ const STEPS: Step[] = [
   },
   {
     title: 'Add counters',
-    body: 'A counter is where staff actually serve someone. A queue with no active counter has nowhere to send a called person, so add at least one.',
+    body: 'A counter is where your team actually serves someone. A queue with no active counter has nowhere to send a called person, so add at least one.',
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {
-    title: 'Invite staff',
+    title: 'Invite associates',
     body: 'Send an email invitation to the people who will run the counter. They set their own password from the link — nobody types it for them.',
     cta: { label: 'Go to Staff', to: '/staff' },
   },
   {
-    title: 'Assign staff to counters',
-    body: 'From the queue’s counters page, assign an invited staff member to the counter they’ll work from.',
+    title: 'Assign Executives to counters',
+    body: 'From the queue’s counters page, assign an invited Executive to the counter they’ll work from.',
     cta: { label: 'Go to Queues', to: '/queues' },
   },
   {

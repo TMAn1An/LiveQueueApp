@@ -93,7 +93,7 @@ export function ReferralDialog({ tokenId, onClose }: { tokenId: string; onClose:
               onChange={(e) => setNote(e.target.value)}
               className="w-full rounded-md border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
             />
-            <p className="mt-1 text-xs text-muted">{noteError ?? `${note.length}/${MAX_NOTE} · Staff only.`}</p>
+            <p className="mt-1 text-xs text-muted">{noteError ?? `${note.length}/${MAX_NOTE} · Visible to your team only.`}</p>
           </div>
           <ErrorBanner message={error} />
           <div className="flex justify-end gap-2">
