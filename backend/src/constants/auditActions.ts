@@ -31,6 +31,7 @@ export const AUDIT_ACTIONS = [
   // ADR-070: a journey step sent to another counter.
   'token_referred',
   'token_duration_updated',
+  // Historical only: ADR-071 D8 replaced it with OrganizationDeletionReceipt.
   'organization_deletion_requested',
   // ADR-071: governance — every one written in the same transaction as the
   // change it records.

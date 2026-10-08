@@ -825,9 +825,11 @@ model NotificationPreference {
 /// Append-only evidence trail (Phase 7 Step 4). organizationId/staffId are
 /// plain scalar snapshots with deliberately NO Prisma relation to
 /// Organization/Staff — an audit record is evidence of what happened, and
-/// must survive both organization deletion (Organization cascades through
-/// every other table via onDelete: Cascade) and staff deletion (DELETE
-/// /api/staff/:staffId is a hard delete). staffEmail is captured too, so the
+/// must survive staff deletion (DELETE /api/staff/:staffId is a hard
+/// delete). ADR-071 D8 supersedes the original "survives organization
+/// deletion" rule: deleting an organization purges its rows in the same
+/// transaction, leaving an OrganizationDeletionReceipt; a DB trigger forbids
+/// every other UPDATE/DELETE. staffEmail is captured too, so the
 /// actor stays identifiable even after the Staff row is gone. `action` is a
 /// plain string, not a Postgres enum, so the audit vocabulary can grow
 /// without a schema migration for every new event — validated at the

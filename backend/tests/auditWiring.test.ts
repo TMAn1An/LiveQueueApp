@@ -335,8 +335,11 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
     });
   });
 
-  it('organization deletion creates the audit event, and it survives the deletion', async () => {
+  // ADR-071 D8: deleting an organization removes its audit trail and
+  // governance history with it; only a minimal receipt survives.
+  it('organization deletion removes the audit trail and leaves only a minimal receipt', async () => {
     const ctx = await registerOwner({ organizationName: 'Deletion Wiring Org' });
+    expect(await prisma.auditLog.count({ where: { organizationId: ctx.organizationId } })).toBeGreaterThan(0);
 
     const res = await api()
       .delete('/api/organizations/me')
@@ -344,20 +347,18 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
       .send({ confirmName: 'Deletion Wiring Org' });
     expect(res.status).toBe(204);
 
-    // No race here, unlike every other action: the audit write happens
-    // before the delete and before the response is sent (see
-    // organization.service.ts), so it is already durable by this point.
-    const rows = await prisma.auditLog.findMany({
-      where: { organizationId: ctx.organizationId, action: 'organization_deletion_requested' },
+    expect(await prisma.auditLog.count({ where: { organizationId: ctx.organizationId } })).toBe(0);
+    expect(await prisma.organizationHeadTenure.count({ where: { organizationId: ctx.organizationId } })).toBe(0);
+    const receipts = await prisma.organizationDeletionReceipt.findMany({
+      where: { organizationId: ctx.organizationId },
     });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.entityId).toBe(ctx.organizationId);
-    expect(rows[0]?.staffId).toBe(ctx.staffId);
-    expect(rows[0]?.staffEmail).toBe(ctx.email);
-    expect((rows[0]?.metadata as Record<string, unknown>)?.organizationName).toBe('Deletion Wiring Org');
-
-    const orgStillExists = await prisma.organization.findUnique({ where: { id: ctx.organizationId } });
-    expect(orgStillExists).toBeNull();
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({
+      organizationName: 'Deletion Wiring Org',
+      deletedByStaffId: ctx.staffId,
+      deletedByEmail: ctx.email,
+    });
+    expect(await prisma.organization.findUnique({ where: { id: ctx.organizationId } })).toBeNull();
   });
 
   it('blocked-device status change creates exactly one blocked_device_changed audit event', async () => {
