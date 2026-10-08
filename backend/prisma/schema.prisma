@@ -1362,8 +1362,9 @@ model AdminWorkspaceTransfer {
   organizationId String       @map("organization_id")
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
-  queueId   String @map("queue_id")
-  queueName String @map("queue_name")
+  /// Null when the Admin had Executives but no live queue.
+  queueId   String? @map("queue_id")
+  queueName String? @map("queue_name")
 
   oldAdminId      String               @map("old_admin_id")
   oldAdminName    String               @map("old_admin_name")

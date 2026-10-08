@@ -49,7 +49,6 @@ export interface JourneyServiceRow {
 export function validateJourneySteps(
   steps: string[],
   services: Map<string, JourneyServiceRow>,
-  options: { allowMultipleServices: boolean },
 ): void {
   if (steps.length === 0) {
     throw new AppError(422, 'JOURNEY_EMPTY', 'Select at least one service.');
@@ -64,9 +63,6 @@ export function validateJourneySteps(
   }
   if (steps.some((id) => !services.get(id)!.isActive)) {
     throw new AppError(409, 'SERVICE_NOT_ACTIVE', 'One or more selected services are not currently available.');
-  }
-  if (!options.allowMultipleServices && steps.length !== 1) {
-    throw new AppError(409, 'MULTIPLE_SERVICES_NOT_ALLOWED', 'This queue only allows selecting a single service.');
   }
   for (let i = 1; i < steps.length; i++) {
     if (steps[i] === steps[i - 1]) {
@@ -166,7 +162,7 @@ export async function setRecommendedJourney(actor: WorkspaceActor, queueId: stri
   return prisma.$transaction(async (tx) => {
     if (serviceIds.length > 0) {
       const services = await loadQueueServices(tx, queueId);
-      validateJourneySteps(serviceIds, services, { allowMultipleServices: queue.allowMultipleServices });
+      validateJourneySteps(serviceIds, services);
     }
     await tx.queueRecommendedStep.deleteMany({ where: { queueId } });
     if (serviceIds.length > 0) {

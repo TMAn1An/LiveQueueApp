@@ -1,13 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  api,
-  createCounter,
-  createQueue,
-  createService,
-  createToken,
-  registerOwner,
-  setFormFields,
-} from './helpers/app';
+import { api, createCounter, createQueue, createService, createToken, registerOwner, setFormFields, workspaceAdminFor } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { isLatinName, isLatinText } from '../src/validators/latinText';
 
@@ -197,7 +189,7 @@ describe('ADR-056 — enforced by every write that takes a restricted field', ()
     const res = await api()
       .post('/api/staff')
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ name: 'New Person', email: 'new.person+desk@example.com', role: 'STAFF' });
+      .send({ name: 'New Person', email: 'new.person+desk@example.com', role: 'STAFF', workspaceAdminId: await workspaceAdminFor(ctx.accessToken) });
     expect(res.status).toBe(201);
   });
 });

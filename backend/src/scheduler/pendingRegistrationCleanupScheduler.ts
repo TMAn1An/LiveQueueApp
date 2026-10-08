@@ -1,6 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
+import * as headSuccessionService from '../services/headSuccession.service';
 import * as emailVerificationService from '../services/emailVerification.service';
 
 let task: ScheduledTask | null = null;
@@ -18,6 +19,14 @@ export async function runPendingRegistrationCleanupTick(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, 'Pending registration cleanup run failed unexpectedly');
+  }
+  // ADR-071: leadership handovers whose code or successor link lapsed are
+  // closed as EXPIRED, freeing the organization to start a new one.
+  try {
+    const expired = await headSuccessionService.expireLapsedSuccessions();
+    if (expired > 0) logger.info({ expired }, 'Lapsed leadership handovers expired');
+  } catch (err) {
+    logger.error({ err }, 'Leadership handover expiry run failed unexpectedly');
   }
 }
 

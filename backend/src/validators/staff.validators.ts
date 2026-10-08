@@ -124,3 +124,21 @@ export const reviewRemovalRequestSchema = {
 export const removalRequestIdOnlySchema = {
   params: removalRequestIdParams,
 };
+
+/** ADR-071: handing an Admin's workspace to a replacement Admin. */
+export const workspaceTransferSchema = {
+  params: staffIdParams,
+  body: z
+    .object({
+      replacementStaffId: z.string().uuid('replacementStaffId must be a valid id.'),
+      outcome: z.enum(['MANAGER', 'EXECUTIVE', 'REMOVE']),
+      reason: z
+        .string()
+        .trim()
+        .min(3, 'Say briefly why the workspace is being handed over.')
+        .max(200)
+        .regex(LATIN_TEXT_PATTERN, LATIN_TEXT_MESSAGE),
+      note: optionalNote,
+    })
+    .strict(),
+};

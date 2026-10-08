@@ -461,12 +461,10 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
   // ADR-070: `serviceIds` is the person's ordered journey. Every step must
   // be an active service of this exact queue (another queue's service is
   // "not found"), never the same service twice in a row, and each service
-  // within its repeat limit. V2 Checkpoint 6's single-service queues allow
-  // exactly one step. The legacy singular `serviceId` shape is a one-step
+  // within its repeat limit. One service or many (ADR-071 D1: no queue-level
+  // single-service mode). The legacy singular `serviceId` shape is a one-step
   // journey. Never trusts a client-supplied duration or count.
-  validateJourneySteps(input.serviceIds, await loadQueueServices(prisma, input.queueId), {
-    allowMultipleServices: queue.allowMultipleServices,
-  });
+  validateJourneySteps(input.serviceIds, await loadQueueServices(prisma, input.queueId));
 
   const device = await registerDevice(input.deviceIdentifier);
   // OrganizationDeviceBlock, not device.status, is authoritative — a device
@@ -578,7 +576,7 @@ export async function createToken(input: CreateTokenInput, idempotencyKey: strin
 
     // Phase 4: scheduleEnabled/scheduleDailyCapacity are a static queue-
     // configuration gate — read from the pre-lock `queue`, not the locked
-    // row, exactly like the allowMultipleServices check above. The session
+    // row, exactly like the journey validation above. The session
     // lookup and capacity COUNT below are the actual resource allocation,
     // and run only now, after the queue row lock, which is what makes them
     // race-free against a concurrent createToken call for the same queue

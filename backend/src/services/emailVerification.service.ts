@@ -1,4 +1,5 @@
 import { prisma } from '../config/prisma';
+import { purgeDeletedOrganizationsAudit } from './governance.service';
 import { logger } from '../config/logger';
 import { AppError } from '../utils/AppError';
 import { generateEmailLinkToken, hashRefreshToken } from '../utils/tokens';
@@ -156,17 +157,28 @@ export async function resendVerificationEmail(staffId: string): Promise<void> {
  * deleted rows simply matches zero organizations.
  */
 export async function cleanupExpiredPendingRegistrations(): Promise<{ deletedCount: number }> {
-  const result = await prisma.organization.deleteMany({
-    where: {
-      staff: {
-        some: {
-          role: 'OWNER',
-          status: 'PENDING_EMAIL_VERIFICATION',
-          registrationExpiresAt: { lt: new Date() },
-        },
+  const pendingOwner = {
+    staff: {
+      some: {
+        role: 'OWNER' as const,
+        status: 'PENDING_EMAIL_VERIFICATION' as const,
+        registrationExpiresAt: { lt: new Date() },
       },
     },
-  });
-
-  return { deletedCount: result.count };
+  };
+  const candidates = await prisma.organization.findMany({ where: pendingOwner, select: { id: true } });
+  let deletedCount = 0;
+  for (const { id } of candidates) {
+    // Each delete repeats the full condition in the statement itself, so an
+    // owner who verified in the meantime is simply no longer matched.
+    await prisma.$transaction(async (tx) => {
+      const result = await tx.organization.deleteMany({ where: { id, ...pendingOwner } });
+      if (result.count === 1) {
+        // ADR-071 D8: its audit rows go with it.
+        await purgeDeletedOrganizationsAudit(tx, [id]);
+        deletedCount += 1;
+      }
+    });
+  }
+  return { deletedCount };
 }

@@ -46,7 +46,10 @@ export async function getPublicQueueConfig(queueId: string) {
     // there is no actionable pre-join UX for it; the rejection at token
     // creation (REPEAT_VISIT_NOT_ALLOWED) is the only point that actually
     // knows.
-    allowMultipleServices: queue.allowMultipleServices,
+    // ADR-071 D1: retired and always true. Kept in the response because
+    // released Android apps (v1.0.3–v1.0.5) and cached portal bundles read
+    // it; a missing value would make an old portal offer single-service only.
+    allowMultipleServices: true,
     // ADR-034: unlike the old device-based rule — which the app could not
     // usefully anticipate — the app now has to know *before* joining whether
     // to ask for a verified phone and which question identifies the

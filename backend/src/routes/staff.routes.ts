@@ -14,6 +14,7 @@ import {
   setExecutiveWorkspaceSchema,
   staffIdOnlySchema,
   updateStaffSchema,
+  workspaceTransferSchema,
 } from '../validators/staff.validators';
 
 const router = Router();
@@ -68,6 +69,24 @@ router.post(
   authenticate,
   validate(removalRequestIdOnlySchema),
   staffController.cancelRemovalRequest,
+);
+
+// ADR-071: Admin workspace handovers. Registered before '/:staffId'.
+router.get('/workspace-transfers', authenticate, staffController.listWorkspaceTransfers);
+router.get(
+  '/:staffId/role-change-impact',
+  authenticate,
+  requirePermission('manage_admins'),
+  validate(staffIdOnlySchema),
+  staffController.roleChangeImpact,
+);
+router.post(
+  '/:staffId/workspace-transfer',
+  sensitiveRateLimiter,
+  authenticate,
+  requirePermission('manage_admins'),
+  validate(workspaceTransferSchema),
+  staffController.transferWorkspace,
 );
 
 // ADR-069 D3: the Organization Head moves an Executive between workspaces.

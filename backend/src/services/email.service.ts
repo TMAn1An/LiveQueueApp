@@ -213,10 +213,30 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  OWNER: 'Owner',
-  ADMIN: 'Administrator',
-  STAFF: 'Staff',
+/** ADR-069/071: the role names people see. Every stored role has an entry,
+ * so no role can ever be described with another role's name. */
+export const ROLE_LABELS: Record<'OWNER' | 'MANAGER' | 'ADMIN' | 'STAFF', string> = {
+  OWNER: 'Organization Head',
+  MANAGER: 'Organization Manager',
+  ADMIN: 'Admin',
+  STAFF: 'Executive',
+};
+
+export function roleLabel(role: string): string {
+  const label = (ROLE_LABELS as Record<string, string>)[role];
+  if (!label) throw new Error(`No display label for role ${role}`);
+  return label;
+}
+
+/** ADR-071 D10: the handover reasons as people read them. */
+export const SUCCESSION_REASON_LABELS: Record<string, string> = {
+  RETIREMENT: 'Retirement',
+  RESIGNATION: 'Resignation',
+  END_OF_TERM: 'End of term',
+  ORGANIZATIONAL_RESTRUCTURING: 'Organizational restructuring',
+  CHANGE_OF_RESPONSIBILITY: 'Change of responsibility',
+  PERSONAL_REASONS: 'Personal reasons',
+  OTHER: 'Other',
 };
 
 export function verificationEmail(verificationUrl: string): TransactionalEmail {
@@ -238,16 +258,17 @@ export function staffInvitationEmail(input: {
   role: string;
   setupUrl: string;
 }): TransactionalEmail {
-  const role = ROLE_LABELS[input.role] ?? 'Staff';
+  const role = roleLabel(input.role);
+  const article = /^[AEIOU]/.test(role) ? 'an' : 'a';
   return render('You have been invited to LiveQueue', {
     heading: 'Set up your LiveQueue account',
     paragraphs: [
-      `Hi ${input.name}, ${input.organizationName} has given you access to LiveQueue as ${role}.`,
+      `Hi ${input.name}, ${input.organizationName} has given you access to LiveQueue as ${article} ${role}.`,
       'Choose your own password to finish setting up your account. Nobody else will know it.',
     ],
     action: { label: 'Set up your account', url: input.setupUrl },
     notes: [
-      'This link works once and expires in 7 days. After that, ask an administrator to send a new one.',
+      'This link works once and expires in 7 days. After that, ask the person who invited you to send a new one.',
       'Once your password is set, sign in with this email address.',
     ],
     footer: "If you weren't expecting this invitation, you can ignore this email. The account cannot be used until a password is set with this link.",
@@ -290,6 +311,85 @@ export function customerVerificationCodeEmail(input: {
     code: input.code,
     notes: [`This code expires in ${input.expiresInMinutes} minutes. Do not share it with anyone.`],
     footer: "If you didn't request this, you can ignore this email. Nobody can join a queue as you without the code above.",
+  });
+}
+
+/** ADR-071: the code the current Organization Head enters to confirm they
+ * started a leadership handover. */
+export function headSuccessionCodeEmail(input: {
+  name: string;
+  organizationName: string;
+  successorName: string;
+  code: string;
+  expiresInMinutes: number;
+}): TransactionalEmail {
+  return render('Confirm the leadership handover', {
+    heading: 'Confirm your leadership handover',
+    paragraphs: [
+      `Hi ${input.name}, you started handing over the Organization Head role of ${input.organizationName} to ${input.successorName}.`,
+      'Enter this code in the LiveQueue dashboard to confirm it was you.',
+    ],
+    code: input.code,
+    notes: [`This code expires in ${input.expiresInMinutes} minutes. Do not share it with anyone.`],
+    footer:
+      "If you didn't start this, sign in, cancel the handover from Organization Settings and change your password.",
+  });
+}
+
+/** ADR-071: the successor's one-time acceptance link. */
+export function headSuccessorInvitationEmail(input: {
+  successorName: string;
+  organizationName: string;
+  currentHeadName: string;
+  reasonLabel: string;
+  acceptUrl: string;
+  expiresInHours: number;
+}): TransactionalEmail {
+  return render(`You are invited to lead ${input.organizationName}`, {
+    heading: 'Accept the Organization Head role',
+    paragraphs: [
+      `Hi ${input.successorName}, ${input.currentHeadName} has asked you to become the Organization Head of ${input.organizationName} on LiveQueue.`,
+      `Reason for the handover: ${input.reasonLabel}.`,
+      'Open the link to review the handover. Nothing changes until you accept it.',
+    ],
+    action: { label: 'Review the handover', url: input.acceptUrl },
+    notes: [`This link works once and expires in ${input.expiresInHours} hours.`],
+    footer: "If you weren't expecting this, you can ignore this email or decline the handover from the link.",
+  });
+}
+
+/** ADR-071: tells a person how a leadership handover ended. */
+export function headSuccessionOutcomeEmail(input: {
+  name: string;
+  organizationName: string;
+  outcome: 'COMPLETED_FORMER' | 'COMPLETED_NEW' | 'DECLINED';
+  otherName: string;
+}): TransactionalEmail {
+  const text = {
+    COMPLETED_FORMER: {
+      subject: 'Leadership handover completed',
+      lines: [
+        `Hi ${input.name}, ${input.otherName} has accepted the Organization Head role of ${input.organizationName}.`,
+        'Your LiveQueue account for this organization has been closed and every session signed out.',
+      ],
+    },
+    COMPLETED_NEW: {
+      subject: `You are now the Organization Head of ${input.organizationName}`,
+      lines: [
+        `Hi ${input.name}, you are now the Organization Head of ${input.organizationName}.`,
+        'Sign in to LiveQueue with this email address to continue.',
+      ],
+    },
+    DECLINED: {
+      subject: 'Leadership handover declined',
+      lines: [`Hi ${input.name}, ${input.otherName} declined the Organization Head role of ${input.organizationName}.`],
+    },
+  }[input.outcome];
+  return render(text.subject, {
+    heading: text.subject,
+    paragraphs: text.lines,
+    notes: [],
+    footer: 'This message was sent because of a change to your organization on LiveQueue.',
   });
 }
 
@@ -390,4 +490,16 @@ export async function sendCustomerVerificationCodeEmail(
     return customerVerificationSenderOverride(input);
   }
   return deliver('customer verification', input.to, customerVerificationCodeEmail(input));
+}
+
+export function sendHeadSuccessionCodeEmail(input: Parameters<typeof headSuccessionCodeEmail>[0] & { to: string }) {
+  return deliver('leadership handover code', input.to, headSuccessionCodeEmail(input));
+}
+
+export function sendHeadSuccessorInvitationEmail(input: Parameters<typeof headSuccessorInvitationEmail>[0] & { to: string }) {
+  return deliver('leadership handover invitation', input.to, headSuccessorInvitationEmail(input));
+}
+
+export function sendHeadSuccessionOutcomeEmail(input: Parameters<typeof headSuccessionOutcomeEmail>[0] & { to: string }) {
+  return deliver('leadership handover outcome', input.to, headSuccessionOutcomeEmail(input));
 }

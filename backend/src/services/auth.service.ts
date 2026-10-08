@@ -1,5 +1,6 @@
 import type { Organization, Staff } from '@prisma/client';
 import { prisma } from '../config/prisma';
+import { purgeDeletedOrganizationsAudit } from './governance.service';
 import { AppError } from '../utils/AppError';
 import { isValidTimezone } from '../utils/customerIdentity';
 import { hashPassword, verifyPassword } from '../utils/password';
@@ -132,11 +133,14 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
     // longer use. Only the owner's own pending organization is removed —
     // a live account, or one still inside its window, is never replaced.
     if (existing.role === 'OWNER' && isPendingSelfRegistration(existing) && !registrationWindowOpen(existing)) {
-      await prisma.organization.deleteMany({
-        where: {
-          id: existing.organizationId,
-          staff: { some: { id: existing.id, status: 'PENDING_EMAIL_VERIFICATION' } },
-        },
+      await prisma.$transaction(async (tx) => {
+        const removed = await tx.organization.deleteMany({
+          where: {
+            id: existing.organizationId,
+            staff: { some: { id: existing.id, status: 'PENDING_EMAIL_VERIFICATION' } },
+          },
+        });
+        if (removed.count === 1) await purgeDeletedOrganizationsAudit(tx, [existing.organizationId]);
       });
     } else {
       throw new AppError(409, 'EMAIL_ALREADY_REGISTERED', 'This email is already registered.');
@@ -176,6 +180,19 @@ export async function register(input: RegisterInput, meta: SessionMeta) {
         emailVerificationTokenHash: verificationToken.hash,
         emailVerificationExpiresAt: verificationToken.expiresAt,
         registrationExpiresAt: newRegistrationDeadline(),
+      },
+    });
+
+    // ADR-071: the founding Organization Head's tenure starts with the
+    // organization, in the same transaction.
+    await tx.organizationHeadTenure.create({
+      data: {
+        organizationId: organization.id,
+        staffId: staff.id,
+        name: staff.name,
+        email: staff.email,
+        startType: 'FOUNDING',
+        startedAt: organization.createdAt,
       },
     });
 

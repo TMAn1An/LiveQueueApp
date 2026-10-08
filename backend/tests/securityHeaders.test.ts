@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { corsOrigins } from '../src/config/env';
 import { api, registerOwner } from './helpers/app';
 
 /**
@@ -55,6 +56,19 @@ describe('security headers (Phase 7 Step 3)', () => {
       const res = await api().get('/health').set('Origin', 'https://evil.example.com');
 
       expect(res.headers['access-control-allow-origin']).not.toBe('https://evil.example.com');
+    });
+
+    it('lets an allowed origin cache its preflight for 10 minutes (ADR-071)', async () => {
+      const origin = corsOrigins[0];
+      if (!origin) return; // no allowed origin configured in this environment
+      const res = await api()
+        .options('/api/staff')
+        .set('Origin', origin)
+        .set('Access-Control-Request-Method', 'GET')
+        .set('Access-Control-Request-Headers', 'authorization');
+      expect(res.status).toBe(204);
+      expect(res.headers['access-control-allow-origin']).toBe(origin);
+      expect(res.headers['access-control-max-age']).toBe('600');
     });
 
     it('never sends a wildcard Access-Control-Allow-Origin', async () => {

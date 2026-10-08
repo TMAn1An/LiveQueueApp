@@ -18,19 +18,20 @@ export interface AuthContext {
 /**
  * ADR-058/ADR-071: an access token issued before the account's
  * `accessRevokedAt` is refused everywhere — REST, optional auth and
- * Socket.io alike — even though its JWT lifetime has not run out. `iat` is
- * in whole seconds, so a token minted in the same second as the revocation
- * (the fresh sign-in that follows it) is still accepted.
+ * Socket.io alike — even though its JWT lifetime has not run out. Compared
+ * in milliseconds (`iatMs`), so only a token minted after the revocation —
+ * the fresh sign-in that follows it — is accepted. Older tokens without
+ * `iatMs` use whole-second `iat`.
  */
 export function isAccessRevoked(
   staff: { accessRevokedAt: Date | null },
-  payload: { iat?: number },
+  payload: { iat?: number; iatMs?: number },
 ): boolean {
-  return (
-    staff.accessRevokedAt !== null &&
-    typeof payload.iat === 'number' &&
-    payload.iat < Math.floor(staff.accessRevokedAt.getTime() / 1000)
-  );
+  if (staff.accessRevokedAt === null) return false;
+  if (typeof payload.iatMs === 'number') {
+    return payload.iatMs <= staff.accessRevokedAt.getTime();
+  }
+  return typeof payload.iat === 'number' && payload.iat < Math.floor(staff.accessRevokedAt.getTime() / 1000);
 }
 
 /**

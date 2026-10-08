@@ -22,6 +22,12 @@ import {
   verifyEmailSchema,
 } from '../validators/auth.validators';
 import { acceptInvitationSchema } from '../validators/staff.validators';
+import {
+  acceptSuccessionSchema,
+  declineSuccessionSchema,
+  successorTokenQuerySchema,
+} from '../validators/headSuccession.validators';
+import * as organizationController from '../controllers/organization.controller';
 
 const router = Router();
 
@@ -49,11 +55,41 @@ router.patch(
 // ADR-035: an invited staff member sets their own password here. Public for
 // the same reason as email verification below — the link is the credential,
 // and it is clicked in a browser with no session.
+// ADR-071: validated before the password form is shown — answers only
+// whether the link can be used, like the password-reset check below.
+router.get(
+  '/invitations/validate',
+  authRateLimiter,
+  validate(resetTokenQuerySchema),
+  authController.validateInvitation,
+);
 router.post(
   '/accept-invitation',
   authRateLimiter,
   validate(acceptInvitationSchema),
   authController.acceptInvitation,
+);
+
+// ADR-071: the successor's side of an Organization Head handover. Public —
+// the emailed link is the credential — and limited like every other
+// credential-bearing link.
+router.get(
+  '/leadership-handover/validate',
+  authRateLimiter,
+  validate(successorTokenQuerySchema),
+  organizationController.validateSuccessorLink,
+);
+router.post(
+  '/leadership-handover/accept',
+  authRateLimiter,
+  validate(acceptSuccessionSchema),
+  organizationController.acceptSuccession,
+);
+router.post(
+  '/leadership-handover/decline',
+  authRateLimiter,
+  validate(declineSuccessionSchema),
+  organizationController.declineSuccession,
 );
 
 // ADR-058: forgot password. All public. The request has its own per-IP

@@ -30,6 +30,9 @@ type QueueAdminSummary = { id: string; name: string; email: string } | null;
 function serializeQueue(queue: QueueWithServices & { admin?: QueueAdminSummary }, actor?: WorkspaceActor) {
   return {
     ...queue,
+    // ADR-071 D1: every queue accepts one or more services. Still sent, always
+    // true, for released apps and cached portal bundles that read it.
+    allowMultipleServices: true,
     services: [...queue.services].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()),
     qrCodeUri: `livequeue://queue/${queue.id}`,
     // ADR-069: what the signed-in person may do with it — the dashboard
@@ -251,7 +254,8 @@ export async function createQueue(actor: WorkspaceActor, input: CreateQueueInput
       baseTimeMinutes: input.baseTimeMinutes,
       defaultNotificationMinutes: input.defaultNotificationMinutes,
       status: input.status,
-      allowMultipleServices: input.allowMultipleServices,
+      // ADR-071 D1: always true; the column is kept only for compatibility.
+      allowMultipleServices: true,
       requireServiceStartOtp: input.requireServiceStartOtp,
       timezone,
       ...policy,
@@ -302,7 +306,6 @@ function isUniqueViolation(err: unknown, target: string): boolean {
  * stable code so a crafted request learns exactly why.
  */
 const CREATION_ONLY_SETTINGS = {
-  allowMultipleServices: 'Multiple-service support',
   requireServiceStartOtp: 'Service-start verification',
 } as const;
 

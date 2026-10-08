@@ -35,7 +35,7 @@ function rows(...specs: [string, number][]): Map<string, JourneyServiceRow> {
 describe('journey rules (pure)', () => {
   const services = rows(['A', 2], ['B', 2], ['C', 2]);
   const ok = (steps: string[], s = services) => () =>
-    validateJourneySteps(steps, s, { allowMultipleServices: true });
+    validateJourneySteps(steps, s);
 
   it.each([[['A']], [['A', 'B']], [['A', 'B', 'A']], [['A', 'B', 'A', 'C']]])('accepts %j', (steps) => {
     expect(ok(steps)).not.toThrow();
@@ -61,10 +61,9 @@ describe('journey rules (pure)', () => {
     }
   });
 
-  it('a single-service queue allows exactly one step', () => {
-    expect(() => validateJourneySteps(['A', 'B'], services, { allowMultipleServices: false })).toThrow(
-      /single service/,
-    );
+  it('one service or many — there is no single-service queue mode any more (ADR-071 D1)', () => {
+    expect(() => validateJourneySteps(['A'], services)).not.toThrow();
+    expect(() => validateJourneySteps(['A', 'B', 'C'], services)).not.toThrow();
   });
 });
 

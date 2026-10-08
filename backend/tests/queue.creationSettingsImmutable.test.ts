@@ -4,10 +4,14 @@ import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 
 /**
- * ADR-055: multiple-service support and the service-start verification code
- * are chosen when a queue is created and are fixed for its lifetime. The
- * backend enforces it — the dashboard rendering them read-only is not what
- * stops a change.
+ * ADR-055: the service-start verification code is chosen when a queue is
+ * created and is fixed for its lifetime. The backend enforces it — the
+ * dashboard rendering it read-only is not what stops a change.
+ *
+ * ADR-071 D1: the queue-level multiple-service toggle is retired. Every queue
+ * accepts one service or many; the stored column stays true, older clients
+ * may still send the field and it is ignored — it can never turn a queue
+ * into a single-service one.
  */
 
 beforeEach(async () => {
@@ -44,7 +48,7 @@ describe('ADR-055 — creation', () => {
     const res = await createRaw(ctx, {});
     expect(res.status).toBe(201);
     expect(res.body.data.requireServiceStartOtp).toBe(false);
-    // Multiple services keep their existing default.
+    // ADR-071 D1: always true.
     expect(res.body.data.allowMultipleServices).toBe(true);
   });
 
@@ -56,7 +60,7 @@ describe('ADR-055 — creation', () => {
     expect(rows).toEqual([{ column_default: 'false', is_nullable: 'NO' }]);
   });
 
-  it('persists every combination chosen at creation', async () => {
+  it('persists the verification choice; a stale allowMultipleServices=false is ignored', async () => {
     const ctx = await registerOwner();
     for (const allowMultipleServices of [true, false]) {
       for (const requireServiceStartOtp of [true, false]) {
@@ -66,8 +70,9 @@ describe('ADR-055 — creation', () => {
           requireServiceStartOtp,
         });
         expect(res.status).toBe(201);
+        expect(res.body.data.allowMultipleServices).toBe(true);
         expect(await stored(res.body.data.id)).toMatchObject({
-          allowMultipleServices,
+          allowMultipleServices: true,
           requireServiceStartOtp,
         });
       }
@@ -79,8 +84,6 @@ describe('ADR-055 — no change after creation, in either direction', () => {
   const cases = [
     { field: 'requireServiceStartOtp', from: false, to: true },
     { field: 'requireServiceStartOtp', from: true, to: false },
-    { field: 'allowMultipleServices', from: false, to: true },
-    { field: 'allowMultipleServices', from: true, to: false },
   ] as const;
 
   for (const { field, from, to } of cases) {
@@ -111,12 +114,9 @@ describe('ADR-055 — no change after creation, in either direction', () => {
     });
   });
 
-  it('repeating the stored value is a harmless no-op, and unrelated edits leave both alone', async () => {
+  it('repeating the stored value is a harmless no-op; a stale allowMultipleServices is ignored', async () => {
     const ctx = await registerOwner();
-    const queue = await createQueue(ctx.accessToken, {
-      allowMultipleServices: false,
-      requireServiceStartOtp: true,
-    });
+    const queue = await createQueue(ctx.accessToken, { requireServiceStartOtp: true });
 
     const same = await updateQueue(ctx.accessToken, queue.id, {
       allowMultipleServices: false,
@@ -124,12 +124,13 @@ describe('ADR-055 — no change after creation, in either direction', () => {
       name: 'Renamed',
     });
     expect(same.status).toBe(200);
+    expect(same.body.data.allowMultipleServices).toBe(true);
 
     const rename = await updateQueue(ctx.accessToken, queue.id, { name: 'Renamed again' });
     expect(rename.status).toBe(200);
     expect(await stored(queue.id)).toEqual({
       name: 'Renamed again',
-      allowMultipleServices: false,
+      allowMultipleServices: true,
       requireServiceStartOtp: true,
     });
   });
@@ -145,23 +146,24 @@ describe('ADR-055 — no change after creation, in either direction', () => {
     expect((await stored(queue.id)).requireServiceStartOtp).toBe(true);
   });
 
-  it('a queue that existed before this rule keeps — and is frozen at — the value it had', async () => {
+  it('a queue that existed before this rule keeps — and is frozen at — its verification setting', async () => {
     const ctx = await registerOwner();
     const queue = await createQueue(ctx.accessToken);
-    // Stand-in for a production queue created under ADR-041's on-by-default:
-    // its stored value is simply whatever it was, and nothing migrates it.
-    await prisma.queue.update({
-      where: { id: queue.id },
-      data: { requireServiceStartOtp: true, allowMultipleServices: false },
-    });
+    // Stand-in for a production queue created under ADR-041's on-by-default.
+    await prisma.queue.update({ where: { id: queue.id }, data: { requireServiceStartOtp: true } });
 
     const off = await updateQueue(ctx.accessToken, queue.id, { requireServiceStartOtp: false });
     expect(off.status).toBe(409);
-    const multi = await updateQueue(ctx.accessToken, queue.id, { allowMultipleServices: true });
-    expect(multi.status).toBe(409);
-    expect(await stored(queue.id)).toMatchObject({
-      requireServiceStartOtp: true,
-      allowMultipleServices: false,
-    });
+    expect(await stored(queue.id)).toMatchObject({ requireServiceStartOtp: true });
+  });
+
+  it('a row still holding the retired false value behaves as multi-service everywhere', async () => {
+    const ctx = await registerOwner();
+    const queue = await createQueue(ctx.accessToken);
+    await prisma.queue.update({ where: { id: queue.id }, data: { allowMultipleServices: false } });
+    const read = await api().get(`/api/queues/${queue.id}`).set('Authorization', `Bearer ${ctx.accessToken}`);
+    expect(read.body.data.allowMultipleServices).toBe(true);
+    const pub = await api().get(`/api/public/queues/${queue.id}/config`);
+    expect(pub.body.data.allowMultipleServices).toBe(true);
   });
 });

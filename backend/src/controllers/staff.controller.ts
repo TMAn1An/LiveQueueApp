@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
+import { prisma } from '../config/prisma';
 import * as staffService from '../services/staff.service';
 import * as auditService from '../services/audit.service';
 import * as membershipService from '../services/membership.service';
+import * as adminTransferService from '../services/adminTransfer.service';
 import * as realtime from '../realtime/emit';
 
 export async function list(req: Request, res: Response) {
@@ -129,4 +131,35 @@ export async function setWorkspace(req: Request, res: Response) {
   );
   res.status(200).json({ success: true, data: staff });
   realtime.disconnectStaff(staff.id);
+}
+
+/** ADR-071: what changing this person's role would affect (Head only). */
+export async function roleChangeImpact(req: Request, res: Response) {
+  const impact = await adminTransferService.roleChangeImpact(req.auth!, req.params.staffId as string);
+  res.status(200).json({ success: true, data: impact });
+}
+
+/** ADR-071: hand an Admin's workspace (queue and Executives) to a
+ * replacement Admin, atomically. */
+export async function transferWorkspace(req: Request, res: Response) {
+  const result = await adminTransferService.transferAdminWorkspace(
+    req.auth!,
+    req.params.staffId as string,
+    req.body,
+    req.ip,
+  );
+  res.status(200).json({ success: true, data: result.transfer });
+  for (const staffId of result.affectedStaffIds) realtime.disconnectStaff(staffId);
+  if (result.queueId) {
+    const queue = await prisma.queue.findUnique({
+      where: { id: result.queueId },
+      include: { services: true, admin: { select: { id: true, name: true, email: true } } },
+    });
+    if (queue) await realtime.emitQueueUpdated(queue);
+  }
+}
+
+export async function listWorkspaceTransfers(req: Request, res: Response) {
+  const data = await adminTransferService.listWorkspaceTransfers(req.auth!);
+  res.status(200).json({ success: true, data });
 }

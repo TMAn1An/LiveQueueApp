@@ -33,6 +33,10 @@ export function createApp() {
     cors({
       origin: corsOrigins.length > 0 ? corsOrigins : false,
       credentials: true,
+      // ADR-071: browsers may reuse a preflight answer for 10 minutes instead
+      // of repeating it before every authenticated call. The allowed origins
+      // are unchanged — this only caches the same answer.
+      maxAge: 600,
     }),
   );
   app.use(express.json());

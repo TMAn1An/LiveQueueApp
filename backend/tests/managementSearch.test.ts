@@ -12,7 +12,7 @@ beforeEach(async () => {
 /** Creates a staff member through the real endpoint so the row is realistic. */
 async function addStaff(
   accessToken: string,
-  input: { name: string; email: string; role?: 'ADMIN' | 'STAFF' },
+  input: { name: string; email: string; role?: 'ADMIN' | 'STAFF'; workspaceAdminId?: string },
 ) {
   const res = await api()
     .post('/api/staff')
@@ -28,11 +28,12 @@ async function addStaff(
 describe('GET /api/staff?search=', () => {
   it('matches name and email case-insensitively and excludes non-matches', async () => {
     const ctx = await registerOwner();
-    await addStaff(ctx.accessToken, { name: 'Amina Rahman', email: 'amina@example.com' });
+    const amina = await addStaff(ctx.accessToken, { name: 'Amina Rahman', email: 'amina@example.com' });
     await addStaff(ctx.accessToken, {
       name: 'Bilal Khan',
       email: 'bilal@example.com',
       role: 'STAFF',
+      workspaceAdminId: amina.id,
     });
 
     const byName = await api()
@@ -49,11 +50,12 @@ describe('GET /api/staff?search=', () => {
 
   it('matches the role enum from free text', async () => {
     const ctx = await registerOwner();
-    await addStaff(ctx.accessToken, { name: 'Role One', email: 'role-one@example.com' });
+    const roleOne = await addStaff(ctx.accessToken, { name: 'Role One', email: 'role-one@example.com' });
     await addStaff(ctx.accessToken, {
       name: 'Role Two',
       email: 'role-two@example.com',
       role: 'STAFF',
+      workspaceAdminId: roleOne.id,
     });
 
     const res = await api()

@@ -126,9 +126,11 @@ export const createQueueSchema = {
     defaultNotificationMinutes: queueReminderMinutes.default(10),
     status: queueStatus.default('ACTIVE'),
     allowRepeatVisits: z.boolean().default(true),
-    // ADR-055: both are decided here, once, and are fixed for the queue's
-    // lifetime — updateQueue refuses any later change.
-    allowMultipleServices: z.boolean().default(true),
+    // ADR-071 D1: retired. Every queue accepts one or more services; a value
+    // sent by an older client is accepted and ignored.
+    allowMultipleServices: z.boolean().optional(),
+    // ADR-055: decided here, once, and fixed for the queue's lifetime —
+    // updateQueue refuses any later change.
     // The service-start verification code is off unless the creator turns it
     // on (ADR-055 reverses ADR-041's on-by-default).
     requireServiceStartOtp: z.boolean().default(false),
@@ -163,8 +165,7 @@ export const updateQueueSchema = {
     baseTimeMinutes: z.number().int().positive().optional(),
     defaultNotificationMinutes: queueReminderMinutes.optional(),
     allowRepeatVisits: z.boolean().optional(),
-    // ADR-055: accepted only so a change can be refused with a clear
-    // QUEUE_SETTING_IMMUTABLE instead of being silently dropped by the parser.
+    // ADR-071 D1: retired — accepted from older clients and ignored.
     allowMultipleServices: z.boolean().optional(),
     requireServiceStartOtp: z.boolean().optional(),
     ...repeatPolicyFields,

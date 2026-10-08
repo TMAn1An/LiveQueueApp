@@ -118,8 +118,14 @@ export async function resendVerificationEmail(req: Request, res: Response) {
  * inbox for days.
  */
 export async function acceptInvitation(req: Request, res: Response) {
-  const staff = await staffInvitationService.acceptInvitation(req.body.token, req.body.password);
+  const staff = await staffInvitationService.acceptInvitation(req.body.token, req.body.password, req.ip);
   res.status(200).json({ success: true, data: { email: staff.email } });
+}
+
+/** ADR-071: checked before the password form is shown. Only yes or no. */
+export async function validateInvitation(req: Request, res: Response) {
+  const valid = await staffInvitationService.isInvitationUsable(req.query.token as string);
+  res.status(200).json({ success: true, data: { valid } });
 }
 
 /**

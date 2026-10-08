@@ -9,10 +9,15 @@ export interface AccessTokenPayload {
   role: StaffRole;
   /** Issued-at, in seconds — set by jsonwebtoken on every signed token. */
   iat?: number;
+  /** ADR-071: issued-at in milliseconds, so revocation (accessRevokedAt) is
+   * exact — a token minted earlier in the same second as a suspension or a
+   * handover is refused too. Tokens signed before this claim existed fall
+   * back to `iat`. */
+  iatMs?: number;
 }
 
 export function signAccessToken(payload: AccessTokenPayload): string {
-  return jwt.sign(payload, env.JWT_SECRET, {
+  return jwt.sign({ ...payload, iatMs: Date.now() }, env.JWT_SECRET, {
     expiresIn: env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'],
   });
 }

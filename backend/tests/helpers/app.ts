@@ -74,6 +74,7 @@ export interface RestrictedStaffContext {
   staffId: string;
   organizationId: string;
   accessToken: string;
+  email: string;
 }
 
 /**
@@ -117,6 +118,7 @@ export async function createStaffWithRole(
     staffId: staff.id,
     organizationId,
     accessToken: loginRes.body.data.accessToken,
+    email,
   };
 }
 

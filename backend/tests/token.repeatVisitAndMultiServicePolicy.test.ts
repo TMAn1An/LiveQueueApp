@@ -126,11 +126,17 @@ describe('V2 Checkpoint 6 — queue repeat-visit policy', () => {
     // — written directly, bypassing the Zod-defaulted create endpoint, with
     // no explicit value for either new column (exactly what an
     // already-migrated production row looks like: DEFAULT true applied).
-    const legacy = await prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO queues (id, organization_id, name, token_prefix, starting_number, next_token_number, base_time_minutes, default_notification_minutes, form_version, created_at, updated_at)
-      VALUES (gen_random_uuid(), ${ctx.organizationId}, 'Legacy Queue', 'L', 1, 1, 5, 10, 1, now(), now())
-      RETURNING id
-    `;
+    // (Admin-less like every pre-ADR-069 row, so ADR-071's live-queue trigger
+    // is suspended around this test-only insert.)
+    const [, legacy] = await prisma.$transaction([
+      prisma.$executeRawUnsafe('ALTER TABLE "queues" DISABLE TRIGGER "queues_live_requires_admin"'),
+      prisma.$queryRaw<{ id: string }[]>`
+        INSERT INTO queues (id, organization_id, name, token_prefix, starting_number, next_token_number, base_time_minutes, default_notification_minutes, form_version, created_at, updated_at)
+        VALUES (gen_random_uuid(), ${ctx.organizationId}, 'Legacy Queue', 'L', 1, 1, 5, 10, 1, now(), now())
+        RETURNING id
+      `,
+      prisma.$executeRawUnsafe('ALTER TABLE "queues" ENABLE TRIGGER "queues_live_requires_admin"'),
+    ]);
     const queueId = legacy[0]!.id;
 
     const row = await prisma.queue.findUniqueOrThrow({ where: { id: queueId } });
@@ -139,35 +145,16 @@ describe('V2 Checkpoint 6 — queue repeat-visit policy', () => {
   });
 });
 
-describe('V2 Checkpoint 6 — queue multi-service restriction', () => {
-  it('Test 8: allowMultipleServices=false rejects a request with more than one service id', async () => {
-    const org = await setupOrgQueue({ allowMultipleServices: false });
-    const secondService = await createService(org.accessToken, org.queue.id);
+describe('ADR-071 D1 — no queue-level single-service mode', () => {
+  /** A queue whose stored row still holds the retired false value. */
+  async function retiredSingleServiceQueue() {
+    const org = await setupOrgQueue();
+    await prisma.queue.update({ where: { id: org.queue.id }, data: { allowMultipleServices: false } });
+    return org;
+  }
 
-    const res = await createTokenRequest({
-      queueId: org.queue.id,
-      serviceIds: [org.service.id, secondService.id],
-    });
-    expect(res.status).toBe(409);
-    expect(res.body.error.code).toBe('MULTIPLE_SERVICES_NOT_ALLOWED');
-  });
-
-  it('Test 9: allowMultipleServices=false accepts exactly one service id', async () => {
-    const org = await setupOrgQueue({ allowMultipleServices: false });
-
-    const res = await createTokenRequest({ queueId: org.queue.id, serviceIds: [org.service.id] });
-    expect(res.status).toBe(201);
-  });
-
-  it('Test 9b: allowMultipleServices=false also accepts the legacy singular serviceId shape', async () => {
-    const org = await setupOrgQueue({ allowMultipleServices: false });
-
-    const res = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id });
-    expect(res.status).toBe(201);
-  });
-
-  it('Test 10: allowMultipleServices=true (explicit) preserves Checkpoint 5 multi-service selection unchanged', async () => {
-    const org = await setupOrgQueue({ allowMultipleServices: true });
+  it('Test 8: a stored false no longer restricts — several services are accepted', async () => {
+    const org = await retiredSingleServiceQueue();
     const secondService = await createService(org.accessToken, org.queue.id);
 
     const res = await createTokenRequest({
@@ -176,5 +163,25 @@ describe('V2 Checkpoint 6 — queue multi-service restriction', () => {
     });
     expect(res.status).toBe(201);
     expect(res.body.data.services).toHaveLength(2);
+  });
+
+  it('Test 9: exactly one service id is still a valid journey', async () => {
+    const org = await setupOrgQueue();
+
+    const res = await createTokenRequest({ queueId: org.queue.id, serviceIds: [org.service.id] });
+    expect(res.status).toBe(201);
+  });
+
+  it('Test 9b: the legacy singular serviceId shape is still accepted', async () => {
+    const org = await retiredSingleServiceQueue();
+
+    const res = await createTokenRequest({ queueId: org.queue.id, serviceId: org.service.id });
+    expect(res.status).toBe(201);
+  });
+
+  it('Test 10: an empty journey is refused — at least one service is required', async () => {
+    const org = await setupOrgQueue();
+    const res = await createTokenRequest({ queueId: org.queue.id, serviceIds: [] });
+    expect(res.status).toBe(422);
   });
 });

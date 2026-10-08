@@ -1,9 +1,9 @@
 import { Prisma, type Organization } from '@prisma/client';
 import { prisma } from '../config/prisma';
+import { lockOrganization, purgeDeletedOrganizationsAudit } from './governance.service';
 import { AppError } from '../utils/AppError';
 import { isValidTimezone } from '../utils/customerIdentity';
 import { organizationNameKey } from '../utils/organizationName';
-import { recordAuditEvent } from './audit.service';
 
 function requireOwner(role: string): void {
   if (role !== 'OWNER') {
@@ -80,7 +80,10 @@ export async function claimOrganizationName(name: string, exceptOrganizationId?:
     if (!(await isLapsedPendingRegistration(holder.id))) {
       throw organizationNameTakenError();
     }
-    await prisma.organization.deleteMany({ where: { id: holder.id } });
+    await prisma.$transaction(async (tx) => {
+      const removed = await tx.organization.deleteMany({ where: { id: holder.id } });
+      if (removed.count === 1) await purgeDeletedOrganizationsAudit(tx, [holder.id]);
+    });
   }
   return nameKey;
 }
@@ -180,20 +183,18 @@ export async function restartOnboarding(organizationId: string, role: string) {
  * relations already defined in the schema; Device rows are deliberately left
  * untouched (ADR-011 — a device is a global identity, not organization-owned).
  *
- * The audit write (Phase 7 Step 5) is deliberately the one exception to this
- * codebase's "audit failures never break the business operation" rule
- * (recordAuditEventSafely, used everywhere else): it happens here, before
- * the delete, using the throwing recordAuditEvent — if it fails, deletion
- * aborts entirely rather than silently destroying the organization with no
- * surviving evidence that it happened. AuditLog has no FK to Organization
- * (Phase 7 Step 4), so the row survives the cascade below regardless.
+ * ADR-071 D8 (supersedes the Phase 7 Step 4/5 retention): permanent
+ * deletion removes the organization's detailed audit rows and governance
+ * history too, leaving only a minimal OrganizationDeletionReceipt (who
+ * deleted which organization, when). All in one transaction — if any step
+ * fails, nothing is deleted.
  */
 export async function deleteOrganization(
   organizationId: string,
   role: string,
   confirmName: string,
   actor: { staffId: string; staffEmail: string },
-  ipAddress?: string,
+  _ipAddress?: string,
 ) {
   requireOwner(role);
 
@@ -210,14 +211,26 @@ export async function deleteOrganization(
     );
   }
 
-  await recordAuditEvent({
-    actor: { staffId: actor.staffId, organizationId, staffEmail: actor.staffEmail },
-    action: 'organization_deletion_requested',
-    entityType: 'organization',
-    entityId: organizationId,
-    metadata: { organizationName: organization.name },
-    ipAddress,
+  // ADR-071 D8: in one transaction, under the organization lock (so a
+  // leadership handover or workspace transfer cannot interleave): leave the
+  // minimal permanent receipt, delete the organization — its governance
+  // history goes by FK cascade — then its detailed audit rows. Nothing about
+  // any other organization is touched.
+  await prisma.$transaction(async (tx) => {
+    if (!(await lockOrganization(tx, organizationId))) {
+      throw new AppError(404, 'ORGANIZATION_NOT_FOUND', 'Organization not found.');
+    }
+    const deleter = await tx.staff.findUnique({ where: { id: actor.staffId }, select: { name: true, email: true } });
+    await tx.organizationDeletionReceipt.create({
+      data: {
+        organizationId,
+        organizationName: organization.name,
+        deletedByStaffId: actor.staffId,
+        deletedByName: deleter?.name ?? actor.staffEmail,
+        deletedByEmail: deleter?.email ?? actor.staffEmail,
+      },
+    });
+    await tx.organization.delete({ where: { id: organizationId } });
+    await purgeDeletedOrganizationsAudit(tx, [organizationId]);
   });
-
-  await prisma.organization.delete({ where: { id: organizationId } });
 }

@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../config/prisma';
+import { personSnapshot, recordGovernanceEvent } from './audit.service';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { AppError } from '../utils/AppError';
@@ -149,6 +151,33 @@ export async function resendInvitation(
   return { emailSent };
 }
 
+function invalidInvitation(): AppError {
+  return new AppError(
+    400,
+    'INVITATION_INVALID_OR_EXPIRED',
+    'This invitation link has expired or is no longer valid. Ask the person who invited you to send a new one.',
+  );
+}
+
+function usableInvitationWhere(hash: string): Prisma.StaffWhereInput {
+  return {
+    invitationTokenHash: hash,
+    status: 'PENDING_EMAIL_VERIFICATION',
+    invitationExpiresAt: { gt: new Date() },
+  };
+}
+
+/**
+ * ADR-071: whether an invitation link can still be used, checked before the
+ * password form is shown. Answers only yes or no — a link that never
+ * existed, expired, or was already used all read the same — exactly what
+ * accepting it would decide.
+ */
+export async function isInvitationUsable(rawToken: string): Promise<boolean> {
+  if (!rawToken) return false;
+  return (await prisma.staff.count({ where: usableInvitationWhere(hashRefreshToken(rawToken)) })) === 1;
+}
+
 /**
  * Redeems the link and sets the password the new member chose.
  *
@@ -157,34 +186,44 @@ export async function resendInvitation(
  * token hash means no email address or id ever appears in the URL. One
  * generic failure covers "no such token", "expired" and "already used" —
  * the difference helps nobody but an attacker.
+ *
+ * ADR-071: redeemed by a conditional update, so two simultaneous
+ * submissions of the same link produce exactly one success; the acceptance
+ * and its audit row commit together.
  */
 export async function acceptInvitation(
   rawToken: string,
   password: string,
+  ipAddress?: string,
 ): Promise<{ id: string; email: string; organizationId: string }> {
   const hash = hashRefreshToken(rawToken);
-  const staff = await prisma.staff.findFirst({
-    where: { invitationTokenHash: hash, status: 'PENDING_EMAIL_VERIFICATION' },
+  const candidate = await prisma.staff.findFirst({ where: usableInvitationWhere(hash) });
+  if (!candidate) throw invalidInvitation();
+  const passwordHash = await hashPassword(password);
+
+  return prisma.$transaction(async (tx) => {
+    const claimed = await tx.staff.updateMany({
+      where: { id: candidate.id, ...usableInvitationWhere(hash) },
+      data: {
+        passwordHash,
+        status: 'ACTIVE',
+        // Single use: the slot is emptied, so the link cannot be replayed.
+        invitationTokenHash: null,
+        invitationExpiresAt: null,
+      },
+    });
+    if (claimed.count !== 1) throw invalidInvitation();
+    const staff = await tx.staff.findUniqueOrThrow({ where: { id: candidate.id } });
+    await recordGovernanceEvent(tx, {
+      actor: { staffId: staff.id, staffEmail: staff.email, organizationId: staff.organizationId, role: staff.role },
+      actorSnapshot: personSnapshot(staff),
+      action: 'invitation_accepted',
+      entityType: 'staff',
+      entityId: staff.id,
+      metadata: { role: staff.role },
+      workspaceAdminId: staff.role === 'STAFF' ? staff.workspaceAdminId : staff.role === 'ADMIN' ? staff.id : null,
+      ipAddress,
+    });
+    return { id: staff.id, email: staff.email, organizationId: staff.organizationId };
   });
-
-  if (!staff || !staff.invitationExpiresAt || staff.invitationExpiresAt < new Date()) {
-    throw new AppError(
-      400,
-      'INVALID_OR_EXPIRED_TOKEN',
-      'This invitation link is invalid or has expired. Ask an administrator to send a new one.',
-    );
-  }
-
-  const updated = await prisma.staff.update({
-    where: { id: staff.id },
-    data: {
-      passwordHash: await hashPassword(password),
-      status: 'ACTIVE',
-      // Single use: the slot is emptied, so the link cannot be replayed.
-      invitationTokenHash: null,
-      invitationExpiresAt: null,
-    },
-  });
-
-  return { id: updated.id, email: updated.email, organizationId: updated.organizationId };
 }

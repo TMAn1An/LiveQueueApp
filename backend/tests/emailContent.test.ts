@@ -1,4 +1,5 @@
 import { inspect } from 'node:util';
+import { roleLabel, staffInvitationEmail } from '../src/services/email.service';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from './helpers/app';
 import { resetDb } from './helpers/db';
@@ -141,7 +142,7 @@ describe('ADR-060 — staff invitation email', () => {
     expect(mail.html).toContain('href="https://dash.example.com/accept-invitation?token=abc"');
     expect(mail.html).not.toContain('/login');
     expect(mail.html).toContain('Acme &lt;Clinic&gt;');
-    expect(mail.text).toContain('Acme <Clinic> has given you access to LiveQueue as Administrator.');
+    expect(mail.text).toContain('Acme <Clinic> has given you access to LiveQueue as an Admin.');
     expect(mail.text).toContain('expires in 7 days');
   });
 
@@ -153,7 +154,7 @@ describe('ADR-060 — staff invitation email', () => {
     await api()
       .post('/api/staff')
       .set('Authorization', `Bearer ${reg.body.data.accessToken}`)
-      .send({ name: 'Colleague', email: 'colleague@example.com', role: 'STAFF' });
+      .send({ name: 'Colleague', email: 'colleague@example.com', role: 'ADMIN' });
     const token = /accept-invitation\?token=([^"&\s]+)/.exec(sent().html)![1]!;
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
@@ -194,5 +195,23 @@ describe('ADR-060 — nothing sensitive reaches the logs', () => {
     expect(logged).not.toContain(token);
     expect(logged).not.toContain('secret-person@example.com');
     for (const spy of spies) spy.mockRestore();
+  });
+});
+
+describe('ADR-071 — role names in invitation emails', () => {
+  it.each([
+    ['OWNER', 'as an Organization Head.'],
+    ['MANAGER', 'as an Organization Manager.'],
+    ['ADMIN', 'as an Admin.'],
+    ['STAFF', 'as an Executive.'],
+  ])('%s is named correctly — never "Staff"', (role, phrase) => {
+    const mail = staffInvitationEmail({ name: 'Rafi', organizationName: 'Acme', role, setupUrl: 'https://x.test/accept-invitation?token=t' });
+    expect(mail.text).toContain(phrase);
+    expect(mail.text).not.toMatch(/\bStaff\b/);
+    expect(mail.html).not.toMatch(/\bStaff\b/);
+  });
+
+  it('an unknown role is a programming error, not a silent "Staff"', () => {
+    expect(() => roleLabel('SOMETHING_ELSE')).toThrow();
   });
 });

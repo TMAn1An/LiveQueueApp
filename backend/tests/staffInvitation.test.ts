@@ -160,7 +160,7 @@ describe('accepting an invitation', () => {
       .send({ token, password: 'SomeoneElse123' });
 
     expect(again.status).toBe(400);
-    expect(again.body.error.code).toBe('INVALID_OR_EXPIRED_TOKEN');
+    expect(again.body.error.code).toBe('INVITATION_INVALID_OR_EXPIRED');
   });
 
   it('refuses an expired link', async () => {
@@ -175,7 +175,7 @@ describe('accepting an invitation', () => {
       .send({ token, password: 'ChosenByMe123' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_OR_EXPIRED_TOKEN');
+    expect(res.body.error.code).toBe('INVITATION_INVALID_OR_EXPIRED');
   });
 
   it('refuses a made-up link without saying why', async () => {
@@ -186,7 +186,59 @@ describe('accepting an invitation', () => {
       .send({ token: 'not-a-real-token', password: 'ChosenByMe123' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_OR_EXPIRED_TOKEN');
+    expect(res.body.error.code).toBe('INVITATION_INVALID_OR_EXPIRED');
+  });
+});
+
+describe('validating an invitation link before the form (ADR-071)', () => {
+  async function invite() {
+    const ctx = await registerOwner();
+    const res = await createStaff(ctx.accessToken);
+    return { staffId: res.body.data.id as string, token: tokenFrom(sent.at(-1)!.setupUrl) };
+  }
+  const check = (token: string) => api().get(`/api/auth/invitations/validate?token=${encodeURIComponent(token)}`);
+
+  it('says yes for a usable link, and nothing more', async () => {
+    const { token } = await invite();
+    const res = await check(token);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ valid: true });
+  });
+
+  it('says the same "no" for unknown, expired and already-used links', async () => {
+    const unknown = await check('not-a-real-token');
+    const expiredInvite = await invite();
+    await prisma.staff.update({ where: { id: expiredInvite.staffId }, data: { invitationExpiresAt: new Date(Date.now() - 1000) } });
+    const expired = await check(expiredInvite.token);
+    const usedInvite = await invite();
+    await api().post('/api/auth/accept-invitation').send({ token: usedInvite.token, password: 'ChosenByMe123' });
+    const used = await check(usedInvite.token);
+    for (const res of [unknown, expired, used]) {
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ valid: false });
+    }
+  });
+
+  it('two simultaneous acceptances of one link: exactly one succeeds', async () => {
+    const { staffId, token } = await invite();
+    const results = await Promise.all([
+      api().post('/api/auth/accept-invitation').send({ token, password: 'FirstChoice123' }),
+      api().post('/api/auth/accept-invitation').send({ token, password: 'SecondChoice123' }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    const winner = results.find((r) => r.status === 200)!;
+    const loser = results.find((r) => r.status === 400)!;
+    expect(loser.body.error.code).toBe('INVITATION_INVALID_OR_EXPIRED');
+    const staff = await prisma.staff.findUniqueOrThrow({ where: { id: staffId } });
+    const winningPassword = results[0] === winner ? 'FirstChoice123' : 'SecondChoice123';
+    expect((await api().post('/api/auth/login').send({ email: staff.email, password: winningPassword })).status).toBe(200);
+  });
+
+  it('records the acceptance in the audit log', async () => {
+    const { staffId, token } = await invite();
+    await api().post('/api/auth/accept-invitation').send({ token, password: 'ChosenByMe123' });
+    const row = await prisma.auditLog.findFirstOrThrow({ where: { action: 'invitation_accepted' } });
+    expect(row).toMatchObject({ staffId, entityId: staffId });
   });
 });
 

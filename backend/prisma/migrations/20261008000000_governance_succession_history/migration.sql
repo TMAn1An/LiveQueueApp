@@ -70,8 +70,8 @@ CREATE TABLE "head_successions" (
 CREATE TABLE "admin_workspace_transfers" (
     "id" TEXT NOT NULL,
     "organization_id" TEXT NOT NULL,
-    "queue_id" TEXT NOT NULL,
-    "queue_name" TEXT NOT NULL,
+    "queue_id" TEXT,
+    "queue_name" TEXT,
     "old_admin_id" TEXT NOT NULL,
     "old_admin_name" TEXT NOT NULL,
     "old_admin_email" TEXT NOT NULL,

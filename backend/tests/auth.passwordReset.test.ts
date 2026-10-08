@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, createStaffWithRole, registerOwner } from './helpers/app';
+import { api, createStaffWithRole, registerOwner, workspaceAdminFor } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 import { env } from '../src/config/env';
@@ -100,7 +100,7 @@ describe('ADR-058 — requesting a reset', () => {
     const invite = await api()
       .post('/api/staff')
       .set('Authorization', `Bearer ${owner.accessToken}`)
-      .send({ name: 'Invitee', email: 'invitee@example.com', role: 'STAFF' });
+      .send({ name: 'Invitee', email: 'invitee@example.com', role: 'STAFF', workspaceAdminId: await workspaceAdminFor(owner.accessToken) });
     expect(invite.status).toBe(201);
     expect((await requestReset('invitee@example.com')).body.data.message).toBe(GENERIC);
 

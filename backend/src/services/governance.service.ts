@@ -83,3 +83,18 @@ export async function revokeAllAccess(tx: Prisma.TransactionClient, staffId: str
   await tx.staff.update({ where: { id: staffId }, data: { accessRevokedAt: now } });
   await tx.session.updateMany({ where: { staffId, revokedAt: null }, data: { revokedAt: now } });
 }
+
+/**
+ * ADR-071 D8: an organization's detailed audit rows go with it. Called in
+ * the same transaction, right after the organization row is deleted — the
+ * append-only trigger allows deleting audit rows only once their
+ * organization no longer exists, so this can never purge a live
+ * organization's history. (Governance tables go by FK cascade.)
+ */
+export async function purgeDeletedOrganizationsAudit(
+  tx: Prisma.TransactionClient,
+  organizationIds: string[],
+): Promise<void> {
+  if (organizationIds.length === 0) return;
+  await tx.auditLog.deleteMany({ where: { organizationId: { in: organizationIds } } });
+}
