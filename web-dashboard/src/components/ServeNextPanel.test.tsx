@@ -7,6 +7,7 @@ import { useMyCounter } from '../hooks/useCounters';
 import { useNextToken } from '../hooks/useTokenActions';
 import { ApiError } from '../api/client';
 import type { MyCounter } from '../types/queue';
+import { FloatingConsoleProvider } from '../floatingConsole/FloatingConsoleContext';
 
 // ADR-064: every role holds operate_tokens; only OWNER/ADMIN hold manage_staff.
 let isStaff = true;
@@ -129,5 +130,40 @@ describe('ServeNextPanel — serving is a self-claim at your own counter (ADR-06
     expect(screen.queryByRole('button', { name: 'Serve next' })).not.toBeInTheDocument();
     expect(screen.getByText('You are not assigned to a counter')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Counters' })).toHaveAttribute('href', '/queues/q1/counters');
+  });
+});
+
+describe('ServeNextPanel — Floating Counter Console entry (ADR-072)', () => {
+  function renderWithConsole(queueId = 'q1') {
+    return render(
+      <MemoryRouter>
+        <FloatingConsoleProvider>
+          <ServeNextPanel queueId={queueId} />
+        </FloatingConsoleProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('offers the floating console to the operator of a counter in this queue', () => {
+    mine(own);
+    renderWithConsole();
+    expect(screen.getByRole('button', { name: 'Open floating console' })).toBeInTheDocument();
+    // Serving from the page is unchanged.
+    expect(screen.getByRole('button', { name: 'Serve next' })).toBeEnabled();
+  });
+
+  it('is not offered to someone without a counter here', () => {
+    mine(null);
+    renderWithConsole();
+    expect(screen.queryByRole('button', { name: 'Open floating console' })).not.toBeInTheDocument();
+    mine({ ...own, queueId: 'q2', queueName: 'Other' });
+    renderWithConsole();
+    expect(screen.queryByRole('button', { name: 'Open floating console' })).not.toBeInTheDocument();
+  });
+
+  it('is not offered outside the signed-in layout', () => {
+    mine(own);
+    renderPanel();
+    expect(screen.queryByRole('button', { name: 'Open floating console' })).not.toBeInTheDocument();
   });
 });

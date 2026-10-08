@@ -257,6 +257,52 @@ export async function getMyCounter(actor: CounterActor) {
     status: counter.status,
     queueId: counter.queueId,
     queueName: counter.queue.name,
+    currentToken: await findCurrentTokenAtCounter(counter.id),
+  };
+}
+
+/**
+ * ADR-072: the person called to, or being served at, this counter — read
+ * straight from the database, never derived on the client. Deliberately
+ * minimal (it feeds an always-visible console): the token number, its state,
+ * the current service, and the times the dashboard already shows. No form
+ * answers, contact details or device identifiers.
+ *
+ * Read-only. Who is called next, and every transition, stays with the
+ * existing endpoints and their rules.
+ */
+async function findCurrentTokenAtCounter(counterId: string) {
+  const token = await prisma.token.findFirst({
+    where: { counterId, status: { in: ['CALLED', 'IN_PROGRESS'] } },
+    orderBy: { calledAt: 'desc' },
+    include: {
+      queue: { select: { requireServiceStartOtp: true } },
+      tokenServices: { include: { service: { select: { serviceName: true } } }, orderBy: { service: { createdAt: 'asc' } } },
+      journeySteps: {
+        orderBy: { stepNumber: 'asc' },
+        select: { stepNumber: true, calledAt: true, startedAt: true, service: { select: { serviceName: true } } },
+      },
+    },
+  });
+  if (!token) return null;
+
+  // ADR-070: on a journey, the current step's own service and times; a token
+  // from before journeys keeps its whole selection and its own times.
+  const step =
+    token.currentStepNumber != null
+      ? (token.journeySteps.find((s) => s.stepNumber === token.currentStepNumber) ?? null)
+      : null;
+  return {
+    id: token.id,
+    serialNumber: token.serialNumber,
+    status: token.status,
+    serviceName: step
+      ? step.service.serviceName
+      : token.tokenServices.map((ts) => ts.service.serviceName).join(', ') || null,
+    calledAt: (step?.calledAt ?? token.calledAt)?.toISOString() ?? null,
+    startedAt: (step ? step.startedAt : token.startedAt)?.toISOString() ?? null,
+    step: step ? { number: step.stepNumber, total: token.journeySteps.length } : null,
+    requiresVerificationCode: token.queue.requireServiceStartOtp,
   };
 }
 

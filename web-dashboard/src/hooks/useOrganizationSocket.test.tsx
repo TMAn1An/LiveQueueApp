@@ -96,6 +96,9 @@ describe('useOrganizationSocket', () => {
     endBurst();
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['dashboard'] });
+    // ADR-072: the Floating Counter Console reads the person at the
+    // signed-in person's own counter from here.
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['counters', 'mine'] });
   });
 
   it('invalidates the specific queue and queues list when a queue.* event arrives', () => {
@@ -111,6 +114,8 @@ describe('useOrganizationSocket', () => {
 
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['queues'] });
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['queue', 'q1'] });
+    // ADR-072: a deleted queue releases its counters' operators.
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['counters', 'mine'] });
   });
 
   it('invalidates counters for the affected queue when a counter.* event arrives', () => {
@@ -146,7 +151,7 @@ describe('useOrganizationSocket', () => {
       expect(queryClient.invalidateQueries).not.toHaveBeenCalled();
 
       endBurst();
-      expect(invalidatedKeys().sort()).toEqual(['["dashboard"]', '["queue","q1"]', '["queues"]']);
+      expect(invalidatedKeys().sort()).toEqual(['["counters","mine"]', '["dashboard"]', '["queue","q1"]', '["queues"]']);
     });
 
     it('still refreshes within MAX_WAIT_MS while events keep arriving', () => {
