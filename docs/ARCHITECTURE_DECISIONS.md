@@ -1985,3 +1985,63 @@ Request counts include the `POST …/next` itself. Socket frames are unchanged: 
 - immediate resync.
 
 Browser QA covered two live tabs plus an overview tab through Serve next → Start → Complete (twice) → Serve next → Skip. After every step, both tabs matched a fresh load of the page.
+
+## ADR-075: The iPhone/iPad portal applies live events instead of re-reading the token after each one (2026-10-08)
+
+**Context.** The portal's `useLiveToken` re-read `GET /api/tokens/:id` on every event in the visitor's token room. That read runs `computeComputedFields`, which simulates the whole queue's ETAs (`token.service.ts`, `computeQueueEtas`). Every queue change sends `token.position_changed` to every waiting person, so N portal visitors meant N whole-queue simulations per queue change.
+
+The Android app already applies the event payload without re-reading.
+
+Measured locally on one Serve next, with N visitors connected to their own tracking pages:
+
+| Waiting | Visitors | Token GETs | Token-GET bytes | ETA simulations | Server CPU | Socket.io to visitors |
+|---|---|---|---|---|---|---|
+| 50 | 1 / 10 / 50 | 1 / 10 / 50 → **0** | 1.1 / 4.2 / 26.5 KB → **0** | 2 / 11 / 50 → **1** | 88 / 256 / 1,095 ms → 50 / 52 / 138 ms | 0.3 / 3.3 / 17.6 KB (unchanged) |
+| 200 | 1 / 10 / 50 | 1 / 10 / 50 → **0** | 1.1 / 6.3 / 41.1 KB → **0** | 2 / 11 / 51 → **1** | 126 / 570 / 2,427 ms → 94 / 94 / 110 ms | 0.3 / 3.3 / 16.7 KB (unchanged) |
+| 500 | 1 / 10 / 50 | 1 / 10 / 50 → **0** | 1.1 / 10.6 / 52.8 KB → **0** | 2 / 11 / 51 → **1** | 316 / 1,158 / 4,849 ms → 164 / 155 / 156 ms | 0.3 / 3.3 / 16.7 KB (unchanged) |
+
+The remaining simulation is the server's own per-event broadcast. Server CPU is the backend process's user and system time over the event, including the Serve next itself.
+
+**Decision.**
+- **Lifecycle events** (`token.called`, `started`, `step_completed`, `completed`, `skipped`, `cancelled`) are applied as they arrive. Each carries the full customer view, built by `getTokenCustomerView`, the same `toCustomerView` as the REST read. A queue deletion's cancellation carries `queueRemoved`.
+- **`token.position_changed`** patches `position`, `estimatedWaitMinutes` and `etaUnavailableReason`. It patches only a token shown as `WAITING`.
+- **Re-reads still happen** in these cases, coalesced over 250 ms:
+  - a payload that fails the shape check (wrong token id, or missing status, serial number, services or position);
+  - a position update for a token not shown as waiting, because the screen and the server disagree;
+  - `token.created`, `queue.status_changed` and `queue.updated`. None of these is sent to a token room today; if one arrives, the portal re-reads rather than guesses.
+- **Applying an event supersedes any read in flight**, so an older answer never overwrites a newer event. A position patch that supersedes a read asks for one fresh read.
+- **Unchanged:** an immediate re-read on every (re)connect and on every return to the page (`visibilitychange`), and the first read on open.
+- **New safety read:** about every 10 minutes (±20% jitter per visitor) while the visit is live and the page visible, so no client state can outlive a silently lost event indefinitely.
+- **Cleanup:** on unmount the debounce and reconcile timers are cleared. The `reconnect_failed` handler is removed by name, because the Socket.io manager is shared per origin.
+
+**Correctness.** A real browser, with an iPhone Safari user agent, ran the full visitor flow against the local stack. After each step the live page matched a fresh load of the same visit, and no page or console errors were reported. Steps covered:
+- join → position changes (person ahead called, then completed) with **0 token reads**;
+- called → started;
+- step 1 completed and referred to another counter (journey step 2);
+- offline with a missed event, then reconnect;
+- browser refresh, and foreground (exactly one read);
+- completed;
+- visitor leaves;
+- queue deleted (the cancellation shows its reason);
+- unknown token ("Visit not found").
+
+**Tradeoffs.**
+- The screen trusts the event payload between reads. That payload comes from the same server function as the read, and every reconnect, foreground and safety read replaces it with a fresh read.
+- The safety read adds about 1 read per visitor per 10 minutes. ESTIMATE: 500 portal visitors ≈ 0.8 reads per second.
+- Socket traffic to visitors is unchanged: one event per visitor per queue change.
+
+**Tests.** `src/portal/useLiveToken.test.ts` (15 tests) covers:
+- position patch without a read;
+- full-view apply without a read, for every terminal state;
+- next journey step / referral;
+- queue-removal reason;
+- untrusted payload → one coalesced read;
+- position for a non-waiting screen → read;
+- superseded in-flight read;
+- other-token events ignored;
+- reconnect and foreground reads;
+- the reconcile read, which skips finished visits;
+- no timers, listeners or reads after unmount;
+- one listener per event.
+
+Run against the previous hook, 11 of the 15 fail. `pages.test.tsx` now drives the tracking page with real payloads.
