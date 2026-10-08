@@ -160,19 +160,21 @@ describe('QueueDetailsPage — settings tabs and locked creation settings', () =
     expect(inactive.className).toContain('bg-surface');
   });
 
-  it('shows both creation-only settings locked, with no switch to flip', () => {
-    renderWithTab('services', { requireServiceStartOtp: false, allowMultipleServices: true });
+  it('shows the creation-only setting locked, with no switch to flip', () => {
+    renderWithTab('services', { requireServiceStartOtp: false });
     expect(screen.getByText('Fixed at Creation')).toBeInTheDocument();
     expect(screen.getByText('Not required')).toBeInTheDocument();
-    expect(screen.getByText('Allowed')).toBeInTheDocument();
-    expect(screen.getAllByText('Locked')).toHaveLength(2);
+    expect(screen.getAllByText('Locked')).toHaveLength(1);
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    // ADR-071 D1: the multiple-services setting is retired.
+    expect(screen.queryByText(/multiple services/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('One per visit')).not.toBeInTheDocument();
   });
 
-  it('shows an existing queue’s stored values as they are', () => {
+  it('shows an existing queue’s stored verification value; a retired false never shows', () => {
     renderWithTab('services', { requireServiceStartOtp: true, allowMultipleServices: false });
     expect(screen.getByText('Required')).toBeInTheDocument();
-    expect(screen.getByText('One per visit')).toBeInTheDocument();
+    expect(screen.queryByText('One per visit')).not.toBeInTheDocument();
   });
 });

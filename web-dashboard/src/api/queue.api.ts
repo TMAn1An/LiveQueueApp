@@ -49,8 +49,6 @@ export interface CreateQueueInput {
   /** ADR-049. SESSION is refused by the backend while the schedule is off. */
   repeatRestrictionScope?: RepeatRestrictionScope;
   timezone?: string | null;
-  /** ADR-055: creation-only. The backend defaults it to true. */
-  allowMultipleServices?: boolean;
   /** ADR-055: creation-only, and off unless the creator turns it on. */
   requireServiceStartOtp?: boolean;
   status?: QueueStatus;
@@ -70,7 +68,7 @@ export function createQueue(input: CreateQueueInput) {
  * all — the backend refuses a change with QUEUE_SETTING_IMMUTABLE. */
 export type UpdateQueueInput = Omit<
   CreateQueueInput,
-  'status' | 'startingNumber' | 'allowMultipleServices' | 'requireServiceStartOtp'
+  'status' | 'startingNumber' | 'requireServiceStartOtp'
 >;
 
 export function updateQueue(queueId: string, input: Partial<UpdateQueueInput>) {

@@ -7,16 +7,12 @@ import { InfoHelp } from './InfoHelp';
  * pieces make that visible wherever the settings appear.
  */
 
-export const MULTIPLE_SERVICES_LABEL = 'Allow multiple services';
-export const MULTIPLE_SERVICES_HELP =
-  'People can pick more than one service when they join. When off, each visit is for exactly one service.';
-
 export const SERVICE_START_VERIFICATION_LABEL = 'Service-start verification code';
 export const SERVICE_START_VERIFICATION_HELP =
-  'Staff must enter the code shown in the person’s app before they can start service. When off, staff start service right after calling the person.';
+  'Whoever serves the person must enter the code shown in the person’s app before service starts. When off, service starts right after the person is called.';
 
 export const IMMUTABLE_SETTING_HELP =
-  'This is decided when the queue is created and stays the same for the life of the queue, so people and staff never find the rules changed partway through. To use a different choice, create a new queue.';
+  'This is decided when the queue is created and stays the same for the life of the queue, so nobody finds the rules changed partway through. To use a different choice, create a new queue.';
 
 export const SERVICE_START_VERIFICATION_CONFIRM =
   'Service-start verification will be permanently enabled for this queue. This setting cannot be changed after the queue is created.';

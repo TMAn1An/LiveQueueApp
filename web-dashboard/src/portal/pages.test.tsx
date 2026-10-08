@@ -158,6 +158,8 @@ const CONFIG = {
   name: 'Emergency',
   description: null,
   status: 'ACTIVE',
+  // ADR-071 D1: a stale/retired false — the portal must not treat it as a
+  // single-service queue.
   allowMultipleServices: false,
   identity: { requiresVerifiedEmail: false, configurationRequired: false, repeatRestricted: false },
   schedule: { acceptingJoins: true, message: null },
@@ -197,7 +199,7 @@ describe('queue → services → form → join', () => {
     expect(await screen.findByRole('heading', { name: 'Emergency' })).toBeInTheDocument();
     const join = screen.getByRole('button', { name: 'Join queue' });
     expect(join).toBeDisabled();
-    await userEvent.click(screen.getByRole('radio', { name: /Triage/ }));
+    await userEvent.click(screen.getByRole('button', { name: /Add Triage/ }));
     expect(join).toBeDisabled(); // the required question is still empty
     await userEvent.type(screen.getByLabelText(/Full name/), 'Sami');
     await userEvent.click(join);
@@ -226,7 +228,7 @@ describe('queue → services → form → join', () => {
       return undefined;
     });
     renderAt('/visit/abc123def456/q/q-em');
-    await userEvent.click(await screen.findByRole('radio', { name: /Dressing/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /Add Dressing/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Join queue' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('You are already in this queue.');
   });
@@ -253,7 +255,7 @@ describe('queue → services → form → join', () => {
       return undefined;
     });
     renderAt('/visit/abc123def456/q/q-em');
-    await userEvent.click(await screen.findByRole('radio', { name: /Triage/ }));
+    await userEvent.click(await screen.findByRole('button', { name: /Add Triage/ }));
     expect(screen.getByRole('button', { name: 'Join queue' })).toBeDisabled();
     await userEvent.type(screen.getByLabelText('Email'), 'sami@example.com');
     await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
@@ -430,5 +432,22 @@ describe('ordered journey (ADR-070)', () => {
     renderAt('/visit/token/tok-1');
     expect(await screen.findByText('Your place was cancelled')).toBeInTheDocument();
     expect(screen.getByText(/Reason: Clinic closed for renovation\./)).toBeInTheDocument();
+  });
+});
+
+describe('one service or many, whatever the config says (ADR-071 D1)', () => {
+  it('a config with the retired false, or without the field, still offers an ordered multi-service journey', async () => {
+    for (const config of [{ ...CONFIG, allowMultipleServices: false, formFields: [] }, (() => {
+      const { allowMultipleServices: _omit, ...rest } = { ...CONFIG, formFields: [] };
+      void _omit;
+      return rest;
+    })()]) {
+      handlers.length = 0;
+      handlers.push((url) => (url.pathname === '/api/public/queues/q-em/config' ? ok(config) : undefined));
+      const view = renderAt('/visit/abc123def456/q/q-em');
+      expect(await screen.findByText('Your services, in order')).toBeInTheDocument();
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+      view.unmount();
+    }
   });
 });

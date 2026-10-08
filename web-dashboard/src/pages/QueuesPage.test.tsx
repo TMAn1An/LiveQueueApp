@@ -242,14 +242,12 @@ describe('QueuesPage — Create Queue creation-only settings', () => {
   const verificationSwitch = () =>
     screen.getByRole('switch', { name: 'Service-start verification code' });
 
-  it('starts with verification off and multiple services on, both marked permanent', () => {
+  it('starts with verification off, marked permanent — and offers no multiple-services toggle (ADR-071 D1)', () => {
     openCreateModal();
     expect(verificationSwitch()).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getByRole('switch', { name: 'Allow multiple services' })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    );
-    expect(screen.getAllByText(/cannot be changed after the queue is created/i)).toHaveLength(2);
+    expect(screen.queryByRole('switch', { name: 'Allow multiple services' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Allow multiple services/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/cannot be changed after the queue is created/i)).toHaveLength(1);
   });
 
   it('sends requireServiceStartOtp: false when left off', async () => {
@@ -259,9 +257,10 @@ describe('QueuesPage — Create Queue creation-only settings', () => {
 
     await vi.waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'Pharmacy', requireServiceStartOtp: false, allowMultipleServices: true }),
+        expect.objectContaining({ name: 'Pharmacy', requireServiceStartOtp: false }),
       ),
     );
+    expect(mutateAsync.mock.calls[0]![0]).not.toHaveProperty('allowMultipleServices');
   });
 
   it('asks for confirmation before turning verification on; Cancel leaves it off', () => {
@@ -288,16 +287,6 @@ describe('QueuesPage — Create Queue creation-only settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await vi.waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ requireServiceStartOtp: true })),
-    );
-  });
-
-  it('lets the creator choose one service per visit', async () => {
-    const mutateAsync = openCreateModal();
-    fireEvent.change(screen.getByLabelText('Queue name'), { target: { value: 'Pharmacy' } });
-    fireEvent.click(screen.getByRole('switch', { name: 'Allow multiple services' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
-    await vi.waitFor(() =>
-      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ allowMultipleServices: false })),
     );
   });
 

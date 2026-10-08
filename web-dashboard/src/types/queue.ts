@@ -60,6 +60,8 @@ export interface Queue {
   /** IANA name, or null when this queue simply uses its organization's zone
    * (ADR-035). Only a month/year window or a fixed cutoff actually needs one. */
   timezone: string | null;
+  /** ADR-071 D1: retired — every queue accepts one service or many; the API
+   * always sends true. */
   allowMultipleServices: boolean;
   /** ADR-041: staff must enter the customer's service-start code before
    * starting service. True for every queue that existed before the setting. */

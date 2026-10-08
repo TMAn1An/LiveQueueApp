@@ -11,8 +11,6 @@ import { InfoHelp } from './InfoHelp';
 import { Switch } from './Switch';
 import {
   ImmutableSettingNote,
-  MULTIPLE_SERVICES_HELP,
-  MULTIPLE_SERVICES_LABEL,
   SERVICE_START_VERIFICATION_CONFIRM,
   SERVICE_START_VERIFICATION_HELP,
   SERVICE_START_VERIFICATION_LABEL,
@@ -172,7 +170,6 @@ export function CreateQueueModal({
   const [counterName, setCounterName] = useState('Counter 1');
   const [operatorChoice, setOperatorChoice] = useState<OperatorChoice>('self');
   const [executiveId, setExecutiveId] = useState('');
-  const [allowMultipleServices, setAllowMultipleServices] = useState(true);
   const [requireServiceStartOtp, setRequireServiceStartOtp] = useState(false);
   const [confirmingVerification, setConfirmingVerification] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,7 +208,6 @@ export function CreateQueueModal({
           name: counterName.trim(),
           ...(operatorChoice === 'executive' ? { operatorStaffId: executiveId } : {}),
         },
-        allowMultipleServices,
         requireServiceStartOtp,
       });
       onCreated?.(created.data);
@@ -352,18 +348,6 @@ export function CreateQueueModal({
         <fieldset className="space-y-4 rounded-lg border border-border bg-subtle/50 p-3.5">
           <legend className="sr-only">Settings fixed at creation</legend>
           <div>
-            <Switch
-              id="create-queue-multiple-services"
-              checked={allowMultipleServices}
-              onChange={setAllowMultipleServices}
-              label={MULTIPLE_SERVICES_LABEL}
-              help={MULTIPLE_SERVICES_HELP}
-            />
-            <div className="pl-12">
-              <ImmutableSettingNote label={MULTIPLE_SERVICES_LABEL} />
-            </div>
-          </div>
-          <div className="border-t border-border pt-4">
             <Switch
               id="create-queue-service-start-verification"
               checked={requireServiceStartOtp}

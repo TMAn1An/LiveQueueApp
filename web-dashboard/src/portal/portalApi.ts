@@ -74,7 +74,8 @@ export interface QueueConfig {
   name: string;
   description: string | null;
   status: 'ACTIVE' | 'PAUSED' | 'INACTIVE';
-  allowMultipleServices: boolean;
+  /** ADR-071 D1: retired; always true. Kept so the type matches the API. */
+  allowMultipleServices?: boolean;
   identity: { requiresVerifiedEmail: boolean; configurationRequired: boolean; repeatRestricted: boolean };
   schedule: { acceptingJoins: boolean; message: string | null };
   services: {

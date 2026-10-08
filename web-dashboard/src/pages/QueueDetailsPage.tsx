@@ -1,26 +1,33 @@
-import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { PermissionGate } from '../components/PermissionGate';
-import { useAuth } from '../context/AuthContext';
-import { useQueue, useUpdateQueue } from '../hooks/useQueues';
-import { Switch } from '../components/Switch';
-import { Card } from '../components/Card';
-import { ButtonLink } from '../components/Button';
-import { TabBar } from '../components/TabBar';
-import { StatusBadge } from '../components/StatusBadge';
-import { Spinner } from '../components/Spinner';
-import { QrCodeDisplay } from '../components/QrCodeDisplay';
-import { QueueBreadcrumb } from '../components/QueueBreadcrumb';
-import { ServicesManager } from '../components/ServicesManager';
-import { RecommendedJourneyEditor } from '../components/RecommendedJourneyEditor';
-import { FormBuilder } from '../components/FormBuilder';
-import { RepeatVisitPolicy } from '../components/RepeatVisitPolicy';
-import { QueueTimezoneSetting } from '../components/QueueTimezoneSetting';
-import { QueueCreationSettings } from '../components/QueueCreationSettings';
-import { QueueSchedule } from '../components/QueueSchedule';
-import { QueueDetailsCard } from '../components/QueueDetailsCard';
-import { SectionHeading } from '../components/SectionHeading';
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { PermissionGate } from "../components/PermissionGate";
+import { useAuth } from "../context/AuthContext";
+import { useQueue, useUpdateQueue } from "../hooks/useQueues";
+import { Switch } from "../components/Switch";
+import { Card } from "../components/Card";
+import { ButtonLink } from "../components/Button";
+import { TabBar } from "../components/TabBar";
+import { StatusBadge } from "../components/StatusBadge";
+import { Spinner } from "../components/Spinner";
+import { QrCodeDisplay } from "../components/QrCodeDisplay";
+import { QueueBreadcrumb } from "../components/QueueBreadcrumb";
+import { ServicesManager } from "../components/ServicesManager";
+import { RecommendedJourneyEditor } from "../components/RecommendedJourneyEditor";
+import { FormBuilder } from "../components/FormBuilder";
+import { RepeatVisitPolicy } from "../components/RepeatVisitPolicy";
+import { QueueTimezoneSetting } from "../components/QueueTimezoneSetting";
+import { QueueCreationSettings } from "../components/QueueCreationSettings";
+import { QueueSchedule } from "../components/QueueSchedule";
+import { QueueDetailsCard } from "../components/QueueDetailsCard";
+import { SectionHeading } from "../components/SectionHeading";
 
-type SettingsTab = 'general' | 'services' | 'form' | 'schedule' | 'repeat' | 'qr' | 'all';
+type SettingsTab =
+  | "general"
+  | "services"
+  | "form"
+  | "schedule"
+  | "repeat"
+  | "qr"
+  | "all";
 
 interface TabDef {
   id: SettingsTab;
@@ -30,36 +37,36 @@ interface TabDef {
 // No per-tab blurb: each section explains itself behind its own "ⓘ", and a
 // sentence under the tab bar only repeated what those say.
 const SETTINGS_TABS: TabDef[] = [
-  { id: 'general', label: 'General & Timezone' },
-  { id: 'services', label: 'Services & Verification' },
-  { id: 'form', label: 'Join Form' },
-  { id: 'schedule', label: 'Schedule & Capacity' },
-  { id: 'repeat', label: 'Repeat Visits' },
-  { id: 'qr', label: 'QR Code & Entry' },
-  { id: 'all', label: 'View All' },
+  { id: "general", label: "General & Timezone" },
+  { id: "services", label: "Services & Verification" },
+  { id: "form", label: "Join Form" },
+  { id: "schedule", label: "Schedule & Capacity" },
+  { id: "repeat", label: "Repeat Visits" },
+  { id: "qr", label: "QR Code & Entry" },
+  { id: "all", label: "View All" },
 ];
 
 export function QueueDetailsPage() {
   const { queueId } = useParams<{ queueId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const currentTab = (searchParams.get('tab') as SettingsTab) || 'general';
+  const currentTab = (searchParams.get("tab") as SettingsTab) || "general";
 
   const { organization } = useAuth();
   const { data: queue, isLoading } = useQueue(queueId);
-  const updateQueue = useUpdateQueue(queueId ?? '');
+  const updateQueue = useUpdateQueue(queueId ?? "");
 
   if (isLoading || !queue) return <Spinner label="Loading queue…" />;
 
   function setTab(tab: SettingsTab) {
-    setSearchParams(tab === 'general' ? {} : { tab });
+    setSearchParams(tab === "general" ? {} : { tab });
   }
 
-  const showGeneral = currentTab === 'general' || currentTab === 'all';
-  const showServices = currentTab === 'services' || currentTab === 'all';
-  const showForm = currentTab === 'form' || currentTab === 'all';
-  const showSchedule = currentTab === 'schedule' || currentTab === 'all';
-  const showRepeat = currentTab === 'repeat' || currentTab === 'all';
-  const showQr = currentTab === 'qr' || currentTab === 'all';
+  const showGeneral = currentTab === "general" || currentTab === "all";
+  const showServices = currentTab === "services" || currentTab === "all";
+  const showForm = currentTab === "form" || currentTab === "all";
+  const showSchedule = currentTab === "schedule" || currentTab === "all";
+  const showRepeat = currentTab === "repeat" || currentTab === "all";
+  const showQr = currentTab === "qr" || currentTab === "all";
 
   return (
     <div className="space-y-6">
@@ -79,7 +86,9 @@ export function QueueDetailsPage() {
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-subtle text-xs font-bold text-fg-soft border border-border">
                 {queue.tokenPrefix}
               </span>
-              <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">{queue.name}</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                {queue.name}
+              </h1>
               <StatusBadge status={queue.status} />
               {queue.deletedAt && (
                 <span className="rounded-md bg-subtle px-2 py-0.5 text-xs font-medium text-faint">
@@ -92,14 +101,31 @@ export function QueueDetailsPage() {
             )}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <ButtonLink to={`/queues/${queue.id}/live`} variant="primary" size="lg">
-              <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+            <ButtonLink
+              to={`/queues/${queue.id}/live`}
+              variant="primary"
+              size="lg"
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className="h-4 w-4"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z"
+                  clipRule="evenodd"
+                />
               </svg>
               Open Queue
             </ButtonLink>
             <PermissionGate permission="manage_counters">
-              <ButtonLink to={`/queues/${queue.id}/counters`} variant="secondary" size="lg">
+              <ButtonLink
+                to={`/queues/${queue.id}/counters`}
+                variant="secondary"
+                size="lg"
+              >
                 Manage Counters
               </ButtonLink>
             </PermissionGate>
@@ -123,8 +149,14 @@ export function QueueDetailsPage() {
           <QueueDetailsCard queue={queue} />
 
           <Card>
-            <SectionHeading title="Queue Timezone" help="The local clock this queue runs on. Schedule hours and repeat-visit limits are measured against it." />
-            <QueueTimezoneSetting queue={queue} organizationTimezone={organization?.timezone ?? null} />
+            <SectionHeading
+              title="Queue Timezone"
+              help="The local clock this queue runs on. Schedule hours and repeat-visit limits are measured against it."
+            />
+            <QueueTimezoneSetting
+              queue={queue}
+              organizationTimezone={organization?.timezone ?? null}
+            />
           </Card>
         </div>
       )}
@@ -141,30 +173,40 @@ export function QueueDetailsPage() {
           </Card>
 
           <Card>
-            <SectionHeading title="Services" help="The services offered in this queue, and how long each one usually takes per person." />
-            <ServicesManager queueId={queue.id} services={queue.services} editable={queue.canManage !== false} />
+            <SectionHeading
+              title="Services"
+              help="The services offered in this queue, and how long each one usually takes per person."
+            />
+            <ServicesManager
+              queueId={queue.id}
+              services={queue.services}
+              editable={queue.canManage !== false}
+            />
           </Card>
 
-          {queue.allowMultipleServices && (
-            <Card>
-              <SectionHeading
-                title="Recommended Order"
-                help="The order you suggest services be taken in. People joining start from it and can rearrange their own steps before they get their token. Drag a step by its handle, or focus the handle and use the arrow keys. A service may repeat, but never twice in a row."
-              />
-              <RecommendedJourneyEditor
-                queueId={queue.id}
-                services={queue.services}
-                editable={queue.canManage !== false}
-              />
-            </Card>
-          )}
+          {/* ADR-071 D1: every queue accepts one service or many, so the
+              recommended order is always available. */}
+          <Card>
+            <SectionHeading
+              title="Recommended Order"
+              help="The order you suggest services be taken in. People joining start from it and can rearrange their own steps before they get their token. Drag a step by its handle, or focus the handle and use the arrow keys. A service may repeat, but never twice in a row."
+            />
+            <RecommendedJourneyEditor
+              queueId={queue.id}
+              services={queue.services}
+              editable={queue.canManage !== false}
+            />
+          </Card>
         </div>
       )}
 
       {/* SECTION: Customer Form */}
       {showForm && (
         <Card>
-          <SectionHeading title="Dynamic Form Fields" help="Custom questions people answer when they scan the QR code, before joining the line. Their answers appear on the token row for counter staff." />
+          <SectionHeading
+            title="Dynamic Form Fields"
+            help="Custom questions people answer when they scan the QR code, before joining the line. Their answers appear on the token row for counter staff."
+          />
           <FormBuilder queueId={queue.id} />
         </Card>
       )}
@@ -172,7 +214,10 @@ export function QueueDetailsPage() {
       {/* SECTION: Schedule & Capacity */}
       {showSchedule && (
         <Card>
-          <SectionHeading title="Schedule & Availability" help="Limit when people can join: weekly opening hours, session windows, and how many people each session takes." />
+          <SectionHeading
+            title="Schedule & Availability"
+            help="Limit when people can join: weekly opening hours, session windows, and how many people each session takes."
+          />
           <QueueSchedule queue={queue} />
         </Card>
       )}
@@ -180,7 +225,10 @@ export function QueueDetailsPage() {
       {/* SECTION: Repeat Visits */}
       {showRepeat && (
         <Card>
-          <SectionHeading title="Repeat Visits" help="Limit how often the same person may rejoin, by having them verify who they are." />
+          <SectionHeading
+            title="Repeat Visits"
+            help="Limit how often the same person may rejoin, by having them verify who they are."
+          />
           <RepeatVisitPolicy
             queue={queue}
             effectiveTimezone={queue.timezone ?? organization?.timezone ?? null}
@@ -199,17 +247,22 @@ export function QueueDetailsPage() {
             <Switch
               id="listed-on-organization-page"
               checked={queue.listedOnOrganizationPage !== false}
-              onChange={(next) => void updateQueue.mutateAsync({ listedOnOrganizationPage: next })}
+              onChange={(next) =>
+                void updateQueue.mutateAsync({ listedOnOrganizationPage: next })
+              }
               label="Show on the organization page"
               help="When on, this queue appears when people scan your organization's QR code. Turn it off to keep a queue out of that list; its own queue-only code still works."
             />
-            <Link to="/organization" className="inline-block text-sm font-semibold text-brand-fg underline">
+            <Link
+              to="/organization"
+              className="inline-block text-sm font-semibold text-brand-fg underline"
+            >
               Organization QR code
             </Link>
           </div>
           <QrCodeDisplay
             qrCodeUri={queue.qrCodeUri}
-            organizationName={organization?.name ?? ''}
+            organizationName={organization?.name ?? ""}
             queueName={queue.name}
           />
         </Card>
