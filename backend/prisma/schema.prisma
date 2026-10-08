@@ -138,6 +138,11 @@ model Organization {
   deviceBlocks    OrganizationDeviceBlock[]
   identityClaims  QueueIdentityClaim[]
   removalRequests MembershipRemovalRequest[]
+  /// ADR-071: governance history. Kept for the organization's whole life and
+  /// removed only with it (database triggers refuse any other change).
+  headTenures     OrganizationHeadTenure[]
+  headSuccessions HeadSuccession[]
+  adminTransfers  AdminWorkspaceTransfer[]
 
   @@map("organizations")
 }
@@ -1203,6 +1208,9 @@ model TokenServiceStep {
   counterId   String?   @map("counter_id")
   counter     Counter?  @relation("StepCounter", fields: [counterId], references: [id], onDelete: SetNull)
   staffId     String?   @map("staff_id")
+  /// ADR-071: the operator's name when the step was called — history keeps
+  /// it through a rename or removal. Null only where it was never known.
+  staffName   String?   @map("staff_name")
   calledAt    DateTime? @map("called_at")
   startedAt   DateTime? @map("started_at")
   completedAt DateTime? @map("completed_at")
@@ -1214,6 +1222,8 @@ model TokenServiceStep {
   referredFromCounterId String?   @map("referred_from_counter_id")
   referredFromCounter   Counter?  @relation("StepReferredFrom", fields: [referredFromCounterId], references: [id], onDelete: SetNull)
   referredByStaffId     String?   @map("referred_by_staff_id")
+  /// ADR-071: who referred, as named at the time.
+  referredByName        String?   @map("referred_by_name")
   referredAt            DateTime? @map("referred_at")
   referralNote          String?   @map("referral_note")
 
@@ -1222,4 +1232,175 @@ model TokenServiceStep {
   @@index([referredToCounterId])
   @@index([counterId])
   @@map("token_service_steps")
+}
+
+// ---------------------------------------------------------------------------
+// ADR-071: governance history — Organization Head tenure and succession,
+// Admin workspace transfers, and the receipt left by organization deletion.
+// Every row is a snapshot (names and emails as they were), never a live join,
+// so removing an account later never rewrites who did what. Append-only:
+// database triggers (migration 20261008000100) refuse updates to finished
+// history and refuse deletion while the organization still exists.
+// ---------------------------------------------------------------------------
+
+enum HeadTenureStartType {
+  /// The person who registered the organization.
+  FOUNDING
+  /// Took over through an accepted succession.
+  SUCCESSION
+  /// Recorded when tenure history was introduced, for an existing Head.
+  BACKFILL
+}
+
+enum HeadSuccessionReason {
+  RETIREMENT
+  RESIGNATION
+  END_OF_TERM
+  ORGANIZATIONAL_RESTRUCTURING
+  CHANGE_OF_RESPONSIBILITY
+  PERSONAL_REASONS
+  OTHER
+}
+
+enum HeadSuccessionStatus {
+  /// Started; the current Head has not yet entered the emailed code.
+  AWAITING_VERIFICATION
+  /// Verified; the successor's one-time link is out.
+  AWAITING_ACCEPTANCE
+  COMPLETED
+  CANCELLED
+  DECLINED
+  EXPIRED
+}
+
+enum AdminTransferOutcome {
+  /// The previous Admin became an Organization Manager.
+  MANAGER
+  /// The previous Admin became an Executive of the new Admin's workspace.
+  EXECUTIVE
+  /// The previous Admin left the organization.
+  REMOVED
+}
+
+/// One person's time as Organization Head. Exactly one row per organization
+/// has `endedAt` null (partial unique index). `staffId` is an identity
+/// snapshot, deliberately not a foreign key: a former Head's account is
+/// removed at handover, and their tenure must outlive it.
+model OrganizationHeadTenure {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  staffId   String?             @map("staff_id")
+  name      String
+  email     String
+  startedAt DateTime            @default(now()) @map("started_at")
+  startType HeadTenureStartType @map("start_type")
+
+  endedAt   DateTime?             @map("ended_at")
+  endReason HeadSuccessionReason? @map("end_reason")
+  /// Private to the Organization Head (ADR-071 D5).
+  endNote   String?               @map("end_note")
+
+  /// The tenure this one followed, and the succession that started it.
+  predecessorTenureId String? @unique @map("predecessor_tenure_id")
+  successionId        String? @unique @map("succession_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, startedAt])
+  @@map("organization_head_tenures")
+}
+
+/// A handover of the Organization Head role. Only hashes of the emailed
+/// verification code and of the successor's link are stored, never the raw
+/// values. At most one is in progress per organization (partial unique
+/// index on the two open statuses).
+model HeadSuccession {
+  id             String               @id @default(uuid())
+  organizationId String               @map("organization_id")
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  status         HeadSuccessionStatus @default(AWAITING_VERIFICATION)
+
+  initiatedByStaffId String @map("initiated_by_staff_id")
+  initiatedByName    String @map("initiated_by_name")
+  initiatedByEmail   String @map("initiated_by_email")
+
+  successorEmail   String  @map("successor_email")
+  successorName    String  @map("successor_name")
+  /// Set when the successor is already a member of the organization.
+  successorStaffId String? @map("successor_staff_id")
+
+  reason HeadSuccessionReason
+  note   String?
+
+  verificationCodeHash  String?   @map("verification_code_hash")
+  verificationExpiresAt DateTime? @map("verification_expires_at")
+  verificationAttempts  Int       @default(0) @map("verification_attempts")
+
+  successorTokenHash      String?   @unique @map("successor_token_hash")
+  successorTokenExpiresAt DateTime? @map("successor_token_expires_at")
+
+  verifiedAt  DateTime? @map("verified_at")
+  acceptedAt  DateTime? @map("accepted_at")
+  declinedAt  DateTime? @map("declined_at")
+  cancelledAt DateTime? @map("cancelled_at")
+  expiredAt   DateTime? @map("expired_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([organizationId, createdAt])
+  @@map("head_successions")
+}
+
+/// An Admin workspace handed to a replacement Admin: the queue, its
+/// Executives and its operations moved; earlier audit rows stay with the
+/// Admin who performed them.
+model AdminWorkspaceTransfer {
+  id             String       @id @default(uuid())
+  organizationId String       @map("organization_id")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  queueId   String @map("queue_id")
+  queueName String @map("queue_name")
+
+  oldAdminId      String               @map("old_admin_id")
+  oldAdminName    String               @map("old_admin_name")
+  oldAdminEmail   String               @map("old_admin_email")
+  oldAdminOutcome AdminTransferOutcome @map("old_admin_outcome")
+
+  newAdminId           String    @map("new_admin_id")
+  newAdminName         String    @map("new_admin_name")
+  newAdminEmail        String    @map("new_admin_email")
+  /// The replacement's role just before the transfer (ADMIN, MANAGER or STAFF).
+  newAdminPreviousRole StaffRole @map("new_admin_previous_role")
+
+  transferredById    String @map("transferred_by_id")
+  transferredByName  String @map("transferred_by_name")
+  transferredByEmail String @map("transferred_by_email")
+
+  reason          String
+  note            String?
+  executivesMoved Int     @map("executives_moved")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([organizationId, createdAt])
+  @@map("admin_workspace_transfers")
+}
+
+/// ADR-071 D8: the only trace an organization leaves once it is permanently
+/// deleted — its detailed audit and governance history go with it.
+model OrganizationDeletionReceipt {
+  id               String   @id @default(uuid())
+  organizationId   String   @map("organization_id")
+  organizationName String   @map("organization_name")
+  deletedByStaffId String   @map("deleted_by_staff_id")
+  deletedByName    String   @map("deleted_by_name")
+  deletedByEmail   String   @map("deleted_by_email")
+  deletedAt        DateTime @default(now()) @map("deleted_at")
+
+  @@index([organizationId])
+  @@map("organization_deletion_receipts")
 }

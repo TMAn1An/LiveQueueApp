@@ -106,10 +106,10 @@ async function assertEligibleOperator(
   // only then does the workspace rule (ADR-069) decide.
   const staff = await tx.staff.findUnique({ where: { id: staffId }, select: { organizationId: true } });
   if (!staff) {
-    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Associate not found.');
   }
   if (staff.organizationId !== queue.organizationId) {
-    throw new AppError(403, 'STAFF_ORGANIZATION_MISMATCH', 'Staff member does not belong to this organization.');
+    throw new AppError(403, 'STAFF_ORGANIZATION_MISMATCH', 'This person does not belong to this organization.');
   }
   const eligible = await tx.staff.findFirst({
     where: { AND: [{ id: staffId }, operatorEligibilityWhere(queue)] },

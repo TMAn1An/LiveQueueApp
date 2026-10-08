@@ -108,13 +108,13 @@ export async function resendInvitation(
     include: { organization: { select: { name: true } } },
   });
   if (!staff) {
-    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Associate not found.');
   }
   if (staff.status !== 'PENDING_EMAIL_VERIFICATION' || !staff.invitationSentAt) {
     throw new AppError(
       409,
       'INVITATION_NOT_PENDING',
-      'This staff member has already set up their account.',
+      'This associate has already set up their account.',
     );
   }
 

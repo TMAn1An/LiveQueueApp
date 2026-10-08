@@ -1,6 +1,7 @@
 import type { Prisma, Queue, QueueService, QueueStatus, StaffRole } from '@prisma/client';
 import type { z } from 'zod';
 import { prisma } from '../config/prisma';
+import { actorFromAuth, loadActorSnapshot, personSnapshot, recordGovernanceEvent } from './audit.service';
 import { resolveQueueTimezone, resolveRepeatPolicy } from './queueIdentityPolicy.service';
 import { requireScheduleTimezone } from './queueSchedule.service';
 import { AppError } from '../utils/AppError';
@@ -439,7 +440,12 @@ export interface QueueDeletionActor extends WorkspaceActor {
  *    can run a new queue.
  *  - Soft delete: tokens, history and reports are kept.
  */
-export async function softDeleteQueue(actor: QueueDeletionActor, queueId: string, reason: string) {
+export async function softDeleteQueue(
+  actor: QueueDeletionActor,
+  queueId: string,
+  reason: string,
+  ipAddress?: string,
+) {
   const trimmed = reason.trim();
   if (!trimmed) {
     throw new AppError(422, 'DELETION_REASON_REQUIRED', 'Say why this queue is being deleted.');
@@ -501,6 +507,17 @@ export async function softDeleteQueue(actor: QueueDeletionActor, queueId: string
       },
       include: { services: true, admin: ADMIN_SELECT },
     });
+    // ADR-071: the removal and its record (who, role, why) commit together.
+    await recordGovernanceEvent(tx, {
+      actor: actorFromAuth(actor),
+      actorSnapshot: await loadActorSnapshot(tx, actor.staffId),
+      action: 'queue_deleted_or_archived',
+      entityType: 'queue',
+      entityId: queue.id,
+      metadata: { name: queue.name, reason: trimmed, cancelledWaiting: waitingIds.length },
+      workspaceAdminId: queue.adminId,
+      ipAddress,
+    });
     return { queue: serializeQueue(queue, actor), cancelledTokenIds: waitingIds };
   });
 }
@@ -515,7 +532,12 @@ export async function softDeleteQueue(actor: QueueDeletionActor, queueId: string
  * Admin, another workspace's Executive) is released and that counter turned
  * off — refused while they are serving someone.
  */
-export async function assignQueueAdmin(actor: WorkspaceActor, queueId: string, adminId: string) {
+export async function assignQueueAdmin(
+  actor: WorkspaceActor & { email: string },
+  queueId: string,
+  adminId: string,
+  ipAddress?: string,
+) {
   if (actor.role !== 'OWNER') {
     throw new AppError(403, 'FORBIDDEN', 'Only the Organization Head can assign a queue to an Admin.');
   }
@@ -553,6 +575,16 @@ export async function assignQueueAdmin(actor: WorkspaceActor, queueId: string, a
       where: { id: queueId },
       data: { adminId },
       include: { services: true, admin: ADMIN_SELECT },
+    });
+    await recordGovernanceEvent(tx, {
+      actor: actorFromAuth(actor),
+      actorSnapshot: await loadActorSnapshot(tx, actor.staffId),
+      action: 'queue_updated',
+      entityType: 'queue',
+      entityId: queueId,
+      metadata: { changedFields: ['adminId'], adminId, admin: personSnapshot(admin) },
+      workspaceAdminId: adminId,
+      ipAddress,
     });
     return serializeQueue(updated, actor);
   });

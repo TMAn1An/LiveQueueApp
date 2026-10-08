@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import * as realtime from '../realtime/emit';
 import * as authService from '../services/auth.service';
 import * as auditService from '../services/audit.service';
 import * as passwordResetService from '../services/passwordReset.service';
@@ -144,6 +145,8 @@ export async function validatePasswordResetToken(req: Request, res: Response) {
 export async function resetPassword(req: Request, res: Response) {
   const staff = await passwordResetService.resetPassword(req.body.token, req.body.password);
   res.status(200).json({ success: true, data: { reset: true } });
+  // ADR-058/071: every session ended — open sockets too.
+  realtime.disconnectStaff(staff.id);
   await auditService.recordAuditEventSafely({
     actor: { staffId: staff.id, organizationId: staff.organizationId, staffEmail: staff.email },
     action: 'password_reset',

@@ -46,9 +46,9 @@ export const createStaffSchema = {
       .regex(LATIN_NAME_PATTERN, LATIN_NAME_MESSAGE),
     email: emailSchema,
     role: manageableRole,
-    /** ADR-069: for an Executive invited by the Organization Head — the
-     * Admin workspace they join (omit for organization-level). An Admin's
-     * invitations always go into their own workspace. */
+    /** ADR-069/071 D13: for an Executive invited by the Organization Head —
+     * the Admin workspace they join (required). An Admin's invitations always
+     * go into their own workspace. */
     workspaceAdminId: z.string().uuid('workspaceAdminId must be a valid id.').optional(),
   }),
 };
@@ -73,6 +73,9 @@ export const updateStaffSchema = {
     password: passwordSchema.optional(),
     role: manageableRole.optional(),
     status: staffStatus.optional(),
+    /** ADR-071: the destination Admin workspace when making someone an
+     * Executive (required then, refused otherwise). */
+    workspaceAdminId: z.string().uuid('workspaceAdminId must be a valid id.').optional(),
   }),
 };
 

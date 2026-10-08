@@ -64,9 +64,18 @@ describe('ADR-057 — nobody removes themselves directly', () => {
 
 describe('ADR-057 — direct removal', () => {
   it('the owner removes an admin and a staff member', async () => {
-    const { owner, admin, staff } = await setup();
-    expect((await remove(owner.accessToken, admin.staffId)).status).toBe(204);
+    const { owner, admin, staff, staff2 } = await setup();
+    // ADR-071: an Admin whose workspace still has Executives is not removed
+    // — the workspace is handed to a replacement first.
+    const blocked = await remove(owner.accessToken, admin.staffId);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error.code).toBe('ADMIN_HAS_EXECUTIVES');
+    expect(blocked.body.error.details).toEqual({ executiveCount: 2 });
+    expect(await exists(admin.staffId)).toBe(true);
+
     expect((await remove(owner.accessToken, staff.staffId)).status).toBe(204);
+    expect((await remove(owner.accessToken, staff2.staffId)).status).toBe(204);
+    expect((await remove(owner.accessToken, admin.staffId)).status).toBe(204);
     expect(await exists(admin.staffId)).toBe(false);
     expect(await exists(staff.staffId)).toBe(false);
   });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { api, createRestrictedStaff, createStaffWithRole, registerOwner } from './helpers/app';
+import { api, createRestrictedStaff, createStaffWithRole, registerOwner, workspaceAdminFor } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { STAFF_PERMISSIONS, ADMIN_PERMISSIONS } from '../src/constants/permissions';
 
@@ -11,6 +11,10 @@ async function createStaff(
   accessToken: string,
   overrides: Record<string, unknown> = {},
 ) {
+  // ADR-071 D13: the Head always places a new Executive in an Admin workspace.
+  if ((overrides.role ?? 'ADMIN') === 'STAFF' && !('workspaceAdminId' in overrides)) {
+    overrides = { ...overrides, workspaceAdminId: await workspaceAdminFor(accessToken) };
+  }
   return api()
     .post('/api/staff')
     .set('Authorization', `Bearer ${accessToken}`)
@@ -153,7 +157,7 @@ describe('PUT /api/staff/:staffId', () => {
     const res = await api()
       .put(`/api/staff/${created.body.data.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ name: 'Renamed', role: 'STAFF', status: 'SUSPENDED' });
+      .send({ name: 'Renamed', role: 'STAFF', status: 'SUSPENDED', workspaceAdminId: await workspaceAdminFor(ctx.accessToken) });
 
     expect(res.status).toBe(200);
     expect(res.body.data.name).toBe('Renamed');
@@ -174,7 +178,7 @@ describe('PUT /api/staff/:staffId', () => {
     await api()
       .put(`/api/staff/${created.body.data.id}`)
       .set('Authorization', `Bearer ${ctx.accessToken}`)
-      .send({ role: 'STAFF' });
+      .send({ role: 'STAFF', workspaceAdminId: await workspaceAdminFor(ctx.accessToken) });
 
     const loginRes = await api()
       .post('/api/auth/login')

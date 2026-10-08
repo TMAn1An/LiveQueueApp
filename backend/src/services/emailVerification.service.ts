@@ -108,7 +108,7 @@ export async function verifyEmailToken(
 export async function resendVerificationEmail(staffId: string): Promise<void> {
   const staff = await prisma.staff.findUnique({ where: { id: staffId } });
   if (!staff) {
-    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Associate not found.');
   }
   if (staff.status !== 'PENDING_EMAIL_VERIFICATION') {
     throw new AppError(409, 'ALREADY_VERIFIED', 'This account is already verified.');

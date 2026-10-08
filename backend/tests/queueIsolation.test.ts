@@ -15,7 +15,7 @@ import {
   setCounterStatus,
   servingToken,
 } from './helpers/app';
-import { resetDb } from './helpers/db';
+import { resetDb, makeLegacyAdminlessQueues } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 
 /**
@@ -43,7 +43,7 @@ async function twoQueues({ legacy = false }: { legacy?: boolean } = {}) {
   const queueA = await createQueue(ctx.accessToken, { name: 'Pharmacy', tokenPrefix: 'A' });
   const queueB = await createQueue(ctx.accessToken, { name: 'Registration', tokenPrefix: 'B' });
   if (legacy) {
-    await prisma.queue.updateMany({ where: { id: { in: [queueA.id, queueB.id] } }, data: { adminId: null } });
+    await makeLegacyAdminlessQueues([queueA.id, queueB.id]);
   }
   const serviceA = await createService(ctx.accessToken, queueA.id);
   const serviceB = await createService(ctx.accessToken, queueB.id);

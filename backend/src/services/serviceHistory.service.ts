@@ -105,6 +105,8 @@ const HISTORY_SELECT = {
       stepNumber: true,
       status: true,
       staffId: true,
+      staffName: true,
+      referredByName: true,
       calledAt: true,
       startedAt: true,
       completedAt: true,
@@ -150,19 +152,6 @@ export async function listServiceHistory(
   const formFieldDefs = await fetchFormFieldDefs(
     tokens.map((token) => ({ queueId: token.queueId, formVersion: token.formVersion })),
   );
-  // Who served each step, by name — one lookup for the whole page.
-  const stepStaffIds = [
-    ...new Set(tokens.flatMap((t) => t.journeySteps.map((s) => s.staffId)).filter((id): id is string => !!id)),
-  ];
-  const staffNames = new Map(
-    (
-      await prisma.staff.findMany({
-        where: { id: { in: stepStaffIds }, organizationId: actor.organizationId },
-        select: { id: true, name: true },
-      })
-    ).map((row) => [row.id, row.name]),
-  );
-
   return {
     data: tokens.map((token) => ({
       tokenId: token.id,
@@ -183,7 +172,9 @@ export async function listServiceHistory(
         status: step.status,
         service: { id: step.service.id, name: step.service.serviceName },
         counter: step.counter,
-        executiveName: step.staffId ? (staffNames.get(step.staffId) ?? null) : null,
+        // ADR-071: the name recorded when the step was called — never the
+        // operator's current name, and still there after they are removed.
+        executiveName: step.staffName,
         calledAt: step.calledAt,
         startedAt: step.startedAt,
         completedAt: step.completedAt,
@@ -194,6 +185,8 @@ export async function listServiceHistory(
               to: step.referredToCounter,
               at: step.referredAt,
               note: step.referralNote,
+              /** ADR-071: who referred, as recorded at the time. */
+              byName: step.referredByName,
               /** ADR-070: the target was no longer open, so another open
                * counter for the same service took the referral. The
                * referral itself is kept as made; the step's counter says

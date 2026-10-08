@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, registerOwner } from './helpers/app';
+import { api, registerOwner, workspaceAdminFor } from './helpers/app';
 import { resetDb } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 import * as emailService from '../src/services/email.service';
@@ -31,7 +31,9 @@ beforeEach(async () => {
   });
 });
 
-function createStaff(accessToken: string, body: Record<string, unknown> = {}) {
+async function createStaff(accessToken: string, body: Record<string, unknown> = {}) {
+  const role = (body.role as string | undefined) ?? 'STAFF';
+  const workspace = role === 'STAFF' && !('workspaceAdminId' in body) ? { workspaceAdminId: await workspaceAdminFor(accessToken) } : {};
   return api()
     .post('/api/staff')
     .set('Authorization', `Bearer ${accessToken}`)
@@ -39,6 +41,7 @@ function createStaff(accessToken: string, body: Record<string, unknown> = {}) {
       name: 'Rafi Ahmed',
       email: `invitee-${Math.random().toString(36).slice(2, 8)}@example.com`,
       role: 'STAFF',
+      ...workspace,
       ...body,
     });
 }

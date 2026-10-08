@@ -1645,12 +1645,14 @@ export async function completeToken(
       data: { status: 'COMPLETED', completedAt: now },
     });
     if (referral) {
+      const referrer = await tx.staff.findUnique({ where: { id: actor.staffId }, select: { name: true } });
       await tx.tokenServiceStep.updateMany({
         where: { tokenId, stepNumber: nextStep.stepNumber, status: 'PENDING' },
         data: {
           referredToCounterId: referral.toCounterId,
           referredFromCounterId: referral.fromCounterId,
           referredByStaffId: actor.staffId,
+          referredByName: referrer?.name ?? null,
           referredAt: now,
           referralNote: opts.referralNote?.trim() || null,
         },
@@ -2268,9 +2270,12 @@ async function claimForCounter(
   });
   if (result.count === 0) return false;
   if (current?.currentStepNumber != null) {
+    // ADR-071: who served the step is recorded as it was at the time — a
+    // later rename or removal never rewrites past history.
+    const operator = await tx.staff.findUnique({ where: { id: staffId }, select: { name: true } });
     await tx.tokenServiceStep.updateMany({
       where: { tokenId, stepNumber: current.currentStepNumber, status: 'PENDING' },
-      data: { status: 'CALLED', counterId, staffId, calledAt: now },
+      data: { status: 'CALLED', counterId, staffId, staffName: operator?.name ?? null, calledAt: now },
     });
   }
   return true;

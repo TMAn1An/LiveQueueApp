@@ -97,8 +97,11 @@ export interface RecordAuditEventInput {
  * counter, token, organization-deletion, blocked-device, login/logout) is
  * Step 5.
  */
-export async function recordAuditEvent(input: RecordAuditEventInput) {
-  return prisma.auditLog.create({
+export async function recordAuditEvent(
+  input: RecordAuditEventInput,
+  client: Prisma.TransactionClient = prisma,
+) {
+  return client.auditLog.create({
     data: {
       organizationId: input.actor.organizationId,
       staffId: input.actor.staffId,
@@ -112,6 +115,69 @@ export async function recordAuditEvent(input: RecordAuditEventInput) {
         input.workspaceAdminId !== undefined ? input.workspaceAdminId : defaultWorkspace(input.actor),
     },
   });
+}
+
+/** A person as an audit snapshot: who they were at the time, never a live
+ * reference. Holds no secrets — only identity and authority. */
+export interface PersonSnapshot {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status?: string;
+  workspaceAdminId?: string | null;
+}
+
+export function personSnapshot(staff: {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status?: string;
+  workspaceAdminId?: string | null;
+}): PersonSnapshot {
+  return {
+    id: staff.id,
+    name: staff.name,
+    email: staff.email,
+    role: staff.role,
+    ...(staff.status !== undefined ? { status: staff.status } : {}),
+    ...(staff.workspaceAdminId !== undefined ? { workspaceAdminId: staff.workspaceAdminId } : {}),
+  };
+}
+
+/**
+ * ADR-071: governance and security changes (roles, status, removals,
+ * workspace and queue ownership, queue deletion, invitations, Head
+ * succession) write their audit row through the *same* transaction client as
+ * the change itself. The change and its record commit together or not at
+ * all — a failure here is never swallowed; it rolls the change back.
+ *
+ * The acting person is recorded as a full snapshot (name and role as well as
+ * id and email), so the row stays meaningful after their account is renamed
+ * or removed.
+ */
+export async function recordGovernanceEvent(
+  tx: Prisma.TransactionClient,
+  input: RecordAuditEventInput & { actorSnapshot?: PersonSnapshot },
+) {
+  const { actorSnapshot, ...rest } = input;
+  return recordAuditEvent(
+    {
+      ...rest,
+      metadata: { ...(actorSnapshot ? { actor: actorSnapshot } : {}), ...(input.metadata ?? {}) },
+    },
+    tx,
+  );
+}
+
+/** Loads the acting person's snapshot inside the governance transaction. */
+export async function loadActorSnapshot(tx: Prisma.TransactionClient, staffId: string): Promise<PersonSnapshot | undefined> {
+  const row = await tx.staff.findUnique({
+    where: { id: staffId },
+    select: { id: true, name: true, email: true, role: true },
+  });
+  return row ? personSnapshot(row) : undefined;
 }
 
 /**

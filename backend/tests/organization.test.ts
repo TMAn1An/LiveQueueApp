@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { api, createRestrictedStaff, createStaffWithRole, registerOwner } from './helpers/app';
-import { resetDb } from './helpers/db';
+import { resetDb, createLegacyAdminlessQueue } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 
 beforeEach(async () => {
@@ -132,9 +132,7 @@ describe('DELETE /api/organizations/me', () => {
 
   it('deletes the organization and cascades to staff, sessions, queues, and tokens when confirmed', async () => {
     const ctx = await registerOwner({ organizationName: 'Acme Corp' });
-    const queue = await prisma.queue.create({
-      data: { organizationId: ctx.organizationId, name: 'Q1', tokenPrefix: 'A' },
-    });
+    const queue = await createLegacyAdminlessQueue({ organizationId: ctx.organizationId, name: 'Q1', tokenPrefix: 'A' });
     const service = await prisma.queueService.create({
       data: { queueId: queue.id, serviceName: 'S1', durationMinutes: 5 },
     });

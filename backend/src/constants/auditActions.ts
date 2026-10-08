@@ -32,6 +32,19 @@ export const AUDIT_ACTIONS = [
   'token_referred',
   'token_duration_updated',
   'organization_deletion_requested',
+  // ADR-071: governance — every one written in the same transaction as the
+  // change it records.
+  'invitation_accepted',
+  'admin_workspace_transferred',
+  'head_succession_started',
+  'head_succession_verified',
+  'head_succession_cancelled',
+  'head_succession_declined',
+  'head_succession_expired',
+  'head_succession_completed',
+  'head_tenure_ended',
+  'head_tenure_started',
+  'staff_sessions_revoked',
   'blocked_device_changed',
 ] as const;
 

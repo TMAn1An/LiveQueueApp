@@ -73,22 +73,14 @@ export async function updateStatus(req: Request, res: Response) {
 }
 
 export async function remove(req: Request, res: Response) {
+  // ADR-071: the deletion and its audit row commit together in the service.
   const { queue, cancelledTokenIds } = await queueService.softDeleteQueue(
     req.auth!,
     req.params.queueId as string,
     req.body.reason,
+    req.ip,
   );
   res.status(200).json({ success: true, data: queue });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'queue_deleted_or_archived',
-    entityType: 'queue',
-    entityId: queue.id,
-    // ADR-069: the reason is part of the record the Head and Managers audit.
-    metadata: { name: queue.name, reason: queue.deletionReason, cancelledWaiting: cancelledTokenIds.length },
-    workspaceAdminId: queue.adminId,
-    ipAddress: req.ip,
-  });
   await realtime.emitQueueUpdated(queue);
   for (const tokenId of cancelledTokenIds) {
     await realtime.emitTokenCancelled(tokenId);
@@ -102,17 +94,9 @@ export async function assignAdmin(req: Request, res: Response) {
     req.auth!,
     req.params.queueId as string,
     req.body.adminId,
+    req.ip,
   );
   res.status(200).json({ success: true, data: queue });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'queue_updated',
-    entityType: 'queue',
-    entityId: queue.id,
-    metadata: { changedFields: ['adminId'], adminId: queue.adminId },
-    workspaceAdminId: queue.adminId,
-    ipAddress: req.ip,
-  });
   await realtime.emitQueueUpdated(queue);
 }
 

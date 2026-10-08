@@ -3,6 +3,13 @@ import { prisma } from '../config/prisma';
 import { assertNoActiveServiceForStaff } from './counterAccess.service';
 import { releaseOperatorCounter } from './counter.service';
 import { AppError } from '../utils/AppError';
+import {
+  actorFromAuth,
+  loadActorSnapshot,
+  personSnapshot,
+  recordGovernanceEvent,
+} from './audit.service';
+import { assertAdminMayLeaveWorkspace, lockOrganization } from './governance.service';
 
 /**
  * ADR-057: who may end whose membership, and how.
@@ -14,14 +21,42 @@ import { AppError } from '../utils/AppError';
  * STAFF        | nobody                  | themselves only
  *
  * Nobody removes themselves directly, and nobody may act against the OWNER;
- * an owner who wants out deletes the organization instead. Every rule here
- * is enforced on the server — the dashboard only mirrors it.
+ * an Organization Head who wants out hands leadership over (ADR-071 Head
+ * succession) or deletes the organization. ADR-071: an Admin who still owns
+ * a live queue, or still has Executives, cannot be removed or leave until
+ * their workspace is handed to a replacement Admin. Every removal and
+ * request decision is audited in its own transaction. Every rule here is
+ * enforced on the server — the dashboard only mirrors it.
  */
 
 export interface MembershipActor {
   staffId: string;
   organizationId: string;
   role: StaffRole;
+  email: string;
+  workspaceAdminId?: string | null;
+}
+
+async function auditInTx(
+  tx: Prisma.TransactionClient,
+  actor: MembershipActor,
+  ipAddress: string | undefined,
+  event: Omit<Parameters<typeof recordGovernanceEvent>[1], 'actor' | 'actorSnapshot' | 'ipAddress'>,
+) {
+  await recordGovernanceEvent(tx, {
+    ...event,
+    actor: actorFromAuth(actor),
+    actorSnapshot: await loadActorSnapshot(tx, actor.staffId),
+    ipAddress,
+  });
+}
+
+/** An event about a member belongs to that member's workspace (an
+ * Executive's Admin, an Admin's own); otherwise organization level. */
+function memberWorkspace(target: Pick<Staff, 'id' | 'role' | 'workspaceAdminId'>): string | null {
+  if (target.role === 'STAFF') return target.workspaceAdminId;
+  if (target.role === 'ADMIN') return target.id;
+  return null;
 }
 
 export function serializeRemovalRequest(request: MembershipRemovalRequest) {
@@ -30,7 +65,11 @@ export function serializeRemovalRequest(request: MembershipRemovalRequest) {
     requestType: request.requestType,
     status: request.status,
     reason: request.reason,
-    requester: { id: request.requesterId, name: request.requesterName, email: request.requesterEmail },
+    requester: {
+      id: request.requesterId,
+      name: request.requesterName,
+      email: request.requesterEmail,
+    },
     target: {
       id: request.targetStaffId,
       name: request.targetName,
@@ -53,7 +92,7 @@ async function findMember(
 ): Promise<Staff> {
   const staff = await client.staff.findFirst({ where: { id: staffId, organizationId } });
   if (!staff) {
-    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Associate not found.');
   }
   return staff;
 }
@@ -65,7 +104,7 @@ function assertMayRemoveDirectly(actor: MembershipActor, target: Staff): void {
       403,
       'CANNOT_REMOVE_SELF',
       actor.role === 'OWNER'
-        ? 'The owner cannot leave the organization. Delete the organization instead.'
+        ? 'The Organization Head cannot leave directly. Transfer organization leadership first, or delete the organization.'
         : 'You cannot remove yourself. Send a leave request to the owner instead.',
     );
   }
@@ -76,7 +115,7 @@ function assertMayRemoveDirectly(actor: MembershipActor, target: Staff): void {
   // ADR-069: an Admin removes only the Executives of their own workspace.
   if (actor.role === 'ADMIN' && target.role === 'STAFF') {
     if (target.workspaceAdminId === actor.staffId) return;
-    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Associate not found.');
   }
   if (actor.role === 'ADMIN' && target.role === 'ADMIN') {
     throw new AppError(
@@ -114,6 +153,9 @@ async function endMembership(
       data: { status: 'CANCELLED', activeSlot: id, reviewedAt: new Date() },
     });
   }
+  // ADR-071: never leave a live queue without its Admin, or Executives
+  // without a workspace.
+  await assertAdminMayLeaveWorkspace(tx, target);
   // ADR-064: never orphan a person this member called or is serving.
   await assertNoActiveServiceForStaff(tx, target.id);
   // ADR-069: their counter is turned off and released before the row goes,
@@ -125,16 +167,28 @@ async function endMembership(
     where: { id: target.id, organizationId: target.organizationId },
   });
   if (count === 0) {
-    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Associate not found.');
   }
 }
 
 /** DELETE /api/staff/:staffId. Returns the removed member's snapshot for the audit row. */
-export async function removeMember(actor: MembershipActor, targetStaffId: string) {
+export async function removeMember(
+  actor: MembershipActor,
+  targetStaffId: string,
+  ipAddress?: string,
+) {
   return prisma.$transaction(async (tx) => {
+    await lockOrganization(tx, actor.organizationId);
     const target = await findMember(tx, actor.organizationId, targetStaffId);
     assertMayRemoveDirectly(actor, target);
     await endMembership(tx, target);
+    await auditInTx(tx, actor, ipAddress, {
+      action: 'staff_removed',
+      entityType: 'staff',
+      entityId: target.id,
+      metadata: { email: target.email, role: target.role, target: personSnapshot(target) },
+      workspaceAdminId: memberWorkspace(target),
+    });
     return { id: target.id, email: target.email, role: target.role };
   });
 }
@@ -142,6 +196,7 @@ export async function removeMember(actor: MembershipActor, targetStaffId: string
 export async function createRemovalRequest(
   actor: MembershipActor,
   input: { targetStaffId: string; reason?: string },
+  ipAddress?: string,
 ) {
   const [requester, target] = await Promise.all([
     findMember(prisma, actor.organizationId, actor.staffId),
@@ -155,7 +210,7 @@ export async function createRemovalRequest(
       403,
       isSelf ? 'CANNOT_REMOVE_SELF' : 'OWNER_REMOVES_DIRECTLY',
       isSelf
-        ? 'The owner cannot leave the organization. Delete the organization instead.'
+        ? 'The Organization Head cannot leave directly. Transfer organization leadership first, or delete the organization.'
         : 'As the owner, remove this member directly.',
     );
   }
@@ -171,7 +226,7 @@ export async function createRemovalRequest(
   }
   if (!isSelf && target.role === 'STAFF' && target.workspaceAdminId !== actor.staffId) {
     // ADR-069: another workspace's Executive is not this Admin's to remove.
-    throw new AppError(404, 'STAFF_NOT_FOUND', 'Staff member not found.');
+    throw new AppError(404, 'STAFF_NOT_FOUND', 'Associate not found.');
   }
   if (!isSelf && target.role === 'STAFF') {
     // An admin removes staff directly; a request would only wait on the owner
@@ -185,21 +240,34 @@ export async function createRemovalRequest(
 
   const requestType = isSelf ? 'SELF_LEAVE' : 'ADMIN_REMOVAL_REQUEST';
   try {
-    const request = await prisma.membershipRemovalRequest.create({
-      data: {
-        organizationId: actor.organizationId,
-        requestType,
-        reason: input.reason || null,
-        requesterId: requester.id,
-        requesterName: requester.name,
-        requesterEmail: requester.email,
-        targetStaffId: target.id,
-        targetName: target.name,
-        targetEmail: target.email,
-        targetRole: target.role,
-      },
+    return await prisma.$transaction(async (tx) => {
+      const request = await tx.membershipRemovalRequest.create({
+        data: {
+          organizationId: actor.organizationId,
+          requestType,
+          reason: input.reason || null,
+          requesterId: requester.id,
+          requesterName: requester.name,
+          requesterEmail: requester.email,
+          targetStaffId: target.id,
+          targetName: target.name,
+          targetEmail: target.email,
+          targetRole: target.role,
+        },
+      });
+      await auditInTx(tx, actor, ipAddress, {
+        action: 'membership_request_created',
+        entityType: 'membership_removal_request',
+        entityId: request.id,
+        metadata: {
+          requestType: request.requestType,
+          targetStaffId: target.id,
+          target: personSnapshot(target),
+        },
+        workspaceAdminId: memberWorkspace(target),
+      });
+      return serializeRemovalRequest(request);
     });
-    return serializeRemovalRequest(request);
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       throw new AppError(
@@ -288,9 +356,11 @@ export async function approveRemovalRequest(
   actor: MembershipActor,
   requestId: string,
   reviewNote?: string,
+  ipAddress?: string,
 ) {
   assertOwner(actor);
   return prisma.$transaction(async (tx) => {
+    await lockOrganization(tx, actor.organizationId);
     const request = await findRequest(tx, actor.organizationId, requestId);
     const owner = await findMember(tx, actor.organizationId, actor.staffId);
     const target = await tx.staff.findFirst({
@@ -300,6 +370,17 @@ export async function approveRemovalRequest(
       // Already gone some other way — nothing to approve, so the request is
       // closed as moot rather than left pending forever.
       const closed = await closeRequest(tx, request, 'CANCELLED', null);
+      await auditInTx(tx, actor, ipAddress, {
+        action: 'membership_request_approved',
+        entityType: 'membership_removal_request',
+        entityId: closed.id,
+        metadata: {
+          requestType: closed.requestType,
+          targetStaffId: closed.targetStaffId,
+          outcome: closed.status,
+        },
+        workspaceAdminId: null,
+      });
       return { request: serializeRemovalRequest(closed), removed: null };
     }
     // The owner's own direct-removal rules still apply (never the owner).
@@ -312,6 +393,29 @@ export async function approveRemovalRequest(
       reviewNote,
     );
     await endMembership(tx, target, request.id);
+    await auditInTx(tx, actor, ipAddress, {
+      action: 'membership_request_approved',
+      entityType: 'membership_removal_request',
+      entityId: approved.id,
+      metadata: {
+        requestType: approved.requestType,
+        targetStaffId: target.id,
+        outcome: approved.status,
+      },
+      workspaceAdminId: memberWorkspace(target),
+    });
+    await auditInTx(tx, actor, ipAddress, {
+      action: 'staff_removed',
+      entityType: 'staff',
+      entityId: target.id,
+      metadata: {
+        email: target.email,
+        role: target.role,
+        removalRequestId: approved.id,
+        target: personSnapshot(target),
+      },
+      workspaceAdminId: memberWorkspace(target),
+    });
     return {
       request: serializeRemovalRequest(approved),
       removed: { id: target.id, email: target.email, role: target.role },
@@ -323,6 +427,7 @@ export async function rejectRemovalRequest(
   actor: MembershipActor,
   requestId: string,
   reviewNote?: string,
+  ipAddress?: string,
 ) {
   assertOwner(actor);
   return prisma.$transaction(async (tx) => {
@@ -335,18 +440,40 @@ export async function rejectRemovalRequest(
       { id: owner.id, name: owner.name },
       reviewNote,
     );
+    await auditInTx(tx, actor, ipAddress, {
+      action: 'membership_request_rejected',
+      entityType: 'membership_removal_request',
+      entityId: rejected.id,
+      metadata: { requestType: rejected.requestType, targetStaffId: rejected.targetStaffId },
+      workspaceAdminId: null,
+    });
     return serializeRemovalRequest(rejected);
   });
 }
 
 /** Only the person who made a request may withdraw it. */
-export async function cancelRemovalRequest(actor: MembershipActor, requestId: string) {
+export async function cancelRemovalRequest(
+  actor: MembershipActor,
+  requestId: string,
+  ipAddress?: string,
+) {
   return prisma.$transaction(async (tx) => {
     const request = await findRequest(tx, actor.organizationId, requestId);
     if (request.requesterId !== actor.staffId) {
-      throw new AppError(403, 'FORBIDDEN', 'Only the person who made this request can withdraw it.');
+      throw new AppError(
+        403,
+        'FORBIDDEN',
+        'Only the person who made this request can withdraw it.',
+      );
     }
     const cancelled = await closeRequest(tx, request, 'CANCELLED', null);
+    await auditInTx(tx, actor, ipAddress, {
+      action: 'membership_request_cancelled',
+      entityType: 'membership_removal_request',
+      entityId: cancelled.id,
+      metadata: { requestType: cancelled.requestType },
+      workspaceAdminId: undefined,
+    });
     return serializeRemovalRequest(cancelled);
   });
 }

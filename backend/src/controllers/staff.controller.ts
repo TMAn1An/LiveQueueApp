@@ -16,19 +16,9 @@ export async function list(req: Request, res: Response) {
 }
 
 export async function create(req: Request, res: Response) {
-  const staff = await staffService.createStaff(req.auth!, req.body);
+  // ADR-071: the account and its staff_created audit row commit together.
+  const staff = await staffService.createStaff(req.auth!, req.body, req.ip);
   res.status(201).json({ success: true, data: staff });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'staff_created',
-    entityType: 'staff',
-    entityId: staff.id,
-    // Conservative on purpose: role indicates seniority without duplicating
-    // the full permissions array in a second, easily-stale place.
-    metadata: { email: staff.email, role: staff.role, workspaceAdminId: staff.workspaceAdminId },
-    workspaceAdminId: staff.role === 'STAFF' ? staff.workspaceAdminId : null,
-    ipAddress: req.ip,
-  });
 }
 
 export async function get(req: Request, res: Response) {
@@ -37,23 +27,14 @@ export async function get(req: Request, res: Response) {
 }
 
 export async function update(req: Request, res: Response) {
-  const staff = await staffService.updateStaff(
-    req.auth!,
-    req.params.staffId as string,
-    req.body,
-    { staffId: req.auth!.staffId, role: req.auth!.role },
-  );
-  res.status(200).json({ success: true, data: staff });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'staff_updated',
-    entityType: 'staff',
-    entityId: staff.id,
-    // Field names only, never values — req.body may include a new
-    // `password`, whose value must never be recorded (only that it changed).
-    metadata: { changedFields: Object.keys(req.body as object) },
-    ipAddress: req.ip,
-  });
+  // ADR-071: the change and its audit row (with before/after values) commit
+  // together inside the service.
+  const result = await staffService.updateStaff(req.auth!, req.params.staffId as string, req.body, req.ip);
+  res.status(200).json({ success: true, data: result.staff });
+  // A new role, a suspension or ended sessions change which rooms this
+  // person may hear: their open sockets are closed so they reconnect with
+  // their current authority.
+  if (result.authorizationChanged) realtime.disconnectStaff(result.staff.id);
 }
 
 function membershipActor(req: Request): membershipService.MembershipActor {
@@ -61,24 +42,16 @@ function membershipActor(req: Request): membershipService.MembershipActor {
     staffId: req.auth!.staffId,
     organizationId: req.auth!.organizationId,
     role: req.auth!.role,
+    email: req.auth!.email,
+    workspaceAdminId: req.auth!.workspaceAdminId,
   };
 }
 
-/** ADR-057: direct removal, under the owner/admin matrix. */
+/** ADR-057: direct removal, under the owner/admin matrix. ADR-071: the
+ * removal and its audit row commit together. */
 export async function remove(req: Request, res: Response) {
-  const removed = await membershipService.removeMember(
-    membershipActor(req),
-    req.params.staffId as string,
-  );
+  const removed = await membershipService.removeMember(membershipActor(req), req.params.staffId as string, req.ip);
   res.status(204).send();
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'staff_removed',
-    entityType: 'staff',
-    entityId: removed.id,
-    metadata: { email: removed.email, role: removed.role },
-    ipAddress: req.ip,
-  });
   realtime.disconnectStaff(removed.id);
 }
 
@@ -89,16 +62,8 @@ export async function listRemovalRequests(req: Request, res: Response) {
 }
 
 export async function createRemovalRequest(req: Request, res: Response) {
-  const request = await membershipService.createRemovalRequest(membershipActor(req), req.body);
+  const request = await membershipService.createRemovalRequest(membershipActor(req), req.body, req.ip);
   res.status(201).json({ success: true, data: request });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'membership_request_created',
-    entityType: 'membership_removal_request',
-    entityId: request.id,
-    metadata: { requestType: request.requestType, targetStaffId: request.target.id },
-    ipAddress: req.ip,
-  });
 }
 
 export async function approveRemovalRequest(req: Request, res: Response) {
@@ -106,35 +71,10 @@ export async function approveRemovalRequest(req: Request, res: Response) {
     membershipActor(req),
     req.params.requestId as string,
     req.body.reviewNote,
+    req.ip,
   );
   res.status(200).json({ success: true, data: result.request });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'membership_request_approved',
-    entityType: 'membership_removal_request',
-    entityId: result.request.id,
-    metadata: {
-      requestType: result.request.requestType,
-      targetStaffId: result.request.target.id,
-      outcome: result.request.status,
-    },
-    ipAddress: req.ip,
-  });
-  if (result.removed) {
-    await auditService.recordAuditEventSafely({
-      actor: auditService.actorFromAuth(req.auth!),
-      action: 'staff_removed',
-      entityType: 'staff',
-      entityId: result.removed.id,
-      metadata: {
-        email: result.removed.email,
-        role: result.removed.role,
-        removalRequestId: result.request.id,
-      },
-      ipAddress: req.ip,
-    });
-    realtime.disconnectStaff(result.removed.id);
-  }
+  if (result.removed) realtime.disconnectStaff(result.removed.id);
 }
 
 export async function rejectRemovalRequest(req: Request, res: Response) {
@@ -142,32 +82,18 @@ export async function rejectRemovalRequest(req: Request, res: Response) {
     membershipActor(req),
     req.params.requestId as string,
     req.body.reviewNote,
+    req.ip,
   );
   res.status(200).json({ success: true, data: request });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'membership_request_rejected',
-    entityType: 'membership_removal_request',
-    entityId: request.id,
-    metadata: { requestType: request.requestType, targetStaffId: request.target.id },
-    ipAddress: req.ip,
-  });
 }
 
 export async function cancelRemovalRequest(req: Request, res: Response) {
   const request = await membershipService.cancelRemovalRequest(
     membershipActor(req),
     req.params.requestId as string,
+    req.ip,
   );
   res.status(200).json({ success: true, data: request });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'membership_request_cancelled',
-    entityType: 'membership_removal_request',
-    entityId: request.id,
-    metadata: { requestType: request.requestType },
-    ipAddress: req.ip,
-  });
 }
 
 /**
@@ -199,16 +125,8 @@ export async function setWorkspace(req: Request, res: Response) {
     req.auth!,
     req.params.staffId as string,
     req.body.adminId,
+    req.ip,
   );
   res.status(200).json({ success: true, data: staff });
-  await auditService.recordAuditEventSafely({
-    actor: auditService.actorFromAuth(req.auth!),
-    action: 'staff_updated',
-    entityType: 'staff',
-    entityId: staff.id,
-    metadata: { changedFields: ['workspaceAdminId'], workspaceAdminId: staff.workspaceAdminId },
-    workspaceAdminId: staff.workspaceAdminId,
-    ipAddress: req.ip,
-  });
   realtime.disconnectStaff(staff.id);
 }

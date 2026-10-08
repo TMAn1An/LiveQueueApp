@@ -518,3 +518,22 @@ export async function setFormFields(accessToken: string, queueId: string, fields
   }
   return res.body.data as { formVersion: number; fields: unknown[] };
 }
+
+/**
+ * ADR-071 D13: every Executive belongs to an Admin workspace. Tests that make
+ * Executives as the Organization Head use this to get (and reuse) an Admin of
+ * the caller's organization.
+ */
+const workspaceAdminCache = new Map<string, string>();
+export async function workspaceAdminFor(accessToken: string): Promise<string> {
+  const me = await api().get('/api/auth/me').set('Authorization', `Bearer ${accessToken}`);
+  const organizationId = me.body.data.organization.id as string;
+  const cached = workspaceAdminCache.get(organizationId);
+  if (cached) {
+    const stillThere = await prisma.staff.findFirst({ where: { id: cached, role: 'ADMIN' }, select: { id: true } });
+    if (stillThere) return cached;
+  }
+  const adminId = (await createStaffWithRole(organizationId, 'ADMIN')).staffId;
+  workspaceAdminCache.set(organizationId, adminId);
+  return adminId;
+}

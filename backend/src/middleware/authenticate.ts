@@ -4,6 +4,7 @@ import { AppError } from '../utils/AppError';
 import { verifyAccessToken } from '../utils/tokens';
 import { prisma } from '../config/prisma';
 import { getEffectivePermissions } from '../constants/permissions';
+import { isAccessRevoked } from '../utils/authContext';
 
 /**
  * Verifies the JWT access token and loads the current staff + organization
@@ -53,11 +54,7 @@ export async function authenticate(req: Request, _res: Response, next: NextFunct
   // access tokens that have not expired yet. `iat` is in whole seconds, so a
   // token minted in the same second as the reset (the fresh login that
   // follows it) is still accepted.
-  if (
-    staff.accessRevokedAt &&
-    typeof payload.iat === 'number' &&
-    payload.iat < Math.floor(staff.accessRevokedAt.getTime() / 1000)
-  ) {
+  if (isAccessRevoked(staff, payload)) {
     next(new AppError(401, 'SESSION_REVOKED', 'Please sign in again.'));
     return;
   }

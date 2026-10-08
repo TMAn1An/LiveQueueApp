@@ -132,7 +132,13 @@ describe('Phase 7 Step 5 — audit write wiring', () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.entityId).toBe(target.body.data.id);
-    expect(rows[0]?.metadata).toEqual({ changedFields: ['name'] });
+    // ADR-071: values as well as field names, and who acted — as snapshots.
+    expect(rows[0]?.metadata).toMatchObject({
+      changedFields: ['name'],
+      before: { id: target.body.data.id, name: 'Target', role: 'ADMIN' },
+      after: { id: target.body.data.id, name: 'Renamed Target', role: 'ADMIN' },
+      actor: { id: ctx.staffId, role: 'OWNER' },
+    });
   });
 
   it('queue creation creates exactly one queue_created audit event', async () => {

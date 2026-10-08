@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { api, createStaffWithRole } from './helpers/app';
-import { resetDb } from './helpers/db';
+import { resetDb, createLegacyAdminlessQueue } from './helpers/db';
 import { prisma } from '../src/config/prisma';
 import {
   ADMIN_PERMISSIONS,
@@ -301,9 +301,7 @@ describe('atomic queue creation', () => {
     const head = await headOrganization();
     const admin = await createStaffWithRole(head.organizationId, 'ADMIN');
     const exec = await createStaffWithRole(head.organizationId, 'STAFF', { workspaceAdminId: admin.staffId });
-    const legacy = await prisma.queue.create({
-      data: { organizationId: head.organizationId, name: 'Legacy', tokenPrefix: 'L' },
-    });
+    const legacy = await createLegacyAdminlessQueue({ organizationId: head.organizationId, name: 'Legacy', tokenPrefix: 'L' });
     await prisma.counter.create({ data: { queueId: legacy.id, name: 'Held', status: 'ACTIVE', staffId: exec.staffId } });
     const res = await as(admin.accessToken).post('/api/queues', {
       name: 'Blocked',
@@ -444,9 +442,7 @@ describe('queue deletion governance', () => {
 describe('legacy queues and Executives (D2/D3)', () => {
   it('the Head assigns a Head-managed queue to an Admin; organization-level Executives on it join that workspace', async () => {
     const head = await headOrganization();
-    const legacy = await prisma.queue.create({
-      data: { organizationId: head.organizationId, name: 'Legacy Desk', tokenPrefix: 'L' },
-    });
+    const legacy = await createLegacyAdminlessQueue({ organizationId: head.organizationId, name: 'Legacy Desk', tokenPrefix: 'L' });
     const orgExec = await createStaffWithRole(head.organizationId, 'STAFF');
     await prisma.counter.create({ data: { queueId: legacy.id, name: 'Old Counter', status: 'ACTIVE', staffId: orgExec.staffId } });
     const admin = await createStaffWithRole(head.organizationId, 'ADMIN');
@@ -464,17 +460,40 @@ describe('legacy queues and Executives (D2/D3)', () => {
     expect((await as(admin.accessToken).get(`/api/queues/${legacy.id}`)).status).toBe(200);
   });
 
-  it('when an Admin leaves, their queue and Executives return to the Head instead of disappearing', async () => {
+  it('an Admin who owns a live queue cannot be removed, demoted or leave — the queue never loses its Admin (ADR-071)', async () => {
     const ws = await adminWorkspace();
-    const exec = await executiveOf(ws);
-    // The Admin's own counter must be released first (active-service rule), then removal.
-    await as(ws.admin.accessToken).post(`/api/queues/${ws.queueId}/counters`, { name: 'Spare' });
+    await executiveOf(ws);
     const removed = await as(ws.head.accessToken).delete(`/api/staff/${ws.admin.staffId}`);
-    expect(removed.status).toBe(204);
+    expect(removed.status).toBe(409);
+    expect(removed.body.error.code).toBe('ADMIN_OWNS_LIVE_QUEUE');
+    expect(removed.body.error.details).toMatchObject({ queueId: ws.queueId });
+    for (const role of ['MANAGER', 'STAFF'] as const) {
+      const changed = await as(ws.head.accessToken).put(`/api/staff/${ws.admin.staffId}`, {
+        role,
+        ...(role === 'STAFF' ? { workspaceAdminId: (await createStaffWithRole(ws.head.organizationId, 'ADMIN')).staffId } : {}),
+      });
+      expect(changed.status).toBe(409);
+      expect(changed.body.error.code).toBe('ADMIN_OWNS_LIVE_QUEUE');
+    }
+    const leave = await as(ws.admin.accessToken).post('/api/staff/removal-requests', { targetStaffId: ws.admin.staffId });
+    expect(leave.status).toBe(201);
+    const approved = await as(ws.head.accessToken).post(`/api/staff/removal-requests/${leave.body.data.id}/approve`, {});
+    expect(approved.status).toBe(409);
+    expect(approved.body.error.code).toBe('ADMIN_OWNS_LIVE_QUEUE');
     const queue = await prisma.queue.findUniqueOrThrow({ where: { id: ws.queueId } });
-    expect(queue.adminId).toBeNull();
-    expect((await prisma.staff.findUniqueOrThrow({ where: { id: exec.staffId } })).workspaceAdminId).toBeNull();
-    const counter = await prisma.counter.findUniqueOrThrow({ where: { id: ws.firstCounterId } });
-    expect(counter).toMatchObject({ status: 'OFFLINE', staffId: null });
+    expect(queue.adminId).toBe(ws.admin.staffId);
+    // The database refuses it too, whatever the path.
+    await expect(prisma.queue.update({ where: { id: ws.queueId }, data: { adminId: null } })).rejects.toThrow(
+      /live queue must have an Admin/,
+    );
+    await expect(prisma.staff.delete({ where: { id: ws.admin.staffId } })).rejects.toThrow(/live queue must have an Admin/);
+  });
+
+  it('once the queue is deleted, the Admin can change role or leave normally', async () => {
+    const ws = await adminWorkspace();
+    expect((await as(ws.admin.accessToken).delete(`/api/queues/${ws.queueId}`, { reason: 'Closing this desk' })).status).toBe(200);
+    const changed = await as(ws.head.accessToken).put(`/api/staff/${ws.admin.staffId}`, { role: 'MANAGER' });
+    expect(changed.status).toBe(200);
+    expect(changed.body.data.role).toBe('MANAGER');
   });
 });
