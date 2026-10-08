@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { PasswordInput } from '../components/PasswordInput';
-import { acceptInvitation } from '../api/auth.api';
+import { acceptInvitation, validateInvitation } from '../api/auth.api';
+import { Spinner } from '../components/Spinner';
 import { ApiError } from '../api/client';
+import { useBackendWarmup } from '../hooks/useBackendWarmup';
 
 /**
  * Where an invited colleague lands from their email (ADR-035).
@@ -19,6 +21,7 @@ import { ApiError } from '../api/client';
  * itself; doing so is what once stacked a second logo above a second card.
  */
 export function AcceptInvitationPage() {
+  useBackendWarmup();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const token = params.get('token') ?? '';
@@ -27,6 +30,24 @@ export function AcceptInvitationPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  // ADR-071: the link is checked before any password field is shown.
+  const [linkState, setLinkState] = useState<'checking' | 'valid' | 'invalid'>(token ? 'checking' : 'invalid');
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    validateInvitation(token)
+      .then((res) => {
+        if (!cancelled) setLinkState(res.data.valid ? 'valid' : 'invalid');
+      })
+      .catch(() => {
+        // Could not check (offline, say): let them try; the submit decides.
+        if (!cancelled) setLinkState('valid');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const mismatch = confirm.length > 0 && password !== confirm;
   const tooShort = password.length > 0 && password.length < 8;
@@ -38,9 +59,11 @@ export function AcceptInvitationPage() {
       await acceptInvitation(token, password);
       setDone(true);
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : 'Could not set up your account. Please try again.',
-      );
+      if (err instanceof ApiError && err.code === 'INVITATION_INVALID_OR_EXPIRED') {
+        setLinkState('invalid');
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Could not set up your account. Please try again.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -51,7 +74,25 @@ export function AcceptInvitationPage() {
       <>
         <h1 className="mb-2 text-lg font-semibold text-fg">This link is incomplete</h1>
         <p className="text-sm text-fg-soft">
-          Open the link from your invitation email again, or ask an administrator to send a new one.
+          Open the link from your invitation email again, or ask the person who invited you to send a new one.
+        </p>
+      </>
+    );
+  }
+
+  if (linkState === 'checking' && !done) {
+    return <Spinner label="Checking your invitation link…" />;
+  }
+
+  if (linkState === 'invalid' && !done) {
+    return (
+      <>
+        <h1 className="mb-2 text-lg font-semibold text-fg">This invitation can&apos;t be used</h1>
+        <p className="mb-4 text-sm text-fg-soft">
+          This invitation link has expired or is no longer valid. Ask the person who invited you to send a new one.
+        </p>
+        <p className="text-xs text-faint">
+          Already set up? <Link to="/login" className="text-brand-600 hover:underline">Sign in</Link>
         </p>
       </>
     );
@@ -73,7 +114,7 @@ export function AcceptInvitationPage() {
     <>
       <h1 className="mb-1 text-lg font-semibold text-fg">Set up your account</h1>
       <p className="mb-4 text-sm text-muted">
-        Choose a password. Nobody else will know it — not even the administrator who invited you.
+        Choose a password. Nobody else will know it — not even the person who invited you.
       </p>
       <ErrorBanner message={error} />
       <div className="mb-3">

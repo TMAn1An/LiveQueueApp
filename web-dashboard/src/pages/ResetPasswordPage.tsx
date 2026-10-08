@@ -8,6 +8,7 @@ import { Spinner } from '../components/Spinner';
 import { resetPassword, validatePasswordResetToken } from '../api/auth.api';
 import { ApiError } from '../api/client';
 import { passwordPolicyError } from '../utils/passwordPolicy';
+import { useBackendWarmup } from '../hooks/useBackendWarmup';
 
 function InvalidLink() {
   return (
@@ -28,6 +29,7 @@ function InvalidLink() {
  * session for the account ends, and the person signs in afresh.
  */
 export function ResetPasswordPage() {
+  useBackendWarmup();
   const [params] = useSearchParams();
   const token = params.get('token') ?? '';
   const [linkState, setLinkState] = useState<'checking' | 'valid' | 'invalid'>(

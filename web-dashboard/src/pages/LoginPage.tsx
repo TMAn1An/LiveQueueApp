@@ -8,8 +8,10 @@ import { PasswordInput } from '../components/PasswordInput';
 import { AuthLoadingOverlay } from '../components/AuthLoadingOverlay';
 import { useDelayedFlag } from '../hooks/useDelayedFlag';
 import { AUTH_LOADER_DELAY_MS, startAuthTiming } from '../utils/authTiming';
+import { useBackendWarmup } from '../hooks/useBackendWarmup';
 
 export function LoginPage() {
+  useBackendWarmup();
   const { login } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');

@@ -13,10 +13,11 @@ export function register(input: {
 }
 
 /** Live "is this organization name free?" check — case-insensitive. */
-export function checkOrganizationNameAvailability(name: string) {
+export function checkOrganizationNameAvailability(name: string, signal?: AbortSignal) {
   return apiFetch<{ available: boolean }>('/api/auth/organization-name-availability', {
     method: 'GET',
     query: { name },
+    signal,
   });
 }
 
@@ -113,6 +114,14 @@ export function resendVerificationEmail() {
 /** ADR-035: an invited staff member redeems their emailed link. Public — the
  * token is the credential — and returns no session, so signing in stays the
  * one place a session is created. */
+/** ADR-071: checked before the password form is shown — only yes or no. */
+export function validateInvitation(token: string) {
+  return apiFetch<{ valid: boolean }>('/api/auth/invitations/validate', {
+    method: 'GET',
+    query: { token },
+  });
+}
+
 export function acceptInvitation(token: string, password: string) {
   return apiFetch<{ email: string }>('/api/auth/accept-invitation', {
     method: 'POST',

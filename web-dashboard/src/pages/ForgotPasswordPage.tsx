@@ -4,6 +4,7 @@ import { Button } from '../components/Button';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { requestPasswordReset } from '../api/auth.api';
 import { ApiError } from '../api/client';
+import { useBackendWarmup } from '../hooks/useBackendWarmup';
 
 /** ADR-058: the generic answer, shown whatever the backend found. */
 export const GENERIC_RESET_MESSAGE =
@@ -15,6 +16,7 @@ export const GENERIC_RESET_MESSAGE =
  * to reach the server (or the rate limit) is reported as an error.
  */
 export function ForgotPasswordPage() {
+  useBackendWarmup();
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [sent, setSent] = useState(false);

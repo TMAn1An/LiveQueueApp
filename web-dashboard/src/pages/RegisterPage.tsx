@@ -11,6 +11,7 @@ import { latinNameError } from '../utils/latinText';
 import { useOrganizationNameAvailability } from '../hooks/useOrganizationNameAvailability';
 import { AuthLoadingOverlay } from '../components/AuthLoadingOverlay';
 import { useDelayedFlag } from '../hooks/useDelayedFlag';
+import { useBackendWarmup } from '../hooks/useBackendWarmup';
 import { AUTH_LOADER_DELAY_MS, startAuthTiming } from '../utils/authTiming';
 
 export function RegisterPage() {
@@ -22,6 +23,7 @@ export function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const showLoader = useDelayedFlag(submitting, AUTH_LOADER_DELAY_MS);
+  useBackendWarmup();
   // Organization names are unique like usernames; checked as you type.
   const nameStatus = useOrganizationNameAvailability(organizationName);
   const nameScriptError = latinNameError(organizationName);
@@ -60,7 +62,11 @@ export function RegisterPage() {
           aria-invalid={nameStatus === 'taken' || Boolean(nameScriptError) || undefined}
           className="w-full rounded-md border border-border-strong px-3 py-2 text-sm"
         />
-        <OrganizationNameStatus status={nameStatus} id="organizationName-status" />
+        <OrganizationNameStatus
+          status={nameStatus}
+          id="organizationName-status"
+          unknownText="Couldn't check right now — we'll confirm the name when you create the organization."
+        />
         <FieldError message={nameScriptError} />
       </div>
       <div className="mb-3">

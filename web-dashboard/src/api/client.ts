@@ -106,6 +106,9 @@ export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   /** Set for the one internal retry-after-refresh call — prevents infinite refresh loops. */
   _isRetry?: boolean;
+  /** Lets a caller cancel the request (a timeout, or a newer request
+   * superseding this one). */
+  signal?: AbortSignal;
 }
 
 export interface ApiResult<T> {
@@ -126,16 +129,24 @@ function buildUrl(path: string, query?: RequestOptions['query']): string {
 }
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<ApiResult<T>> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // ADR-071: a read (GET/HEAD) carries no Content-Type — with a JSON content
+  // type it is not a "simple" request, and the browser would send an extra
+  // CORS preflight round trip before each one. Writes keep it as before.
+  const method = (options.method ?? 'GET').toUpperCase();
+  const headers: Record<string, string> = {};
+  if (options.body !== undefined || (method !== 'GET' && method !== 'HEAD')) {
+    headers['Content-Type'] = 'application/json';
+  }
   const accessToken = authHandlers?.getAccessToken();
   if (accessToken) {
     headers.Authorization = `Bearer ${accessToken}`;
   }
 
   const res = await fetch(buildUrl(path, options.query), {
-    method: options.method ?? 'GET',
+    method,
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    ...(options.signal ? { signal: options.signal } : {}),
   });
 
   // 204 No Content — nothing to parse.

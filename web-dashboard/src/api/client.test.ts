@@ -45,6 +45,38 @@ describe('apiFetch', () => {
     expect(headers.Authorization).toBe('Bearer initial-access-token');
   });
 
+  it('sends no Content-Type on a read, so the browser needs no CORS preflight (ADR-071)', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(200, { success: true, data: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiFetch('/api/auth/organization-name-availability', { method: 'GET', query: { name: 'x' } });
+
+    const headers = (fetchMock.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
+    expect(headers['Content-Type']).toBeUndefined();
+  });
+
+  it('keeps Content-Type on writes, with or without a body', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(200, { success: true, data: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiFetch('/api/staff', { method: 'POST', body: { name: 'x' } });
+    await apiFetch('/api/staff/1/cancel', { method: 'POST' });
+
+    for (const call of fetchMock.mock.calls) {
+      expect(((call[1] as RequestInit).headers as Record<string, string>)['Content-Type']).toBe('application/json');
+    }
+  });
+
+  it('passes an abort signal through to fetch', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse(200, { success: true, data: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiFetch('/api/queues', { signal: controller.signal });
+
+    expect((fetchMock.mock.calls[0]![1] as RequestInit).signal).toBe(controller.signal);
+  });
+
   it('treats 204 as success with no body', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })));
 
