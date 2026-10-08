@@ -1969,7 +1969,7 @@ Request counts include the `POST …/next` itself. Socket frames are unchanged: 
 - `token.position_changed` still schedules the same views as any token event. The server stays the source of truth: the screen is always replaced by a real fetch after the burst, and a duration change (which broadcasts only `position_changed`) still refreshes every tab.
 - Resync on (re)connect stays immediate.
 
-**Floating Counter Console (ADR-072).** Its branch invalidates `['counters', 'mine']` directly on every token and queue event, which would reintroduce the per-person refetch. When it merges, those calls go through the scheduler: `scheduleTokenViews` and the `queue.*` case schedule `['counters', 'mine']`. A trial merge resolved that way passed the dashboard suite. The one exact-key assertion was updated to include `["counters","mine"]`, and the result is still one fetch per burst.
+**Floating Counter Console (ADR-072).** Its branch invalidates `['counters', 'mine']` directly on every token and queue event, which would reintroduce the per-person refetch. When it merges, those calls go through the scheduler: `scheduleTokenViews` and the `queue.*` case schedule `['counters', 'mine']`. A trial merge resolved that way passed the dashboard suite. The one exact-key assertion was updated to include `["counters","mine"]`, and the result is still one fetch per burst. The exact steps and patch are in `docs/integration/floating-counter-console-merge.md`.
 
 **Tradeoffs.**
 - Event-driven refreshes appear up to 100 ms later, or up to 1 s later during a continuous stream.
