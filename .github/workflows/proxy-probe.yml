@@ -19,19 +19,19 @@ jobs:
       - name: Probe
         run: |
           echo "runner ${{ matrix.runner }} public IP: $(curl -s -m 20 https://api.ipify.org || echo unknown)"
-          # wake / align both jobs on the same wall-clock second boundary
+          # run 2 (fixed header name). wake / align both jobs on the same wall-clock second boundary
           curl -s -o /dev/null -m 90 "$URL"
           if [ "${{ matrix.runner }}" = b ]; then sleep 4; fi
           echo "--- response headers (names + proxy-related values) ---"
-          curl -s -D - -o /dev/null -m 60 "$URL" | tr -d '\r' | grep -iE '^(server|cf-ray|cf-cache-status|via|x-render|rndr-id|x-request-id|ratelimit|ratelimit-policy|x-forwarded|alt-svc):' || true
+          curl -s -D - -o /dev/null -m 60 "$URL" | tr -d '\r' | grep -iE '^(server|cf-ray|cf-cache-status|via|x-render|rndr-id|x-request-id|ratelimit-limit|ratelimit-policy|x-forwarded|alt-svc):' || true
           echo "--- 8 sequential requests: RateLimit header ---"
           for i in $(seq 1 8); do
-            h=$(curl -s -D - -o /dev/null -m 60 "$URL" | tr -d '\r' | grep -i '^ratelimit:' || true)
+            h=$(curl -s -D - -o /dev/null -m 60 "$URL" | tr -d '\r' | grep -iE '^ratelimit-(remaining|reset):' | tr '\n' ' ' || true)
             echo "$(date -u +%H:%M:%S.%N | cut -c1-12) req $i  $h"
             sleep 1
           done
           echo "--- 3 requests with a spoofed X-Forwarded-For ---"
           for ip in 203.0.113.7 198.51.100.9 192.0.2.44; do
-            h=$(curl -s -D - -o /dev/null -m 60 -H "X-Forwarded-For: $ip" "$URL" | tr -d '\r' | grep -i '^ratelimit:' || true)
+            h=$(curl -s -D - -o /dev/null -m 60 -H "X-Forwarded-For: $ip" "$URL" | tr -d '\r' | grep -iE '^ratelimit-(remaining|reset):' | tr '\n' ' ' || true)
             echo "spoof $ip  $h"
           done
