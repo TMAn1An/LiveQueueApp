@@ -103,7 +103,7 @@ jobs:
           probe staff-requires-auth 401 GET "$API/api/staff"
           probe workspace-transfers-requires-auth 401 GET "$API/api/staff/workspace-transfers"
           probe counters-mine-requires-auth 401 GET "$API/api/counters/mine"
-          probe join-invalid-body 400 POST "$API/api/tokens" '{}'
+          probe join-invalid-body 422 POST "$API/api/tokens" '{}'
           probe unknown-queue-config 404 GET "$API/api/public/queues/$UU/config"
           probe unknown-organization 404 GET "$API/api/public/organizations/ZZZZZZZZ"
           probe unknown-token 404 GET "$API/api/tokens/$UU"
