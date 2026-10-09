@@ -30,7 +30,8 @@ jobs:
   # Two runners, two public addresses. A spends a few public-read requests at
   # second ~5 of each minute; B reads its own remaining count at second ~35.
   # Old code (one shared bucket for everyone): B sees A's spending.
-  # New code (per-client via CF-Connecting-IP): B always starts fresh at 59.
+  # New code (per-client via CF-Connecting-IP): B only ever sees its own
+  # one or two requests (>= 57); shared would show A's six (<= 53).
   client-a:
     runs-on: ubuntu-latest
     steps:
@@ -56,8 +57,8 @@ jobs:
             s=$(( 10#$(date +%S) )); w=$(( (95 - s) % 60 )); [ $w -eq 0 ] && w=60; sleep $w
             r=$(curl -s -m 30 -o /dev/null -D - $API$U | grep -i '^ratelimit-remaining' | tr -d '\r' | awk '{print $2}')
             echo "$(date -u +%T) B first request this minute -> remaining $r"
-            if [ "$r" = "59" ]; then ok=$((ok+1)); else ok=0; fi
-            if [ $ok -ge 3 ]; then echo "PASS | B's bucket independent of A for 3 consecutive minutes"; exit 0; fi
+            if [ -n "$r" ] && [ "$r" -ge 57 ]; then ok=$((ok+1)); else ok=0; fi
+            if [ $ok -ge 3 ]; then echo "PASS | B's bucket independent of A for 3 consecutive minutes (shared would read <= 53)"; exit 0; fi
           done
           echo "FAIL | new backend behaviour never observed"; exit 1
         timeout-minutes: 12
@@ -78,6 +79,7 @@ jobs:
           echo "  join        $(pol -X POST -H 'Content-Type: application/json' -H 'Idempotency-Key: smoke-invalid' -d '{}' $API/api/tokens)  (want 10;w=60)"
   probes:
     needs: client-b
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
