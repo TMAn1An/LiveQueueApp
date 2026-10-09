@@ -11,7 +11,7 @@ const REPO = path.resolve(__dirname, '../../..');
 const SHOTS = path.join(REPO, 'docs/presentation/assets/screenshots');
 const LOGO = path.join(REPO, 'web-dashboard/public/logo-full.png');
 const OUT = path.join(REPO, 'docs/presentation/LiveQueue_Production_Presentation.pptx');
-const CHECKED = 'Checked on: 2026-10-08';
+const CHECKED = 'Quotas checked on: 2026-10-08 · production state: 2026-10-09';
 
 const HEX = {
   navy: '0C2B4B', blue: '0F539E', teal: '25A596', ice: 'EEF5FC', ice2: 'D7E7F6',
@@ -169,7 +169,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
 // 3. Solution
 {
   const s = content('One live queue, shared by every device', 'Introduction',
-    'Everything on this slide is implemented and in production, except the Floating Counter Console, which is finished and in review. The key idea: one backend owns the queue, and three kinds of client — Android, iPhone browser and the staff dashboard — stay in sync through realtime events.');
+    'Everything on this slide is implemented and in production, including the Floating Counter Console, which went live on 9 October 2026. The key idea: one backend owns the queue, and three kinds of client — Android, iPhone browser and the staff dashboard — stay in sync through realtime events.');
   const feats = [
     ['Organizations & roles', 'Head, Manager, Admin workspaces, Executives'],
     ['Queues & counters', 'Many counters per queue · Open / Paused / Off'],
@@ -178,7 +178,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
     ['Live updates', 'Socket.io: position, ETA, called, done'],
     ['Notifications', 'Android FCM · iPhone Web Push · email'],
     ['Governance & audit', 'Admin replacement · Head succession · immutable history'],
-    ['Floating Counter Console', 'Always-visible controls (in review)'],
+    ['Floating Counter Console', 'Always-visible serving controls (live)'],
   ];
   feats.forEach(([h, d], i) => {
     const col = i % 4, row = Math.floor(i / 4);
@@ -223,11 +223,11 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
 // 5. Architecture
 {
   const s = content('System architecture', 'Architecture',
-    'Walk left to right. Three clients. One backend process on Render runs the REST API, the Socket.io server and two schedulers. PostgreSQL on Neon is the single source of truth via Prisma. Static dashboard and portal are served by Cloudflare Pages — note that API traffic goes straight to Render, not through Cloudflare. Notifications fan out to FCM for the Android app, Web Push for iPhone/iPad visitors who added the Safari portal to their Home Screen, and Resend for email. The console is a fourth surface in review.');
+    'Walk left to right. Three clients. One backend process on Render runs the REST API, the Socket.io server and two schedulers. PostgreSQL on Neon is the single source of truth via Prisma. Static dashboard and portal are served by Cloudflare Pages — note that API traffic goes straight to Render, not through Cloudflare. Notifications fan out to FCM for the Android app, Web Push for iPhone/iPad visitors who added the Safari portal to their Home Screen, and Resend for email. The Floating Counter Console is a fourth staff surface, live in production: it shares the dashboard\'s session, data cache and Socket.io connection.');
   label(s, 0.4, 1.05, 2.1, 0.62, 'Android app', 'Flutter · visitors');
   label(s, 0.4, 1.8, 2.1, 0.62, 'iPhone/iPad portal', 'Safari PWA · visitors');
   label(s, 0.4, 2.55, 2.1, 0.62, 'Staff dashboard', 'React + Vite');
-  label(s, 0.4, 3.3, 2.1, 0.62, 'Floating Counter Console', 'Document PiP · in review', { fill: HEX.ice, line: HEX.ice2 });
+  label(s, 0.4, 3.3, 2.1, 0.62, 'Floating Counter Console', 'Document PiP · fallback dock', { fill: HEX.ice, line: HEX.ice2 });
   label(s, 0.4, 4.2, 2.1, 0.62, 'Cloudflare Pages', 'Static dashboard + portal', { fill: HEX.white, line: HEX.teal });
   box(s, 3.35, 1.05, 3.1, 3.05, { fill: HEX.ice, line: HEX.blue, lw: 1.25 });
   T(s, 'Render · one web service', { x: 3.45, y: 1.1, w: 2.9, h: 0.3, bold: true, fontSize: 12, color: C.accent1, align: 'center' });
@@ -251,7 +251,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
 // 6. Request vs realtime
 {
   const s = content('REST for truth, Socket.io for change', 'Architecture',
-    'Two lanes. Top: every read and write is a REST request that is authenticated, validated, authorized and usually wrapped in a transaction. Bottom: Socket.io only tells clients that something changed; clients then refetch. Events are never treated as the source of truth and are never replayed, so after a reconnect a client rejoins its rooms and refetches everything.');
+    'Two lanes. Top: every read and write is a REST request that is authenticated, validated, authorized and usually wrapped in a transaction. Bottom: Socket.io tells clients that something changed. The staff dashboard batches the resulting refetches, so a burst of events costs one reload per view; the Android app and the iPhone/iPad portal apply the event payload directly, which the server builds with the same function as the REST read. Events are never replayed, so after a reconnect every client rejoins its rooms and re-reads the server\'s state.');
   T(s, 'REST — every read and write', { x: 0.5, y: 1.05, w: 5, h: 0.3, bold: true, fontSize: 13, color: C.accent1 });
   const steps = ['Client', 'authenticate\n(JWT + DB reload)', 'validate\n(Zod)', 'service layer\nauthorize · transaction', 'PostgreSQL'];
   steps.forEach((t, i) => {
@@ -260,7 +260,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
     if (i < 4) arrow(s, x + 1.6, 1.86, x + 1.86, 1.86, { color: HEX.blue });
   });
   T(s, 'Socket.io — "something changed"', { x: 0.5, y: 2.65, w: 5, h: 0.3, bold: true, fontSize: 13, color: C.accent2 });
-  const rt = ['Committed change', 'emit to rooms\norg · workspace · token', 'client invalidates\nits cached data', 'client refetches\nover REST'];
+  const rt = ['Committed change', 'emit to rooms\norg · workspace · token', 'dashboard: batched invalidate\nvisitors: apply payload', 'dashboard refetches once\nper burst over REST'];
   rt.forEach((t, i) => {
     const x = 0.5 + i * 2.33;
     label(s, x, 3.05, 2.05, 0.82, t, null, { fill: HEX.card, ts: 10.5 });
@@ -356,7 +356,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
     ['2', 'Lock the caller\'s own counter', 'SELECT … FOR UPDATE inside a transaction'],
     ['3', 'Pick: referrals first, then earliest arrival', 'Whose current step this counter handles'],
     ['4', 'Compare-and-swap WAITING → CALLED', 'A concurrent claim matches nothing and moves on'],
-    ['5', 'Commit, then broadcast', 'Every device refetches the same truth'],
+    ['5', 'Commit, then broadcast', 'Every device converges on the same truth'],
   ];
   seq.forEach(([k, a, b], i) => {
     const y = 1.55 + i * 0.66;
@@ -455,7 +455,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
 // 14. Security
 {
   const s = content('Security: implemented vs known gaps', 'Trust',
-    'Left column: controls that exist in code and are covered by tests. Right column: honest limitations. The most important one to mention: rate limiting is in-memory and keyed on the client IP, and Express trust proxy is not configured, so behind Render\'s proxy many clients may share one limit. This was found while preparing this analysis and is not yet verified in production.');
+    'Left column: controls that exist in code and are covered by tests. Right column: honest limitations. Worth mentioning: preparing this analysis we found every visitor shared one rate-limit bucket behind Render\'s proxy. That is fixed and live: limits now key on the real client address from Cloudflare\'s CF-Connecting-IP, with Express trust proxy deliberately left off so forged X-Forwarded-For headers are ignored. Verified in production from two machines on 9 October 2026.');
   T(s, 'Implemented', { x: 0.5, y: 1.05, w: 4.4, h: 0.3, bold: true, fontSize: 14, color: HEX.green });
   bullets(s, [
     'bcrypt passwords · 15-min JWT · rotated, hashed refresh tokens',
@@ -465,13 +465,13 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
     'Instant revocation: tokens + live sockets dropped',
     'Single-use, hashed, expiring invitation and handover links',
     'Transactional, immutable audit with actor snapshots',
-    'Rate limits on public, join, auth and sensitive routes',
+    'Rate limits per real client (CF-Connecting-IP; spoof-resistant)',
   ], { x: 0.5, y: 1.4, w: 4.5, h: 3.6, fontSize: 12 });
   box(s, 5.3, 1.05, 4.2, 3.85, { fill: HEX.amberBg, line: 'FDE68A' });
   T(s, 'Known gaps', { x: 5.5, y: 1.12, w: 3.8, h: 0.3, bold: true, fontSize: 14, color: HEX.amber });
   bullets(s, [
     'Rate limits are in-memory, per process',
-    'No Express "trust proxy" → limits may be shared across clients behind Render (to verify and fix)',
+    'People behind one NAT (campus Wi-Fi, carrier) share a limit',
     'No external penetration test or WAF',
     'No centralized security monitoring or alerting',
   ], { x: 5.5, y: 1.5, w: 3.85, h: 3.3, fontSize: 12 });
@@ -530,20 +530,21 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
 // 17. Testing + status
 {
   const s = content('Testing and current production status', 'Delivery',
-    'Separate what was verified automatically from what still needs a physical device. Test counts are for production master and for the console branch. Emphasize: these are correctness tests; they are not load tests, and we have not run a formal load test.');
-  const stats = [['1,216', 'backend tests'], ['574', 'dashboard tests'], ['479', 'Flutter tests']];
+    'Separate what was verified automatically from what still needs a physical device. Test counts are for production master after the 9 October rollout. Emphasize: these are correctness tests; they are not load tests, and we have not run a formal load test.');
+  const stats = [['1,234', 'backend tests'], ['640', 'dashboard tests'], ['479', 'Flutter tests']];
   stats.forEach(([a, b], i) => {
     const x = 0.5 + i * 1.65;
     T(s, a, { x, y: 1.05, w: 1.6, h: 0.6, fontSize: 30, bold: true, color: C.accent1 });
     T(s, b, { x, y: 1.65, w: 1.5, h: 0.3, fontSize: 11, color: HEX.slate });
   });
-  T(s, 'All passing on production master; console branch: 1,222 + 614. Typecheck, lint and production builds clean.', { x: 0.5, y: 2.05, w: 4.7, h: 0.5, fontSize: 11, color: HEX.mute });
+  T(s, 'All passing on production master (9 Oct 2026). Typecheck, lint and production builds clean.', { x: 0.5, y: 2.05, w: 4.7, h: 0.5, fontSize: 11, color: HEX.mute });
   T(s, 'Verified automatically', { x: 0.5, y: 2.7, w: 4.6, h: 0.3, bold: true, fontSize: 13, color: HEX.green });
   bullets(s, [
     'Backend live: health, Socket.io handshake, Web Push config',
     'Both governance migrations applied; new routes respond',
     'Dashboard + portal render (headless Chromium checks)',
     'Android v1.0.6 published, Latest; APK independently verified',
+    'Console + performance fixes live; per-client rate limits verified',
   ], { x: 0.5, y: 3.05, w: 4.7, h: 1.9, fontSize: 11.5 });
   box(s, 5.5, 1.05, 4.0, 3.9, { fill: HEX.amberBg, line: 'FDE68A' });
   T(s, 'Pending / not yet done', { x: 5.7, y: 1.12, w: 3.6, h: 0.3, bold: true, fontSize: 13, color: HEX.amber });
@@ -551,7 +552,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
     'Real iPhone Web Push delivery — pending physical iPhone test',
     'Physical Android device QA — pending',
     'Formal load testing — not done',
-    'Floating Console — in review, not deployed',
+    'Console always-on-top on a real desktop OS — not verified headlessly',
     'Post-deploy DB counts recorded manually by the owner (read-only SQL)',
   ], { x: 5.7, y: 1.5, w: 3.65, h: 3.3, fontSize: 11.5 });
 }
@@ -584,7 +585,7 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
 // 20. Capacity: one queue
 {
   const s = content('Capacity: one queue', 'Capacity',
-    'There is no software limit on people waiting. The cost of each queue event grows with the queue length, because the server recomputes everyone\'s ETA and sends each waiting person an update. The chart shows bytes one staff dashboard receives per serve cycle, measured locally. We also measured, in a real browser, that one Serve next with 200 waiting caused 305 dashboard requests — a refetch pattern we can fix in software. Hence: comfortable up to about 50 waiting on the free server today.');
+    'There is no software limit on people waiting. The cost of each queue event grows with the queue length, because the server recomputes everyone\'s ETA and sends each waiting person an update. The chart shows bytes one staff dashboard receives per serve cycle, measured locally. We found, in a real browser, that one Serve next with 200 waiting caused hundreds of dashboard requests, and that every iPhone visitor re-read their ticket on every event. Both are fixed and live: one Serve next now costs 2 to 4 dashboard requests and zero visitor re-reads at 50, 200 or 500 waiting. Hence: comfortable up to about 300 to 500 waiting per queue on the free server, Android and iPhone alike — an estimate, not a load test.');
   s.addChart(pres.charts.BAR, [{ name: 'KB per serve cycle', labels: ['50 waiting', '500 waiting', '2,000 waiting'], values: [53, 474, 1884] }], {
     x: 0.4, y: 1.0, w: 4.6, h: 3.0, barDir: 'col', chartColors: [HEX.blue],
     showTitle: true, title: 'Socket bytes to one staff tab per serve cycle (MEASURED, local)', titleFontSize: 11, titleColor: HEX.navy, titleFontFace: '+mn-lt',
@@ -593,13 +594,13 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
     valGridLine: { color: 'E2E8F0', size: 0.5 }, catGridLine: { style: 'none' }, showLegend: false,
   });
   T(s, 'ETA recompute per event (local): 16 ms · 103 ms · 454 ms', { x: 0.5, y: 4.05, w: 4.5, h: 0.3, fontSize: 10, color: HEX.slate });
-  T(s, '1 Serve next, 200 waiting → 305 dashboard requests (MEASURED)', { x: 0.5, y: 4.35, w: 4.5, h: 0.3, fontSize: 10, color: HEX.red });
+  T(s, '1 Serve next, 200 waiting: ~400 → 4 dashboard requests · 0 visitor re-reads (MEASURED, local)', { x: 0.5, y: 4.35, w: 4.5, h: 0.45, fontSize: 10, color: HEX.green });
   table(s, [
     hdr(['', 'People waiting in one queue']),
     ['Application limit', 'None (HARD LIMIT: 32-bit token number)'],
-    ['Comfortable today', '≤ ~50 (ESTIMATE)'],
-    ['Caution', '50 – 150 (ESTIMATE)'],
-    ['After refetch fix', '~300 – 500 on free CPU (ESTIMATE)'],
+    ['Comfortable', '~300 – 500 on free CPU (ESTIMATE)'],
+    ['Caution', '> 500, or many open staff tabs (ESTIMATE)'],
+    ['Before the fixes', '≤ ~50 (ESTIMATE)'],
     ['Load-tested', 'NOT LOAD-TEST VALIDATED'],
   ], { x: 5.3, y: 1.05, w: 4.2, colW: [1.55, 2.65], fs: 10.5 });
   T(s, 'Counters per queue: no limit; comfortable 1–10, caution 10–25 (ESTIMATE).', { x: 5.3, y: 3.6, w: 4.2, h: 0.45, fontSize: 10.5, color: HEX.slate });
@@ -608,12 +609,12 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
 // 21. Capacity pyramid (organization + platform)
 {
   const s = content('Capacity at every level', 'Capacity',
-    'Read top to bottom. Every row distinguishes the application rule from the infrastructure estimate. One Admin, one live queue is a product rule, not a hosting limit. No limit on organizations does not mean infinite organizations. The platform row is the one faculty will ask about: about four thousand visits a month today, about twenty-five thousand after the software fix, from formulas in the capacity document. SHORT ANSWER if asked: Today LiveQueue runs entirely on free tiers. There is no software limit on people per queue, queues per organization, or organizations. In practice the free deployment is comfortable for about one small organization — one or two queues, a few counters, a couple of hundred visits a day — with up to about 50 people waiting per queue. The first limit is not CPU but the free network-egress quotas, which a dashboard refresh pattern currently amplifies; that is a software fix, after which we estimate roughly five small organizations. The first paid step is Neon Launch, roughly 10 to 20 dollars a month, then Render Starter at 7 dollars to remove cold starts. These are engineering estimates, not load-test results.');
+    'Read top to bottom. Every row distinguishes the application rule from the infrastructure estimate. One Admin, one live queue is a product rule, not a hosting limit. No limit on organizations does not mean infinite organizations. The platform row is the one faculty will ask about: about twenty-five thousand visits a month on the free tiers, from formulas in the capacity document. SHORT ANSWER if asked: LiveQueue runs entirely on free tiers. There is no software limit on people per queue, queues per organization, or organizations. With the software fixes now live, we estimate the free deployment is comfortable for about five small organizations with similar business hours — about twenty-five thousand visits a month — and about 300 to 500 people waiting per queue. The first likely limit is Neon\'s free quotas: 5 GB of data transfer and 100 compute-hours a month. The first paid step is Neon Launch, roughly 10 to 20 dollars a month, then Render Starter at 7 dollars to remove cold starts. These are engineering estimates, not load-test results.');
   const rows = [
     ['One counter', 'One operator · one person at a time', '~12 visits/hour (5-min service)', '—'],
-    ['One queue', 'No waiting limit', '≤ ~50 waiting · 1–10 counters', '> 150 waiting · > 25 counters'],
+    ['One queue', 'No waiting limit', '~300–500 waiting · 1–10 counters', '> 500 waiting · > 25 counters'],
     ['One organization', '1 live queue per Admin; no Admin limit', '1–2 queues · ~200 visits/day', '≥ 5 busy queues'],
-    ['Whole platform', 'No organization limit', '≈ 4,000 visits/month today · ≈ 25,000 after refetch fix', 'Egress or Neon hours exhausted'],
+    ['Whole platform', 'No organization limit', '≈ 25,000 visits/month · ~5 small organizations', 'Neon free quotas exhausted'],
   ];
   table(s, [
     hdr(['Level', 'Application rule (HARD LIMIT)', 'Comfortable (ESTIMATE)', 'Upgrade trigger']),
@@ -625,12 +626,12 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
 // 22. Bottlenecks
 {
   const s = content('Current bottlenecks, in order', 'Capacity',
-    'Number zero is a code finding to verify first: no trust proxy, so rate limits may be shared platform-wide. Number one surprised us: the first limit is not CPU but the free network-egress quotas, because each queue event makes open dashboards refetch once per waiting person. That is a software fix. Then Neon\'s compute hours — the reminder job queries every minute, so the database stays awake whenever the backend is — then Render Free\'s small CPU and one-minute cold start, then Resend\'s 100 emails a day, but only for queues that email every visitor.');
+    'Three software bottlenecks we found are fixed and live since 9 October: the dashboard refetch storm, the iPhone portal\'s per-visitor re-reads, and the shared rate-limit bucket. What remains is infrastructure. Number one is Neon\'s free quotas: 5 GB of data transfer and 100 compute-hours a month — the reminder job queries every minute, so the database stays awake whenever the backend is. Then Render Free\'s small CPU and one-minute cold start, then Render\'s 5 GB outbound for long queues watched by many staff tabs, then Resend\'s 100 emails a day, but only for queues that email every visitor.');
   const b = [
-    ['0', 'Rate limits may be shared by all clients', 'Code finding: no Express "trust proxy" — verify; fix is free', HEX.red],
-    ['1', 'Network egress: Neon 5 GB + Render 5 GB/month', 'Amplified by dashboard refetch per waiting person (software fix)', HEX.red],
-    ['2', 'Neon compute: 100 CU-h ≈ 400 active hours/month', 'Reminder job keeps the DB awake while the backend is awake', HEX.amber],
-    ['3', 'Render Free: 0.1 CPU, ~1-minute cold start', 'Per-event work grows with queue length', HEX.amber],
+    ['✓', 'Fixed and live (9 Oct 2026)', 'Dashboard refetch storm · iPhone portal re-reads · shared rate-limit bucket', HEX.green],
+    ['1', 'Neon free quotas: 5 GB transfer + 100 CU-h/month', 'First likely limit; the reminder job keeps the DB awake while the backend is', HEX.red],
+    ['2', 'Render Free: 0.1 CPU, ~1-minute cold start', 'Per-event ETA work grows with queue length', HEX.amber],
+    ['3', 'Render outbound: 5 GB/month', 'Socket updates grow with waiting × open staff tabs', HEX.amber],
     ['4', 'Resend: 100 emails/day', 'Only if queues verify every visitor by email', HEX.slate],
     ['—', 'Not limiting now: Cloudflare Pages, FCM, Web Push, GitHub Actions', 'Free or no published cap at this scale', HEX.green],
   ];
@@ -646,10 +647,10 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
 // 23. Upgrade matrix
 {
   const s = content('When do we need to pay?', 'Capacity',
-    'Order matters: fix the software first, because it is free and buys roughly five times more headroom. The first paid step is Neon Launch — pay-as-you-go, about 10 to 20 dollars a month for one small always-busy compute, with 500 GB of egress included. Then Render Starter at 7 dollars for an always-on backend with five times the CPU. Resend Pro only if queues email every visitor. Render prices come from the pricing page as reported by third parties because the official page loads dynamically — confirm in the dashboard.');
+    'The free software fixes are done and live, and bought roughly five times more headroom. The first paid step is Neon Launch — pay-as-you-go, about 10 to 20 dollars a month for one small always-busy compute, with 500 GB of egress included. Then Render Starter at 7 dollars for an always-on backend with five times the CPU. Resend Pro only if queues email every visitor. Render prices come from the pricing page as reported by third parties because the official page loads dynamically — confirm in the dashboard.');
   table(s, [
     hdr(['When this happens', 'Service', 'Upgrade to', 'Why', 'Approx. cost']),
-    ['Refetch storm / 429s', 'Code', 'Debounce events; set trust proxy', 'Removes O(N) refetches', '$0'],
+    ['Refetch storm / shared limits', 'Code', 'Done — live 9 Oct 2026', 'Batched refetch · per-client limits', '$0'],
     ['Neon egress or hours run out', 'Neon', 'Launch (usage-based)', '500 GB egress, no hour cap', '≈ $11–20/mo*'],
     ['Cold starts / CPU busy', 'Render', 'Starter 0.5 CPU', 'Always on, 5× CPU', '$7/mo†'],
     ['Outbound > 5 GB', 'Render workspace', 'Payment method or Pro', 'Avoid suspension; 25 GB', '$0.15/GB or $25/mo'],
@@ -684,10 +685,10 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
 // 25. Roadmap
 {
   const s = content('Cost & capacity roadmap', 'Scaling',
-    'Four stages. Stage 0 is today at zero infrastructure cost. Stage 1 is software only — still free — and is the highest-value next step. Stage 2 is the first paid step at roughly 18 to 27 dollars a month. Stage 3 for a growing multi-organization platform. Stage 4 changes the architecture and should only be priced after a load test tells us how big it needs to be. All figures are estimates with pricing checked today.');
+    'Stage 0 was the free deployment before the fixes. Stage 1, software only and still free, is done and live since 9 October 2026 — that is where LiveQueue is today. Stage 2 is the first paid step at roughly 18 to 27 dollars a month. Stage 3 for a growing multi-organization platform. Stage 4 changes the architecture and should only be priced after a load test tells us how big it needs to be. All figures are estimates with pricing checked today.');
   const st = [
-    ['Stage 0', 'Today', '$0', 'All free tiers · 1 instance', '≈ 4k visits/mo'],
-    ['Stage 1', 'Software first', '$0', 'Refetch fix · trust proxy', '≈ 25k visits/mo'],
+    ['Stage 0', 'Before fixes', '$0', 'All free tiers · 1 instance', '≈ 4k visits/mo'],
+    ['Stage 1', 'Today: software fixes live', '$0', 'Batched refetch · portal payloads · per-client limits', '≈ 25k visits/mo'],
     ['Stage 2', 'First paid', '≈ $18–27/mo', 'Neon Launch · Render Starter', 'Always-on; no Neon hour cap'],
     ['Stage 3', 'Growing multi-org', '≈ $70–110/mo', 'Render Standard · Pro workspace · Resend Pro (if needed)', 'More CPU + 25 GB outbound'],
     ['Stage 4', 'High concurrency', 'Size after load test', 'Replicas · Redis · Socket.io adapter · metrics', 'Horizontal realtime'],
@@ -712,8 +713,8 @@ section('Capacity, cost and scaling', 'Answering “How big can it run for free?
   bullets(s, [
     'Single backend instance; no Socket.io adapter',
     'Free-tier cold start (~1 minute after 15 idle minutes)',
-    'Per-person event fan-out and dashboard refetch storm',
-    'In-memory rate limits; trust proxy not set',
+    'Per-person socket fan-out (grows with waiting × staff tabs)',
+    'In-memory rate limits; a shared NAT shares one limit',
     'No formal load test; no central metrics/alerts',
     'Physical iPhone push and Android QA pending',
   ], { x: 0.5, y: 1.5, w: 4.4, h: 3.5, fontSize: 14, paraSpaceAfter: 9 });

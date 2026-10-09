@@ -1,6 +1,6 @@
 # LiveQueue — Production Architecture Summary
 
-Study notes for the faculty presentation. **Current as of 2026-10-08:** production runs master `cb03e01` (Android release v1.0.6). The Floating Counter Console is implemented on `feature/floating-counter-console` and is **ready for review, not deployed**.
+Study notes for the faculty presentation. **Current as of 2026-10-09:** production runs master `c17678b` (Android release v1.0.6, unchanged). The Floating Counter Console is **live in production**, together with batched dashboard refetches, event-payload updates on the iPhone/iPad portal and per-client rate limits.
 
 ## 1. Components
 
@@ -9,7 +9,7 @@ Study notes for the faculty presentation. **Current as of 2026-10-08:** producti
 | Android app (visitors) | Flutter, `provider`, `http`, `socket_io_client`, `firebase_messaging` | Scan QR → choose queue and services → token → live tracking → push notifications |
 | Staff dashboard | React 19, Vite, TanStack Query, Tailwind CSS 4, `socket.io-client` | Organization, Associates, queues, counters, live serving, reports, audit, governance |
 | iPhone/iPad visitor portal | Same React build, separate entry (`portal.html`, `/visit/*`), PWA + service worker | Safari-only visitor flow with standards Web Push |
-| Floating Counter Console (feature branch) | Document Picture-in-Picture + React portal; in-page fallback dock | Compact always-visible counter controls |
+| Floating Counter Console (live) | Document Picture-in-Picture + React portal; in-page fallback dock | Compact always-visible counter controls |
 | Backend | Node.js, TypeScript, Express 5, Socket.io 4, Zod validation | REST API, authorization, business rules, realtime events, schedulers |
 | Data | PostgreSQL (Neon), Prisma ORM 6, SQL migrations | System of record, constraints, triggers |
 | Push / email | `firebase-admin` (FCM), `web-push` (VAPID), `resend` | Notifications and transactional email |
@@ -26,7 +26,7 @@ Study notes for the faculty presentation. **Current as of 2026-10-08:** producti
 ## 3. Realtime flow (Socket.io)
 
 - **One Socket.io server in the same process.** The dashboard opens one connection per tab and joins `organization:{id}` (Head/Manager), `workspace:{adminId}` (Admin/Executive) or the legacy room; visitors join `token:{id}`; the public queue room carries no personal data.
-- **Events notify; the database stays the truth.** The dashboard reacts to `token.*`, `queue.*` and `counter.*` events by invalidating TanStack Query caches, which refetch over REST. On every reconnect it re-joins rooms and refetches everything, because missed events are never replayed.
+- **Events notify; the database stays the truth.** The dashboard reacts to `token.*`, `queue.*` and `counter.*` events through one coalescing scheduler (ADR-074): every TanStack Query key touched by a burst is invalidated once, 100 ms after it goes quiet (at most 1 s), so one Serve next costs a few refetches per tab instead of one per waiting person. The Android app and the iPhone/iPad portal apply the event payload (built by the same server function as the REST read) instead of re-reading (ADR-075). On every reconnect each client re-joins rooms and re-reads everything, because missed events are never replayed.
 - Every queue change also recomputes ETAs and emits `token.position_changed` for each waiting person (`broadcastQueueEtaUpdate`).
 - **Revocation:** `realtime.disconnectStaff` drops the sockets of anyone whose access changes. The next request answers `401 SESSION_REVOKED` and the dashboard signs out.
 - **Scaling constraint:** no distributed adapter. **Run exactly one backend instance** (`docs/DEPLOYMENT.md` §12); a second instance would not deliver events emitted by the first.
@@ -37,7 +37,7 @@ Study notes for the faculty presentation. **Current as of 2026-10-08:** producti
 - `staff.accessRevokedAt`: any role, status, workspace or password change, removal or handover sets it in the same transaction. Every request, optional-auth path and socket handshake rejects tokens issued before it.
 - Permissions are derived from the role only (no per-user grants). Every mutation is authorized in the service layer, regardless of what the UI shows.
 - Email verification for registration; invitation and handover links are single-use, stored as hashes and expiring; the Head-succession code is HMAC-hashed, valid 10 minutes, 5 attempts.
-- Rate limiting: `express-rate-limit`, in-memory per process (public 60/min, join 10/min, auth 20 per 15 min, sensitive 30 per 15 min). Note: `trust proxy` is not configured — see the capacity analysis §M.0.
+- Rate limiting: `express-rate-limit`, in-memory per process (public 60/min, join 10/min, auth 20 per 15 min, sensitive 30 per 15 min). Keyed on the real client address from Cloudflare's `CF-Connecting-IP` (ADR-073); Express `trust proxy` stays off, so forged `X-Forwarded-For` headers are ignored and a missing or malformed header falls back to the shared peer address.
 
 ## 5. Roles and workspaces
 
@@ -104,7 +104,7 @@ Visitors (Android app, iPhone portal)      Staff (dashboard, Floating Console*)
         │ Prisma (TLS)            ├── FCM (Android push)
         ▼                         ├── Web Push (iPhone/iPad Safari Home Screen PWA, VAPID)
  Neon PostgreSQL                  └── Resend (email)
-GitHub: source, Actions (tests, signed APK), Releases (APK)      *feature branch
+GitHub: source, Actions (tests, signed APK), Releases (APK)      *live since 9 Oct 2026
 ```
 
 - Render build: `npm ci --include=dev && npm run prisma:generate && npm run prisma:deploy && npm run build`. **Migrations run before the new code starts**; a failed migration fails the deploy and the old release keeps serving.
@@ -115,7 +115,7 @@ GitHub: source, Actions (tests, signed APK), Releases (APK)      *feature branch
 
 1. **Single backend instance** (no Socket.io adapter) — vertical scaling only, until Redis and an adapter are added.
 2. **Free-tier cold starts** — about 1 minute after 15 idle minutes.
-3. **Per-event O(N) work** — ETA recompute and per-person `position_changed` fan-out, plus the dashboard refetch amplification (capacity analysis §E).
+3. **Per-event O(N) work** — one ETA recompute and the per-person `position_changed` socket fan-out per queue event. The dashboard refetch storm and the portal re-reads are fixed (capacity analysis §E).
 4. **Free-tier quotas** — Neon 100 CU-hours and 5 GB egress; Render Hobby 5 GB outbound; Resend 100 emails/day.
-5. **In-memory rate limiting** — per process, and keyed on the IP without `trust proxy`.
+5. **In-memory rate limiting** — per process; people behind one shared address (campus NAT, carrier) share a limit.
 6. **No formal load test; no centralized metrics or alerting.**

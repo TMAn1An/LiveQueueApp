@@ -5,7 +5,7 @@ Answers reflect the actual repository and production state as of 2026-10-08 (pro
 ### Architecture and design
 
 **1. Why Socket.io instead of polling?**
-Queue state changes are rare per person but must arrive quickly: being called is the moment that matters. Socket.io pushes an event the moment it happens and reconnects automatically. We still treat the database as the truth: events tell clients *what changed*, and clients refetch over REST to read the new state. Polling remains a fallback (the dashboard refreshes every 30 s).
+Queue state changes are rare per person but must arrive quickly: being called is the moment that matters. Socket.io pushes an event the moment it happens and reconnects automatically. We still treat the database as the truth. The staff dashboard refetches over REST, batched so a burst of events costs one reload per view. The Android app and the iPhone/iPad portal apply the event payload directly; the server builds it with the same function as the REST read, and every reconnect re-reads the server's state. Polling remains a fallback (the dashboard refreshes every 30 s).
 
 **2. How do you guarantee first-come-first-served?**
 The client never chooses who is next. "Serve next" sends only the queue id; the backend picks the earliest-joined waiting person whose current step the caller's counter handles, at the caller's own counter (ADR-064). The only exception is a referral, which a staff member makes deliberately when completing a step.
@@ -52,7 +52,7 @@ One scoping module decides visibility: the Head and Manager see the organization
 Visitors identify with a device id, not an account. Staff views and visitor views are separate serializers, so OTPs are never sent to staff and other people's data is never sent to visitors. Audit metadata is sanitized. Free text stays out of audit rows. The Floating Counter Console shows only token number and service.
 
 **16. Is it fully secure?**
-No system is. Known gaps: rate limiting is in-memory and keyed on the client IP without `trust proxy` behind Render's proxy, so limits may be shared across clients (to be verified and fixed). There's no WAF, no external penetration test and no centralized security monitoring.
+No system is. Known gaps: rate limiting is in-memory (one process), and people behind one shared address, such as campus Wi-Fi, share a limit. Earlier, every visitor shared one limit behind Render's proxy; since 9 October 2026 limits key on the real client address from Cloudflare's `CF-Connecting-IP`, with `trust proxy` deliberately off so forged `X-Forwarded-For` headers are ignored. There's no WAF, no external penetration test and no centralized security monitoring.
 
 ### Governance
 
@@ -68,7 +68,7 @@ Not through the application, and not through SQL either: database triggers rejec
 ### Reliability
 
 **20. How does the app behave when Socket.io disconnects?**
-Socket.io reconnects automatically. On reconnect the client re-joins its rooms and refetches everything, because missed events are never replayed. The dashboard also refreshes every 30 s. The Floating Console holds its actions until the connection is live again.
+Socket.io reconnects automatically. On reconnect the client re-joins its rooms and re-reads everything, because missed events are never replayed; the iPhone portal also re-reads when the visitor returns to the page, and about every 10 minutes as a safety net. The dashboard also refreshes every 30 s. The Floating Console holds its actions until the connection is live again.
 
 **21. What happens if Render goes down?**
 The API and realtime stop; the dashboard still loads from Cloudflare but shows a reconnecting state. Clients resync when the backend returns. There is no multi-region failover today.
@@ -82,19 +82,19 @@ Migrations are additive and reviewed. They're tested on a fresh database and on 
 ### Capacity and cost
 
 **24. What is the current bottleneck?**
-Network egress quotas on the free tiers (Neon 5 GB and Render 5 GB per month), currently amplified by the dashboard refetching once per waiting person on each queue event. That's a software fix. Next come Neon's 100 CU-hours (about 400 active hours a month) and Render Free's 0.1 CPU and cold starts.
+Neon's free quotas: 5 GB of data transfer and 100 CU-hours (about 400 active hours) a month. Three software bottlenecks we found are fixed and live since 9 October 2026: the dashboard refetch storm, the iPhone portal re-reading every ticket on every event, and the shared rate-limit bucket. Next come Render Free's 0.1 CPU and cold starts, and Render's 5 GB outbound for long queues watched by many staff tabs.
 
 **25. How many people can wait in one queue?**
-There's no software limit. On the current free server we estimate up to about **50 waiting per queue** comfortably, and about 300–500 after the refetch fix. That's an estimate from measured per-event costs, not a load test.
+There's no software limit. On the current free server we estimate about **300–500 waiting per queue** comfortably, for Android and iPhone/iPad visitors alike (it was about 50 before the October fixes). That's an estimate from measured per-event costs, not a load test.
 
 **26. How many concurrent users can you support?**
 Estimate: a few hundred concurrent sockets platform-wide on Render Free at modest event rates. Concurrency, not registered accounts, is what matters: 100,000 accounts are just rows.
 
 **27. How was that calculated?**
-We measured locally the payload size of every request and socket event, the per-event fan-out (≈3 messages per waiting person per serve cycle), and a real browser's refetches (305 requests for one serve with 200 waiting). We combined those with the published quotas in formulas, and labelled every result as an estimate.
+We measured locally the payload size of every request and socket event, the per-event fan-out (≈3 messages per waiting person per serve cycle), and a real browser's refetches: one serve with 200 waiting went from about 400 dashboard requests to 4 after the fix, and iPhone visitors' ticket re-reads from one per visitor per event to zero. We combined those with the published quotas in formulas, and labelled every result as an estimate.
 
 **28. How large can it run for free?**
-About one small organization's daily traffic today (≈4,000 visits/month), and an estimated ≈25,000 visits/month (about five small organizations) after the refetch fix. Not load-test validated.
+An estimated ≈25,000 visits/month, about five small organizations with similar business hours (it was about 4,000 visits/month before the October fixes). ESTIMATE, not load-test validated.
 
 **29. What is free, and what costs money first?**
 Render Free, Neon Free, Cloudflare Pages, FCM, Web Push, Resend Free and GitHub (public repo) are all free. The domain may have its own registration cost. First to cost money: Neon Launch (≈$10–20/month, usage-based), then Render Starter ($7/month) for always-on and 5× the CPU.
@@ -106,12 +106,12 @@ Render runs a long-lived Node.js process with WebSockets, which serverless platf
 Add the Socket.io Redis adapter so events emitted on one instance reach clients connected to the others. Move rate-limit counters to Redis too. Use sticky sessions or WebSocket-only transport behind the load balancer. Until then we deliberately run one instance.
 
 **32. What would you change for 100,000 users?**
-First, fix the per-person fan-out: send one queue-level update instead of N, and stop the refetch storm. Then: paid CPU, multiple instances with Redis and the Socket.io adapter, a shared rate-limit store, Neon autoscaling with connection pooling, background jobs for notifications, metrics and alerting — sized by a staged load test.
+The refetch storm and the portal re-reads are already fixed. Next, reduce the per-person socket fan-out: send one queue-level update instead of N. Then: paid CPU, multiple instances with Redis and the Socket.io adapter, a shared rate-limit store, Neon autoscaling with connection pooling, background jobs for notifications, metrics and alerting — sized by a staged load test.
 
 ### Testing and verification
 
 **33. What testing has been done?**
-Production master: backend 1,216 tests, dashboard 574, Flutter 479 — all passing — plus typecheck, lint and production builds. The Floating Console branch: 1,222 and 614. Migration upgrade tests on a copy of the schema, a read-only production preflight, production smoke checks, and APK signing verification on every release.
+Production master (9 October 2026): backend 1,234 tests, dashboard 640, Flutter 479 — all passing — plus typecheck, lint and production builds. Migration upgrade tests on a copy of the schema, a read-only production preflight, production smoke checks, and APK signing verification on every release.
 
 **34. Has formal load testing been done?**
 No. Our capacity figures are estimates from measured payloads and published quotas. A staged load-test plan exists (100 → 5,000 clients) and would run against a staging copy, never production.

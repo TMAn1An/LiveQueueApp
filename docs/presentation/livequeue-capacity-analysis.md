@@ -1,6 +1,6 @@
 # LiveQueue — Capacity, Bottleneck and Cost Analysis
 
-**Checked on: 2026-10-08.** Provider plans change; re-verify the sources in §C before quoting numbers.
+**Quotas checked on: 2026-10-08. Production state: 2026-10-09** — master `c17678b` is live with the Floating Counter Console, batched dashboard refetches (ADR-074), event-payload updates on the iPhone/iPad portal (ADR-075) and per-client rate limits (ADR-073). Provider plans change; re-verify the sources in §C before quoting numbers.
 
 **Status of every figure in this document** — each number carries one of these labels:
 
@@ -87,7 +87,7 @@ Render Free (web) · Neon Free · Cloudflare Pages Free · FCM (no-cost product)
 | Steps in a journey | ≤ 20; a service at most its per-service limit (1–10, default 2), never twice in a row | ADR-070 |
 | Form fields per queue | ≤ 50 | `formField.validators.ts` |
 | Live-queue table page | ≤ 100 rows per page (default 20) | `dashboard.validators.ts` |
-| Rate limits (per client key, in-memory) | public 60/min; join 10/min; auth 20 per 15 min; sensitive 30 per 15 min | `middleware/rateLimit.ts` |
+| Rate limits (per real client via Cloudflare `CF-Connecting-IP`, in-memory) | public 60/min; join 10/min; auth 20 per 15 min; sensitive 30 per 15 min (unchanged) | `middleware/rateLimit.ts`, `middleware/clientIp.ts` |
 
 **"No explicit limit" never means "unlimited".** It means capacity is set by infrastructure and by the per-event work described below.
 
@@ -105,7 +105,15 @@ Measured with one queue, three open counters, one staff socket and one visitor s
 
 So, per staff socket: **≈ 3 × N messages ≈ 0.32 KB each per serve cycle**. A waiting visitor receives one ≈ 1.45 KB update per queue event.
 
-**Dashboard refetch amplification (MEASURED (local), real browser).** With 200 people waiting, one press of *Serve next* made the open Live Queue tab issue **305 API requests (1.94 MB, uncompressed)**: 201× `GET /api/queues/:id`, 103× `GET /api/dashboard/tokens`. Each per-person `token.position_changed` message invalidates the dashboard's cached queries, so a burst of N messages causes ≈ 1.5 × N refetches. Each refetch of the token table also recomputes positions server-side. **This is an application-level amplification, fixable in software** (ignore or debounce `position_changed` for cache invalidation), and it is the single largest driver of egress and CPU in the current code.
+**Refetch amplification — FIXED and live since 2026-10-09 (MEASURED (local), real browser, one *Serve next*).**
+
+| Waiting | Live Queue tab before → after | Overview tab before → after | iPhone portal, 50 visitors: ticket reads · ETA recomputes · server CPU, before → after |
+|---:|---|---|---|
+| 50 | 103 req, 866 KB → **4 req, 18 KB** | 100 req, 87 KB → **2 req, 1.7 KB** | 50 · 50 · 1,095 ms → **0 · 1 · 73 ms** |
+| 200 | 403 req, 3.4 MB → **4 req, 18 KB** | 400 req, 349 KB → **2 req, 1.7 KB** | 50 · 51 · 2,427 ms → **0 · 1 · 96 ms** |
+| 500 | 1,003 req, 8.5 MB → **4 req, 18 KB** | 1,000 req, 872 KB → **2 req, 1.7 KB** | 50 · 51 · 4,849 ms → **0 · 1 · 162 ms** |
+
+Before: every per-person `token.position_changed` invalidated the dashboard's cached queries (one or two full refetches per waiting person per open tab), and every iPhone portal visitor re-read their ticket on every event, each read recomputing the whole queue's ETAs. After: the dashboard coalesces a burst into one refetch per view (ADR-074, the Floating Counter Console included: with the console open, still 4 requests), and the portal applies the event payload (ADR-075). Measured on the release-candidate build identical to production `c17678b`. Socket fan-out is unchanged: ≈ 0.33 KB per waiting person per staff tab per event, and one message per waiting visitor.
 
 REST sizes (uncompressed, MEASURED (local)): live table page of 20 rows 15.7 KB; queue 1.5 KB; queue list 1.6 KB; stats 0.2 KB; own counter 0.2 KB; visitor token view 1.1 KB; public queue config 0.8 KB; join response 1.1 KB.
 
@@ -116,15 +124,15 @@ REST sizes (uncompressed, MEASURED (local)): live table page of 20 rows 15.7 KB;
 - **A. Application hard limit:** **none** (only the 32-bit token sequence).
 - **B. Practical limit on current free infrastructure (ESTIMATE):**
 
-| Waiting | Rows touched per event | Socket fan-out per event (staff tab + visitors) | Dashboard refetches per event per open tab (current code) | Likely state on Render Free |
+| Waiting | Rows touched per event | Socket fan-out per event (staff tab + visitors) | Dashboard refetches per event per open tab (live code) | Likely state on Render Free |
 |---:|---:|---:|---:|---|
-| 100 | ~100 tokens + steps | ~100 staff msgs/tab + 100 visitor msgs | ~150 | Comfortable with 1–2 tabs |
-| 500 | ~500 | ~500 + 500 | ~750 | Degraded: ~1 s recompute + refetch storm |
-| 1,000 | ~1,000 | ~1,000 + 1,000 | ~1,500 | Unsuitable |
-| 2,500 | ~2,500 | ~2,500 + 2,500 | ~3,750 | Unsuitable |
-| 5,000–10,000 | 5–10k | 5–10k ×2 | 7.5–15k | Unsuitable without architecture changes |
+| 100 | ~100 tokens + steps | ~100 staff msgs/tab + 100 visitor msgs | 1–2 | Comfortable |
+| 500 | ~500 | ~500 + 500 | 1–2 | Comfortable with 1–2 staff tabs and ≤ 10 counters (~1 s recompute per event) |
+| 1,000 | ~1,000 | ~1,000 + 1,000 | 1–2 | Caution: CPU and socket egress per event |
+| 2,500 | ~2,500 | ~2,500 + 2,500 | 1–2 | Unsuitable on Render Free |
+| 5,000–10,000 | 5–10k | 5–10k ×2 | 1–2 | Unsuitable without architecture changes |
 
-Comfortable **≤ ~50 waiting per queue**, caution **50–150**, degradation likely **> ~150** (current code, Render Free). After removing the refetch amplification, the ETA recompute becomes the limit: estimated comfortable to **~300–500 waiting** on Render Free, higher on paid CPU.
+With the fixes live, the per-event ETA recompute is the limit: estimated comfortable to **~300–500 waiting per queue** on Render Free, for Android and iPhone/iPad visitors alike, higher on paid CPU (ESTIMATE, NOT LOAD-TEST VALIDATED). Before the fixes it was **≤ ~50**.
 
 - **C. Load-tested limit:** **NOT LOAD-TEST VALIDATED.**
 
@@ -141,8 +149,8 @@ Comfortable **≤ ~50 waiting per queue**, caution **50–150**, degradation lik
 
 | Live queues | Typical demand (assumption: 100–200 visits/day each, ≤ 20 waiting each, 2 open staff tabs each) | Free-tier verdict (ESTIMATE) |
 |---:|---|---|
-| 1 | 100–200 visits/day | Fits (current code: near egress limit at the top of the range) |
-| 5 | 500–1,000/day | Exceeds egress with current code; borderline after the refetch fix |
+| 1 | 100–200 visits/day | Fits comfortably |
+| 5 | 500–1,000/day | Borderline on Neon's free transfer and compute-hours |
 | 10 | 1,000–2,000/day | Upgrade needed |
 | 25–100 | 2,500–20,000/day | Paid compute + database; at the top, multi-instance architecture |
 
@@ -165,18 +173,18 @@ Per completed single-step visit: token ≈ 1.25 KB + journey step ≈ 0.46 KB + 
 
 Let *k* ≈ 4 queue events per visit (join, call, start, complete), *N̄* = average waiting length, *D* = open staff tabs watching that queue.
 
-**Render outbound per visit** (HTTP compressed ~5× by Render — assumption; WebSocket frames uncompressed):
-`E_render ≈ k × N̄ × [ D × (0.32 KB socket + 9.7 KB/5 refetch) + 1.45 KB visitor ]`
+**Render outbound per visit, live code** (HTTP compressed ~5× by Render — assumption; WebSocket frames uncompressed):
+`E_render ≈ k × [ N̄ × (D × 0.33 KB + 0.33 KB visitor) + D × 18 KB / 5 ]` — the refetch term no longer grows with N̄, and visitors no longer re-read their ticket per event.
 
 **Neon egress per visit** (DB → backend, uncompressed; ≈ 16 KB of query results per refetch unit — ESTIMATE):
-`E_neon ≈ k × N̄ × D × 16 KB` (current code) · `≈ k × D × 25 KB` after the refetch fix
+`≈ k × D × 25 KB` with the live code (it was `k × N̄ × D × 16 KB` before the fixes, plus one whole-queue ETA read per portal visitor per event)
 
 | Profile | N̄ | D | E_render/visit | E_neon/visit | Visits/month before a 5 GB quota (Neon binds first) |
 |---|---:|---:|---:|---:|---:|
-| Small org, current code | 10 | 2 | ~0.24 MB | ~1.3 MB | **~4,000** |
-| Small org, after refetch fix | 10 | 2 | ~0.12 MB | ~0.2 MB | **~25,000** |
-| Medium org, current code | 30 | 6 | ~1.8 MB | ~11.5 MB | ~450 (unsuitable) |
-| Medium org, after fix | 30 | 6 | ~0.5 MB | ~0.6 MB | ~8,500 |
+| Small org, before the fixes | 10 | 2 | ~0.24 MB | ~1.3 MB | ~4,000 |
+| **Small org, live code** | 10 | 2 | ~0.12 MB | ~0.2 MB | **~25,000** |
+| Medium org, before the fixes | 30 | 6 | ~1.8 MB | ~11.5 MB | ~450 (unsuitable) |
+| **Medium org, live code** | 30 | 6 | ~0.5 MB | ~0.6 MB | **~8,500** |
 
 ## K. Socket.io concurrency model (ESTIMATE)
 
@@ -193,10 +201,11 @@ Let *k* ≈ 4 queue events per visit (join, call, start, complete), *N̄* = aver
 
 ## M. Bottleneck ranking — current free deployment (ESTIMATE, highest first)
 
-0. **Application risk to verify first (code finding):** Express `trust proxy` is not set and rate limiters key on the client IP. Behind Render's proxy, many or all clients may share one key, e.g. **10 joins/minute and 20 logins per 15 minutes platform-wide**. Not verified in production; check production logs for HTTP 429 and set `trust proxy` appropriately (software fix, $0).
-1. **Network egress quotas — Neon 5 GB/month and Render Hobby 5 GB/month — amplified by the dashboard refetch storm** (§E). Neon egress is likely to bind first. Exceeding either suspends the service for the rest of the month (Render: when no payment method is on file).
-2. **Neon compute hours — 100 CU-hours ≈ 400 awake hours/month at 0.25 CU.** The reminder job queries the database every minute, so the database stays awake whenever the backend is awake (any traffic in the last 15 minutes). ~13 hours/day of activity uses the allowance; 24/7 activity (~183 CU-hours) exceeds it.
-3. **Render Free CPU (0.1) + cold starts (~1 minute after 15 idle minutes)** — per-event O(N) work limits waiting length per queue and events/second; cold starts hurt the first user after idle time.
+**Fixed and live since 2026-10-09 (were #0 and the amplifier of #1):** the shared rate-limit key (every visitor shared one bucket behind Render's proxy — confirmed in production on 2026-10-08, now keyed on Cloudflare's `CF-Connecting-IP` with `trust proxy` off, verified from two machines in production), the dashboard refetch storm and the iPhone/iPad portal's per-visitor ticket re-reads (§E).
+
+1. **Neon free quotas — first likely limit.** Data transfer 5 GB/month (≈ 0.2 MB per visit with the live code ⇒ ≈ 25,000 visits/month) and **100 CU-hours ≈ 400 awake hours/month at 0.25 CU**. The reminder job queries the database every minute, so the database stays awake whenever the backend is awake (any traffic in the last 15 minutes): ~13 hours/day of activity uses the allowance; 24/7 activity (~183 CU-hours) exceeds it. Exceeding either suspends compute until the next billing period.
+2. **Render Hobby outbound 5 GB/month** — now dominated by the per-person socket fan-out (≈ 0.33 KB per waiting person per staff tab per event), which matters only for long queues watched by many staff tabs.
+3. **Render Free CPU (0.1) + cold starts (~1 minute after 15 idle minutes)** — the one per-event ETA recompute (≈ 0.5–1.6 s on Render Free at 50–500 waiting, ESTIMATE) limits waiting length per queue and events/second; cold starts hurt the first user after idle time.
 4. **Resend 100 emails/day** — only binding if queues use verified-email identity.
 5. Not bottlenecks at this scale: Cloudflare Pages (static, no published bandwidth cap), FCM (free), Web Push (free), GitHub Actions (public repository: free runners), Render instance hours (one service ≤ 744 h/month < 750).
 
@@ -204,8 +213,8 @@ Let *k* ≈ 4 queue events per visit (join, call, start, complete), *N̄* = aver
 
 | Trigger | Service | Current | Upgrade to | Why | Approx. cost |
 |---|---|---|---|---|---|
-| Refetch storm / egress growth | Dashboard code | — | Debounce/ignore `position_changed` for cache invalidation | Removes O(N) refetches per event | $0 (engineering) |
-| HTTP 429s from shared IP key | Backend code | — | `trust proxy` + correct key | Per-client limits | $0 |
+| ~~Refetch storm / egress growth~~ | Dashboard + portal code | **Done — live 2026-10-09** | Coalesced invalidation (ADR-074); portal applies event payloads (ADR-075) | Removed O(N) refetches per event | $0 |
+| ~~HTTP 429s from shared IP key~~ | Backend code | **Done — live 2026-10-09** | Client IP from `CF-Connecting-IP`, `trust proxy` off (ADR-073) | Per-client limits | $0 |
 | Neon egress or CU-hours exhausted | Neon | Free | **Launch** (pay-as-you-go) | 500 GB egress included, no hour cap | 0.25 CU × 400 h ≈ **$10.6**; always-on 0.25 CU ≈ **$19.3/month** + storage $0.35/GB-month |
 | Cold starts unacceptable / CPU saturated | Render | Free | **Starter (0.5 CPU, 512 MB)** | Always on, 5× CPU | **$7/month** (confirm in dashboard) |
 | Render outbound > 5 GB | Render workspace | Hobby | Add payment method (overage $0.15/GB) or **Pro workspace** (25 GB) | Avoid suspension | $0.15/GB or **$25/month** |
@@ -218,8 +227,8 @@ Let *k* ≈ 4 queue events per visit (join, call, start, complete), *N̄* = aver
 
 | Stage | What changes | Fixed monthly | Usage-based | Estimated total |
 |---|---|---|---|---|
-| **0 — Today** | All free tiers | $0 | $0 within quotas | **$0** infrastructure (+ domain, not verified) |
-| **1 — Software first** | Refetch fix, `trust proxy` | $0 | $0 | **$0**; est. ~5–6× more visits before quotas |
+| **0 — Before the fixes** | All free tiers | $0 | $0 within quotas | **$0**; ≈ 4,000 visits/month |
+| **1 — Software first (done; today)** | Batched refetch, portal payloads, per-client limits — live 2026-10-09 | $0 | $0 | **$0** infrastructure (+ domain, not verified); ≈ 25,000 visits/month (ESTIMATE) |
 | **2 — First paid** | Neon Launch; Render Starter | $7 | Neon ≈ $11–20 | **≈ $18–27/month** |
 | **3 — Growing multi-org** | Render Standard; Pro workspace; Resend Pro if verified-email queues | $25 + $25 (+ $20) | Neon ≈ $20–40 | **≈ $70–110/month** |
 | **4 — High concurrency** | 2+ instances, Redis, Socket.io adapter, observability | not verified | — | Price only after a load test sizes it |
@@ -234,14 +243,14 @@ Let *k* ≈ 4 queue events per visit (join, call, start, complete), *N̄* = aver
 - Medium org: 3–10 queues, 10–30 counters, ~1,000 visits/day, N̄ ≈ 30, 6 tabs.
 - Busy org: 10+ queues, many counters, several thousand visits/day.
 - Render HTTP compression ≈ 5× on JSON; WebSocket frames uncompressed.
-- Neon minimum compute 0.25 CU; ≈ 16 KB of query results per refetch unit (current code).
+- Neon minimum compute 0.25 CU; ≈ 16 KB of query results per refetch unit (one per staff tab per event with the live code).
 - Render Free CPU ≈ 10% of the measured local core.
 
 ## Q. Uncertainty
 
 - Local micro-measurements on a fast machine; Render's real per-request CPU, Neon latency, and compression ratio may differ by 2–5×.
 - Neon egress per refetch is estimated, not measured.
-- The shared-rate-limit-key finding (§M.0) is a code reading, not a production observation.
+- The shared-rate-limit key was confirmed in production (2026-10-08) and the fix verified in production (2026-10-09); the refetch and portal numbers are local measurements on a build identical to production, not production traffic measurements.
 - **No formal load test exists. Every range here is NOT LOAD-TEST VALIDATED.**
 
 ## R. Load-testing plan (not run; never against production without approval)
@@ -252,10 +261,10 @@ Scenarios: 100, 500, 1,000, 2,500, 5,000 concurrent clients (k6 or Artillery for
 
 Measure: API latency p50/p95/p99; Socket.io connection success and event delivery latency; CPU and memory; DB connections and query latency; Neon CU and egress consumed; Render outbound bytes; error/429 rate.
 
-Run once before and once after the refetch fix.
+Run on a staging copy of the live code (the refetch and portal fixes are in production since 2026-10-09).
 
 ## S. Faculty-ready answer
 
-**Short (20–30 s):** "Today LiveQueue runs entirely on free tiers. There's no software limit on people per queue, queues per organization, or organizations. In practice the free deployment is comfortable for about **one small organization** — one or two queues, a few counters, a couple of hundred visits a day — with up to about **50 people waiting per queue**. The first limit isn't CPU but the **free network-egress quotas**, which a dashboard refresh pattern currently amplifies. That's a software fix, after which we estimate roughly **five small organizations**. The first paid step is **Neon's Launch plan**, roughly $10–20 a month, then **Render Starter at $7** to remove cold starts. These are engineering estimates from measured payloads and published quotas, **not load-test results**."
+**Short (20–30 s):** "LiveQueue runs entirely on free tiers. There's no software limit on people per queue, queues per organization, or organizations. With the October software fixes live, we estimate the free deployment is comfortable for about **five small organizations** with similar business hours — about **25,000 visits a month** — and about **300–500 people waiting per queue**, for Android and iPhone/iPad alike. The first likely limit is **Neon's free quotas**: 5 GB of data transfer and 100 compute-hours a month. The first paid step is **Neon's Launch plan**, roughly $10–20 a month, then **Render Starter at $7** to remove cold starts. These are engineering estimates from measured payloads and published quotas, **not load-test results**."
 
-**Longer follow-up:** walk through §E (measured fan-out and the 305-request storm), §J (egress formula), §M (ranking) and §N (upgrade matrix), stating each label: measured locally, provider limit, or estimate.
+**Longer follow-up:** walk through §E (measured fan-out, and the refetch storm before and after the fix), §J (egress formula), §M (ranking) and §N (upgrade matrix), stating each label: measured locally, provider limit, or estimate.

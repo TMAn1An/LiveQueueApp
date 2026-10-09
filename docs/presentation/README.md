@@ -10,4 +10,4 @@
 | `assets/screenshots/` | Real product screenshots with a fictional demo organization (no real people or data). |
 | `source/build-deck.js` | The pptxgenjs script that generates the deck. |
 
-Pricing and quotas were **checked on 2026-10-08**. Capacity figures are engineering estimates — **not load-test validated**. Replace the presenter placeholders on the title slide before presenting.
+Pricing and quotas were **checked on 2026-10-08**; the production state described is **as of 2026-10-09** (master `c17678b`). Capacity figures are engineering estimates — **not load-test validated**. Replace the presenter placeholders on the title slide before presenting.
