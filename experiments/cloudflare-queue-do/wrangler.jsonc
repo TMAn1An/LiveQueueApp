@@ -1,0 +1,10 @@
+// EXPERIMENT ONLY. Local `wrangler dev` use; never deployed to the production domain.
+{
+  "name": "livequeue-queue-do-poc",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": { "bindings": [{ "name": "QUEUE", "class_name": "QueueDurableObject" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["QueueDurableObject"] }],
+  // A throwaway local value for synthetic test tokens — not a credential.
+  "vars": { "POC_JWT_SECRET": "poc-local-only-not-a-secret" }
+}
