@@ -369,7 +369,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
 // 10. Floating console
 {
   const s = content('Floating Counter Console', 'Product',
-    'Newest feature — implemented, tested and ready for review on its own branch, not yet deployed. It uses the browser\'s Document Picture-in-Picture API to keep a tiny console on top of other windows. It is a React portal from the dashboard\'s own app, so it shares the same session, cache and single Socket.io connection — there is no second dispatcher. Every button calls the same endpoints as the main page. Browsers without the API get an in-page dock that says honestly it cannot stay on top.');
+    'Newest feature — live in production since 9 October 2026. It uses the browser\'s Document Picture-in-Picture API to keep a tiny console on top of other windows. It is a React portal from the dashboard\'s own app, so it shares the same session, cache and single Socket.io connection — there is no second dispatcher. Every button calls the same endpoints as the main page, and its refreshes go through the same batching as the dashboard, so it adds no per-event refetches. Browsers without the API get an in-page dock that says honestly it cannot stay on top. Its operating-system-level always-on-top behaviour has not been verified on a real desktop.');
   T(s, 'Compact', { x: 0.5, y: 1.05, w: 2, h: 0.25, fontSize: 10, bold: true, color: HEX.slate });
   T(s, 'Expanded', { x: 2.85, y: 1.05, w: 2, h: 0.25, fontSize: 10, bold: true, color: HEX.slate });
   s.addShape(pres.shapes.RECTANGLE, { x: 0.47, y: 1.32, w: 2.21, h: 2.15 * 460 / 676 + 0.06, fill: { color: HEX.white }, line: { color: HEX.line }, shadow: { type: 'outer', color: '000000', opacity: 0.18, blur: 6, offset: 2, angle: 90 } });
@@ -385,7 +385,7 @@ const tag = (s, x, y, text, kind = 'warn') => pill(s, x, y, Math.max(1.2, text.l
     { text: 'Token number and service only — no personal data' },
     { text: 'Fallback: in-page dock that says it cannot stay on top' },
   ], { x: 5.1, y: 1.1, w: 4.4, h: 3.4, fontSize: 12 });
-  pill(s, 5.1, 4.6, 3.2, 'Ready for review · not deployed', 'warn');
+  pill(s, 5.1, 4.6, 3.2, 'Live in production · 9 Oct 2026', 'ok');
 }
 
 // 11. Visitor experience
