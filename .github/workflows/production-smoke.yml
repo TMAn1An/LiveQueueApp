@@ -119,7 +119,7 @@ jobs:
           for p in / /login /register /accept-invitation /accept-leadership /visit /visit/token/00000000-0000-4000-8000-000000000000; do
             echo "route $p -> HTTP $(curl -s -o /dev/null -m 60 -w '%{http_code}' "$WEB$p")"
           done
-          for page in / /portal.html; do curl -s -m 60 "$WEB$page"; done > index.html
+          for page in / /portal; do curl -s -m 60 "$WEB$page"; done > index.html
           : > all.js
           for a in $(grep -oE '/assets/[^"]+\.js' index.html | sort -u); do curl -s -m 60 "$WEB$a" >> all.js; done
           for a in $(grep -oE '/assets/[^" ]+\.js' all.js | sort -u); do curl -s -m 60 "$WEB$a" >> all.js; done
