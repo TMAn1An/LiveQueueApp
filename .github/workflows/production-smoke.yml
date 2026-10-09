@@ -1,0 +1,139 @@
+# Read-only production smoke for the Floating Console + performance rollout.
+# No secrets and no writes: every request is a GET, an OPTIONS, an invalid
+# login/join that the API rejects before touching data, or a lookup of an id
+# or token that does not exist. Runs on push to this ops branch only.
+name: Production smoke (read-only)
+on:
+  push:
+    branches: [ops/production-smoke]
+permissions:
+  contents: read
+env:
+  API: https://livequeueapp.onrender.com
+  WEB: https://livequeue-dashboard.pages.dev
+  U: /api/public/web-push/config
+jobs:
+  dashboard-deployed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for the new dashboard bundle (Floating Counter Console)
+        run: |
+          for i in $(seq 1 60); do
+            curl -s -m 60 "$WEB/" > index.html || true
+            : > all.js
+            for a in $(grep -oE '/assets/[^"]+\.js' index.html | sort -u); do curl -s -m 60 "$WEB$a" >> all.js; done
+            for a in $(grep -oE '/assets/[^" ]+\.js' all.js | sort -u); do curl -s -m 60 "$WEB$a" >> all.js; done
+            if grep -q 'Open floating console' all.js; then echo "new bundle live after attempt $i"; exit 0; fi
+            echo "attempt $i: not yet"; sleep 30
+          done
+          exit 1
+  # Two runners, two public addresses. A spends a few public-read requests at
+  # second ~5 of each minute; B reads its own remaining count at second ~35.
+  # Old code (one shared bucket for everyone): B sees A's spending.
+  # New code (per-client via CF-Connecting-IP): B always starts fresh at 59.
+  client-a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "A public IP (as Cloudflare sees it): $(curl -s -m 30 $API/cdn-cgi/trace | grep '^ip=')"
+          end=$(( $(date +%s) + 1500 ))
+          while [ $(date +%s) -lt $end ]; do
+            s=$(( 10#$(date +%S) )); w=$(( (65 - s) % 60 )); sleep $w
+            out=""
+            for i in 1 2 3 4 5 6; do out="$out $(curl -s -m 30 -o /dev/null -D - $API$U | grep -i '^ratelimit-remaining' | tr -d '\r' | awk '{print $2}')"; done
+            echo "$(date -u +%T) A spent 6 -> remaining:$out"
+            sleep 5
+          done
+        timeout-minutes: 27
+  client-b:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait until B's own count is independent of A (new backend live)
+        run: |
+          echo "B public IP (as Cloudflare sees it): $(curl -s -m 30 $API/cdn-cgi/trace | grep '^ip=')"
+          ok=0
+          for m in $(seq 1 25); do
+            s=$(( 10#$(date +%S) )); w=$(( (95 - s) % 60 )); sleep $w
+            r=$(curl -s -m 30 -o /dev/null -D - $API$U | grep -i '^ratelimit-remaining' | tr -d '\r' | awk '{print $2}')
+            echo "$(date -u +%T) B first request this minute -> remaining $r"
+            if [ "$r" = "59" ]; then ok=$((ok+1)); else ok=0; fi
+            if [ $ok -ge 3 ]; then echo "PASS | B's bucket independent of A for 3 consecutive minutes"; exit 0; fi
+          done
+          echo "FAIL | new backend behaviour never observed"; exit 1
+        timeout-minutes: 28
+      - name: Client-IP checks (spoofing, policies)
+        run: |
+          rem() { curl -s -m 30 -o /dev/null -D - "$@" | grep -i '^ratelimit-remaining' | tr -d '\r' | awk '{print $2}'; }
+          pol() { curl -s -m 30 -o /dev/null -D - "$@" | grep -i '^ratelimit-policy' | tr -d '\r' | awk '{print $2}'; }
+          sleep 61
+          a=$(rem $API$U); b=$(rem -H 'X-Forwarded-For: 1.2.3.4' $API$U); c=$(rem -H 'X-Forwarded-For: 8.8.8.8, 9.9.9.9' $API$U); d=$(rem -H 'X-Real-IP: 5.6.7.8' -H 'True-Client-IP: 5.6.7.8' $API$U)
+          echo "own bucket, then spoofed XFF / XFF chain / X-Real-IP+True-Client-IP: $a $b $c $d"
+          [ "$b" = "$((a-1))" ] && [ "$c" = "$((a-2))" ] && [ "$d" = "$((a-3))" ] && echo "PASS | spoofed forwarding headers stay in the caller's own bucket" || { echo "FAIL | spoofing changed the bucket"; exit 1; }
+          e=$(rem -H 'CF-Connecting-IP: 203.0.113.99' $API$U)
+          [ "$e" = "$((a-4))" ] && echo "PASS | a client-supplied CF-Connecting-IP is overwritten by Cloudflare (same bucket)" || echo "INFO | CF-Connecting-IP test: $e"
+          echo "policies (unchanged expected):"
+          echo "  public      $(pol $API$U)  (want 60;w=60)"
+          echo "  login       $(pol -X POST -H 'Content-Type: application/json' -d '{"email":"nobody@example.invalid","password":"x"}' $API/api/auth/login)  (want 20;w=900)"
+          echo "  invitation  $(pol "$API/api/auth/invitations/validate?token=$(printf 'c%.0s' $(seq 64))")  (want 20;w=900, shared with login)"
+          echo "  join        $(pol -X POST -H 'Content-Type: application/json' -H 'Idempotency-Key: smoke-invalid' -d '{}' $API/api/tokens)  (want 10;w=60)"
+  probes:
+    needs: client-b
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Backend probes
+        run: |
+          fail=0
+          probe() { # name expected method url [data] [body-must-contain]
+            if [ "$3" = POST ]; then code=$(curl -s -o /tmp/b -m 60 -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d "$5" "$4");
+            else code=$(curl -s -o /tmp/b -m 60 -w '%{http_code}' "$4"); fi
+            body=$(head -c 200 /tmp/b | tr '\n' ' ')
+            if echo "$code" | grep -Eq "^($2)$" && { [ -z "$6" ] || grep -q -- "$6" /tmp/b; }; then r=PASS; else r=FAIL; fail=1; fi
+            echo "$r | $1 | HTTP $code (want $2) | $body"
+          }
+          T64=$(printf 'c%.0s' $(seq 64)); UU=00000000-0000-4000-8000-000000000000
+          probe health 200 GET "$API/health"
+          probe socketio-handshake 200 GET "$API/socket.io/?EIO=4&transport=polling" "" '"sid"'
+          probe invitation-link-invalid 200 GET "$API/api/auth/invitations/validate?token=$T64" "" '"valid":false'
+          probe succession-link-invalid 200 GET "$API/api/auth/leadership-handover/validate?token=$T64" "" '"valid":false'
+          probe invalid-login 401 POST "$API/api/auth/login" '{"email":"nobody@example.invalid","password":"not-a-real-password-1A!"}'
+          probe leadership-requires-auth 401 GET "$API/api/organizations/me/leadership"
+          probe staff-requires-auth 401 GET "$API/api/staff"
+          probe workspace-transfers-requires-auth 401 GET "$API/api/staff/workspace-transfers"
+          probe counters-mine-requires-auth 401 GET "$API/api/counters/mine"
+          probe join-invalid-body 400 POST "$API/api/tokens" '{}'
+          probe unknown-queue-config 404 GET "$API/api/public/queues/$UU/config"
+          probe unknown-organization 404 GET "$API/api/public/organizations/ZZZZZZZZ"
+          probe unknown-token 404 GET "$API/api/tokens/$UU"
+          probe web-push-config 200 GET "$API/api/public/web-push/config"
+          probe name-availability 200 GET "$API/api/auth/organization-name-availability?name=Smoke%20Check%20Unused%20Name%2043"
+          echo "INFO | CORS preflight max-age: $(curl -s -D - -o /dev/null -m 60 -X OPTIONS -H "Origin: $WEB" -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' "$API/api/auth/login" | grep -i '^access-control-max-age' | tr -d '\r')"
+          echo "INFO | API compression: $(curl -s -D - -o /dev/null -m 60 -H 'Accept-Encoding: br, gzip' "$API/api/public/web-push/config" | grep -i '^content-encoding' | tr -d '\r')"
+          for i in 1 2 3 4 5; do curl -s -o /dev/null -m 60 -w "INFO | /health latency %{time_total}s\n" "$API/health"; done
+          exit $fail
+      - name: Dashboard and portal bundle
+        run: |
+          fail=0
+          for p in / /login /register /accept-invitation /accept-leadership /visit /visit/token/00000000-0000-4000-8000-000000000000; do
+            echo "route $p -> HTTP $(curl -s -o /dev/null -m 60 -w '%{http_code}' "$WEB$p")"
+          done
+          for page in / /portal.html; do curl -s -m 60 "$WEB$page"; done > index.html
+          : > all.js
+          for a in $(grep -oE '/assets/[^"]+\.js' index.html | sort -u); do curl -s -m 60 "$WEB$a" >> all.js; done
+          for a in $(grep -oE '/assets/[^" ]+\.js' all.js | sort -u); do curl -s -m 60 "$WEB$a" >> all.js; done
+          echo "bundle bytes: $(wc -c < all.js)"
+          need() { if grep -q -- "$1" all.js; then echo "PASS | present | $1"; else echo "FAIL | missing | $1"; fail=1; fi; }
+          need 'Open floating console'
+          need 'Close floating console'
+          need 'No counter assigned'
+          need 'token.step_completed'
+          need 'Associates'
+          need 'accept-leadership'
+          exit $fail
+      - name: Rendered UI (headless Chromium, read-only)
+        run: |
+          cd .github/ops
+          npm init -y >/dev/null
+          npm i --no-audit --no-fund playwright@1.47.2 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          node ui-smoke.mjs
